@@ -1,0 +1,71 @@
+@page "/"
+@using Microsoft.Graph
+@inject GraphServiceClient GraphClient
+
+<PageTitle>Facility Scheduler - Connectivity Check</PageTitle>
+
+<h1>Facility Scheduler</h1>
+<p>Graph connectivity check against the 6 resource mailboxes.</p>
+
+@if (_results is null)
+{
+    <p><em>Checking...</em></p>
+}
+else
+{
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Mailbox</th>
+                <th>Status</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var result in _results)
+            {
+                <tr>
+                    <td>@result.Mailbox</td>
+                    <td>@result.Status</td>
+                    <td>@result.Detail</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private List<MailboxCheckResult>? _results;
+
+    private static readonly string[] Mailboxes =
+    [
+        "sheet1@anthefamily.onmicrosoft.com",
+        "sheet2@anthefamily.onmicrosoft.com",
+        "sheet3@anthefamily.onmicrosoft.com",
+        "sheet4@anthefamily.onmicrosoft.com",
+        "sheet5@anthefamily.onmicrosoft.com",
+        "clubevents@anthefamily.onmicrosoft.com",
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var results = new List<MailboxCheckResult>();
+
+        foreach (var mailbox in Mailboxes)
+        {
+            try
+            {
+                var calendar = await GraphClient.Users[mailbox].Calendar.GetAsync();
+                results.Add(new MailboxCheckResult(mailbox, "OK", $"Calendar name: {calendar?.Name}"));
+            }
+            catch (Exception ex)
+            {
+                results.Add(new MailboxCheckResult(mailbox, "FAILED", ex.Message));
+            }
+        }
+
+        _results = results;
+    }
+
+    private sealed record MailboxCheckResult(string Mailbox, string Status, string Detail);
+}
