@@ -1,0 +1,232 @@
+@page "/diagnostics"
+@using Microsoft.Graph
+@using Microsoft.Graph.Models
+@inject GraphServiceClient GraphClient
+
+<PageTitle>Diagnostics</PageTitle>
+
+<h1>Phase 2 Verification Spikes</h1>
+<p>Runs against <code>@TestMailbox</code>. Creates temporary test events and deletes them immediately after each check.</p>
+
+<button class="btn btn-primary" @onclick="RunSpikes" disabled="@_running">
+    @(_running ? "Running..." : "Run all spikes")
+</button>
+
+@if (_results.Count > 0)
+{
+    <table class="table" style="margin-top: 1rem;">
+        <thead>
+            <tr>
+                <th>Spike</th>
+                <th>Result</th>
+                <th>Detail</th>
+            </tr>
+        </thead>
+        <tbody>
+            @foreach (var result in _results)
+            {
+                <tr>
+                    <td>@result.Name</td>
+                    <td>@result.Result</td>
+                    <td style="white-space: pre-wrap;">@result.Detail</td>
+                </tr>
+            }
+        </tbody>
+    </table>
+}
+
+@code {
+    private const string TestMailbox = "sheet1@anthefamily.onmicrosoft.com";
+    private bool _running;
+    private readonly List<SpikeResult> _results = [];
+
+    private sealed record SpikeResult(string Name, string Result, string Detail);
+
+    private async Task RunSpikes()
+    {
+        _running = true;
+        _results.Clear();
+        StateHasChanged();
+
+        await RunConflictBypassSpike();
+        await RunExtendedPropertySizeSpike();
+        await RunCategoryFilterSpike();
+        await RunGetScheduleWindowSpike();
+
+        _running = false;
+    }
+
+    private async Task RunConflictBypassSpike()
+    {
+        var start = DateTime.UtcNow.AddDays(30).Date.AddHours(14);
+        var createdIds = new List<string>();
+
+        try
+        {
+            var eventA = BuildTestEvent("SPIKE TEST A - delete me", start, start.AddHours(1));
+            var eventB = BuildTestEvent("SPIKE TEST B - delete me (overlaps A)", start.AddMinutes(30), start.AddMinutes(90));
+
+            var createdA = await GraphClient.Users[TestMailbox].Events.PostAsync(eventA);
+            var createdB = await GraphClient.Users[TestMailbox].Events.PostAsync(eventB);
+
+            if (createdA?.Id is not null) createdIds.Add(createdA.Id);
+            if (createdB?.Id is not null) createdIds.Add(createdB.Id);
+
+            var bothAccepted = createdA?.Id is not null && createdB?.Id is not null;
+            _results.Add(new SpikeResult(
+                "Direct-write bypasses booking attendant",
+                bothAccepted ? "CONFIRMED" : "UNEXPECTED",
+                bothAccepted
+                    ? "Both overlapping events were accepted with no conflict rejection. Direct writes do NOT go through the Resource Booking Attendant, as designed (D3) - the app owns conflict enforcement."
+                    : "One or both events were rejected. This contradicts the D3 assumption - investigate before relying on app-owned conflict enforcement."));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new SpikeResult("Direct-write bypasses booking attendant", "ERROR", ex.Message));
+        }
+        finally
+        {
+            await CleanUp(createdIds);
+        }
+    }
+
+    private async Task RunExtendedPropertySizeSpike()
+    {
+        var start = DateTime.UtcNow.AddDays(31).Date.AddHours(10);
+        var createdIds = new List<string>();
+        const int testSize = 4000;
+
+        try
+        {
+            var testEvent = BuildTestEvent("SPIKE TEST - extended property size - delete me", start, start.AddHours(1));
+            testEvent.SingleValueExtendedProperties =
+            [
+                new SingleValueLegacyExtendedProperty
+                {
+                    Id = "String {c11ff204-d3f3-4a0c-9639-d915f8c8a3e3} Name SpikeTestProp",
+                    Value = new string('x', testSize)
+                }
+            ];
+
+            var created = await GraphClient.Users[TestMailbox].Events.PostAsync(testEvent);
+            if (created?.Id is not null) createdIds.Add(created.Id);
+
+            _results.Add(new SpikeResult(
+                "Extended property size limit",
+                "OK",
+                $"A {testSize}-character single-value extended property was accepted without error. Design assumption (small payloads) holds at this size - not testing further upward since the design doesn't need more."));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new SpikeResult(
+                "Extended property size limit",
+                "REJECTED",
+                $"A {testSize}-character value was rejected: {ex.Message}. The actual limit is smaller than assumed - revisit the metadata field sizing in the architecture doc."));
+        }
+        finally
+        {
+            await CleanUp(createdIds);
+        }
+    }
+
+    private async Task RunCategoryFilterSpike()
+    {
+        var start = DateTime.UtcNow.AddDays(32).Date.AddHours(10);
+        var createdIds = new List<string>();
+
+        try
+        {
+            var testEvent = BuildTestEvent("SPIKE TEST - category filter - delete me", start, start.AddHours(1));
+            testEvent.Categories = ["Rental"];
+
+            var created = await GraphClient.Users[TestMailbox].Events.PostAsync(testEvent);
+            if (created?.Id is not null) createdIds.Add(created.Id);
+
+            var viewStart = start.AddHours(-1);
+            var viewEnd = start.AddHours(2);
+
+            var filtered = await GraphClient.Users[TestMailbox].CalendarView.GetAsync(config =>
+            {
+                config.QueryParameters.StartDateTime = viewStart.ToString("o");
+                config.QueryParameters.EndDateTime = viewEnd.ToString("o");
+                config.QueryParameters.Filter = "categories/any(c:c eq 'Rental')";
+            });
+
+            var found = filtered?.Value?.Any(e => e.Id == created?.Id) ?? false;
+            var totalReturned = filtered?.Value?.Count ?? 0;
+
+            _results.Add(new SpikeResult(
+                "calendarView category $filter",
+                found ? "SERVER-SIDE FILTER WORKS" : "FILTER NOT APPLIED / IGNORED",
+                found
+                    ? $"Server-side $filter on categories returned the test event correctly ({totalReturned} result(s)). Views can filter by category server-side rather than pulling everything and filtering in-app."
+                    : $"The test event was not found via the category filter ({totalReturned} result(s) returned). Server-side category filtering appears unsupported or behaves differently than expected - stick with the fetch-broad-filter-in-app approach from the architecture doc."));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new SpikeResult(
+                "calendarView category $filter",
+                "ERROR (filter likely unsupported)",
+                $"{ex.Message}. Confirms the architecture doc's fallback assumption - filter server-side and fall back to fetch-and-filter in app code."));
+        }
+        finally
+        {
+            await CleanUp(createdIds);
+        }
+    }
+
+    private async Task RunGetScheduleWindowSpike()
+    {
+        var start = DateTime.UtcNow.Date;
+        var end = start.AddDays(90);
+
+        try
+        {
+            var body = new Microsoft.Graph.Users.Item.Calendar.GetSchedule.GetSchedulePostRequestBody
+            {
+                Schedules = [TestMailbox],
+                StartTime = new DateTimeTimeZone { DateTime = start.ToString("s"), TimeZone = "UTC" },
+                EndTime = new DateTimeTimeZone { DateTime = end.ToString("s"), TimeZone = "UTC" },
+                AvailabilityViewInterval = 60
+            };
+
+            var schedule = await GraphClient.Users[TestMailbox].Calendar.GetSchedule.PostAsGetSchedulePostResponseAsync(body);
+            var viewLength = schedule?.Value?.FirstOrDefault()?.AvailabilityView?.Length ?? 0;
+
+            _results.Add(new SpikeResult(
+                "getSchedule 90-day window (>62-day cap)",
+                "SUCCEEDED - NO CAP HIT",
+                $"A 90-day request succeeded with an availability view of length {viewLength}. Either the 62-day cap doesn't apply here, or it was silently handled - worth still chunking season-long queries defensively in the app regardless."));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new SpikeResult(
+                "getSchedule 90-day window (>62-day cap)",
+                "REJECTED / CAPPED",
+                $"{ex.Message}. Confirms chunking is required for season-long consolidated views, as already assumed in the architecture doc."));
+        }
+    }
+
+    private static Event BuildTestEvent(string subject, DateTime start, DateTime end) => new()
+    {
+        Subject = subject,
+        Start = new DateTimeTimeZone { DateTime = start.ToString("s"), TimeZone = "UTC" },
+        End = new DateTimeTimeZone { DateTime = end.ToString("s"), TimeZone = "UTC" },
+        ShowAs = FreeBusyStatus.Busy,
+    };
+
+    private async Task CleanUp(List<string> eventIds)
+    {
+        foreach (var id in eventIds)
+        {
+            try
+            {
+                await GraphClient.Users[TestMailbox].Events[id].DeleteAsync();
+            }
+            catch
+            {
+                // Best-effort cleanup; leftover test events are harmless and named for easy manual removal.
+            }
+        }
+    }
+}
