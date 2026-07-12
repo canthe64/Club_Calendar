@@ -19,6 +19,8 @@ builder.Services.AddSingleton(sp =>
     return new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
 });
 
+builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.

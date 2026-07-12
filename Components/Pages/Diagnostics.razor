@@ -1,7 +1,10 @@
 @page "/diagnostics"
 @using Microsoft.Graph
 @using Microsoft.Graph.Models
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
 @inject GraphServiceClient GraphClient
+@inject SheetBookingService BookingService
 
 <PageTitle>Diagnostics</PageTitle>
 
@@ -52,8 +55,90 @@
         await RunExtendedPropertySizeSpike();
         await RunCategoryFilterSpike();
         await RunGetScheduleWindowSpike();
+        await RunBookingServiceRoundTripSpike();
 
         _running = false;
+    }
+
+    private async Task RunBookingServiceRoundTripSpike()
+    {
+        var start = DateTime.UtcNow.AddDays(33).Date.AddHours(10);
+        var end = start.AddHours(1);
+        var window = (start.AddHours(-1), end.AddHours(1));
+        string? eventId = null;
+
+        try
+        {
+            var booking = new SheetBooking
+            {
+                SheetMailbox = TestMailbox,
+                Start = start,
+                End = end,
+                Category = BookingCategory.Rental,
+                State = BookingState.Hold,
+                RenterName = "Spike Test Renter",
+                RenterContact = "555-0100",
+                Price = 42.50m,
+                Notes = "SPIKE TEST - delete me",
+                BookedBy = "Diagnostics"
+            };
+
+            var createResult = await BookingService.CreateHoldAsync(booking);
+            if (!createResult.IsSuccess || createResult.Booking?.EventId is null)
+            {
+                _results.Add(new SpikeResult("Booking service round-trip", "FAILED", "CreateHoldAsync did not succeed or returned no EventId."));
+                return;
+            }
+            eventId = createResult.Booking.EventId;
+
+            var afterCreate = (await BookingService.GetBookingsAsync(TestMailbox, window.Item1, window.Item2))
+                .FirstOrDefault(b => b.EventId == eventId);
+
+            var createReadBackOk = afterCreate is { State: BookingState.Hold, Category: BookingCategory.Rental }
+                && afterCreate.RenterName == booking.RenterName
+                && afterCreate.Price == booking.Price
+                && afterCreate.BookedBy == booking.BookedBy;
+
+            if (!createReadBackOk)
+            {
+                _results.Add(new SpikeResult(
+                    "Booking service round-trip",
+                    "FAILED at read-back",
+                    $"Created event but fields didn't round-trip correctly. State={afterCreate?.State}, Category={afterCreate?.Category}, RenterName={afterCreate?.RenterName}, Price={afterCreate?.Price}, BookedBy={afterCreate?.BookedBy}"));
+                return;
+            }
+
+            var confirmed = await BookingService.ConfirmAsync(TestMailbox, eventId);
+            if (confirmed.State != BookingState.Confirmed)
+            {
+                _results.Add(new SpikeResult("Booking service round-trip", "FAILED at confirm", $"Expected Confirmed, got {confirmed.State}."));
+                return;
+            }
+
+            await BookingService.CancelAsync(TestMailbox, eventId);
+            eventId = null; // cancelled - no cleanup needed
+
+            var afterCancel = (await BookingService.GetBookingsAsync(TestMailbox, window.Item1, window.Item2))
+                .Any(b => b.RenterName == booking.RenterName);
+
+            _results.Add(new SpikeResult(
+                "Booking service round-trip",
+                afterCancel ? "FAILED at cancel" : "PASSED",
+                afterCancel
+                    ? "Booking still appears after CancelAsync - deletion did not take effect as expected."
+                    : "Create (Hold) -> read-back (fields correct) -> Confirm (state -> Confirmed) -> Cancel (removed) all succeeded end to end via SheetBookingService."));
+        }
+        catch (Exception ex)
+        {
+            _results.Add(new SpikeResult("Booking service round-trip", "ERROR", ex.Message));
+        }
+        finally
+        {
+            if (eventId is not null)
+            {
+                await CleanUp([eventId]);
+            }
+        }
     }
 
     private async Task RunConflictBypassSpike()
