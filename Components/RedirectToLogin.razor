@@ -1,0 +1,13 @@
+@inject NavigationManager Navigation
+
+@code {
+    // Blazor Server can't issue a normal HTTP redirect mid-circuit (the SignalR connection is
+    // already established), so this forces a full page navigation to the sign-in endpoint
+    // provided by Microsoft.Identity.Web.UI.
+    protected override void OnInitialized()
+    {
+        Navigation.NavigateTo(
+            $"MicrosoftIdentity/Account/SignIn?redirectUri={Uri.EscapeDataString(Navigation.Uri)}",
+            forceLoad: true);
+    }
+}

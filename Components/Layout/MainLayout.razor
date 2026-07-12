@@ -1,5 +1,15 @@
 ﻿@inherits LayoutComponentBase
 
+<header class="app-header">
+    <span class="app-title">Facility Scheduler</span>
+    <AuthorizeView>
+        <Authorized>
+            <span class="user-name">@context.User.Identity?.Name</span>
+            <a href="MicrosoftIdentity/Account/SignOut">Sign out</a>
+        </Authorized>
+    </AuthorizeView>
+</header>
+
 @Body
 
 <div id="blazor-error-ui" data-nosnippet>
