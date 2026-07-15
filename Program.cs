@@ -90,7 +90,11 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
-app.MapStaticAssets();
+// Static assets (CSS, JS, images) carry nothing sensitive - allow them anonymously rather than
+// leaving them behind the global sign-in fallback policy. This was already true for every asset
+// before Club Events/the public embed existed; it just went unnoticed because nothing anonymous
+// needed to load one (the actual sign-in screen is hosted by Microsoft, not styled by this app).
+app.MapStaticAssets().AllowAnonymous();
 app.MapRazorPages();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
