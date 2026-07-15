@@ -1,0 +1,453 @@
+@page "/calendar"
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@using FacilityScheduler.Components.Calendar
+@inject SheetBookingService BookingService
+@inject ClubEventService ClubEventService
+@inject AuthenticationStateProvider AuthProvider
+
+<PageTitle>Calendar</PageTitle>
+
+<div style="padding:16px 24px">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
+        <span style="font-size:14px;font-weight:600;color:#1e2a33">@AnchorLabel</span>
+        <span style="display:flex;align-items:center;gap:8px;font-size:12px;color:#1e2a33">
+            <span @onclick="GoPrevious" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 4px">&#8249;</span>
+            <span @onclick="GoToday" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 4px">Today</span>
+            <span @onclick="GoNext" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 4px">&#8250;</span>
+        </span>
+        <div style="display:flex;border:1px solid #d7dfe5;border-radius:6px;overflow:hidden;font-size:11px;font-weight:600;margin-left:auto;cursor:pointer">
+            <span @onclick='() => SetView(ViewMode.Month)' style="padding:4px 14px;background:@(View == ViewMode.Month ? "#2d5f8a" : "#fff");color:@(View == ViewMode.Month ? "#fff" : "#2d5f8a")">Month</span>
+            <span @onclick='() => SetView(ViewMode.Week)' style="padding:4px 14px;background:@(View == ViewMode.Week ? "#2d5f8a" : "#fff");color:@(View == ViewMode.Week ? "#fff" : "#2d5f8a")">Week</span>
+            <span @onclick='() => SetView(ViewMode.Day)' style="padding:4px 14px;background:@(View == ViewMode.Day ? "#2d5f8a" : "#fff");color:@(View == ViewMode.Day ? "#fff" : "#2d5f8a")">Day</span>
+        </div>
+        <span @onclick="OpenCreateForm" style="background:#c62f2f;color:#fff;padding:6px 13px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer">+ New Booking</span>
+        <span @onclick="OpenSeriesWizard" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:6px 13px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer">+ New Series</span>
+    </div>
+
+    <div style="background:#fff;border-bottom:1px solid #e2e8ec;padding:9px 0;display:flex;align-items:center;gap:8px;font-size:11px;flex-wrap:wrap;margin-bottom:12px">
+        <span style="font-weight:600;color:#90a0ab;font-size:10px;letter-spacing:.05em">SHOW</span>
+        @foreach (var cat in CalendarStyles.SheetCategories)
+        {
+            var isOn = _selectedCategories.Contains(cat);
+            <span @onclick="() => ToggleCategory(cat)"
+                  style="border:1px solid @CalendarStyles.CategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.CategoryColor(cat));background:@(isOn ? CalendarStyles.CategoryColor(cat) : "#fff");padding:2px 10px;border-radius:10px;font-weight:600;cursor:pointer">
+                @cat
+            </span>
+        }
+        <span @onclick="() => _openIceOnly = !_openIceOnly" style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#1e2a33;font-weight:600;cursor:pointer">
+            <input type="checkbox" checked="@_openIceOnly" style="pointer-events:none" /> Open ice only
+        </span>
+    </div>
+
+    @if (_loading)
+    {
+        <p><em>Loading...</em></p>
+    }
+    else if (View == ViewMode.Month)
+    {
+        <MonthGrid Bookings="FilteredBookings" ClubEvents="_activeClubEvents" AnchorMonth="_anchorDate" OnBookingClick="OpenDetail" OnDayClick="JumpToDay" />
+    }
+    else if (View == ViewMode.Week)
+    {
+        <WeekGrid Bookings="FilteredBookings" ClubEvents="_activeClubEvents" WeekStart="WeekStart" OnBookingClick="OpenDetail" OnDayClick="JumpToDay" />
+    }
+    else
+    {
+        <DayGrid Bookings="FilteredBookings" ClubEvents="_activeClubEvents" Date="_anchorDate" OnBookingClick="OpenDetail" OnSlotClick="OpenSlotForm" />
+    }
+</div>
+
+<BookingFormModal IsOpen="_formOpen" Draft="_draft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" />
+<BookingDetailModal Group="_detailGroup" OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" />
+<CancelChoiceModal Group="_cancelGroup" OnChoice="ApplyCancelChoice" OnKeep="() => _cancelGroup = null" />
+<SeriesWizardModal IsOpen="_seriesWizardOpen" Draft="_seriesDraft" Step="_seriesStep" Conflicts="_seriesConflicts"
+                    IsLoadingPreview="_isLoadingSeriesPreview" IsSaving="_isSavingSeries"
+                    OnPreview="PreviewSeries" OnBack="() => _seriesStep = 1" OnCreate="CreateSeries" OnCancel="CloseSeriesWizard" />
+
+@if (_cancelSeriesGroup is not null)
+{
+    <div style="position:fixed;inset:0;background:rgba(30,42,51,.55);display:flex;align-items:center;justify-content:center;z-index:60">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.4);padding:18px 20px;width:380px">
+            <div style="font-size:14px;font-weight:600;color:#1e2a33;margin-bottom:4px">Cancel the entire series?</div>
+            <div style="font-size:11px;color:#5a7183;margin-bottom:12px">This deletes every occurrence, past and future, on every sheet involved - not just this one date. Meant for correcting a data-entry mistake, not routine cancellations.</div>
+            <div style="display:flex;flex-direction:column;gap:7px;font-size:11.5px;font-weight:600">
+                <span @onclick="ConfirmCancelSeries" style="border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:8px 12px;text-align:center;cursor:pointer">Yes, cancel the entire series</span>
+                <span @onclick="() => _cancelSeriesGroup = null" style="text-align:center;color:#90a0ab;padding:4px 0;cursor:pointer">Never mind</span>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private enum ViewMode { Month, Week, Day }
+
+    private ViewMode View = ViewMode.Month;
+    private DateTime _anchorDate = DateTime.UtcNow.Date;
+    private List<SheetBooking> _allBookings = [];
+    private List<ClubEvent> _activeClubEvents = [];
+    private bool _loading = true;
+
+    private readonly HashSet<BookingCategory> _selectedCategories = [.. CalendarStyles.SheetCategories];
+    private bool _openIceOnly;
+
+    private bool _formOpen;
+    private BookingDraft _draft = new();
+    private List<SheetBooking> _formConflicts = [];
+    private bool _isSaving;
+
+    private List<SheetBooking>? _detailGroup;
+    private List<SheetBooking>? _cancelGroup;
+    private List<SheetBooking>? _cancelSeriesGroup;
+
+    private bool _seriesWizardOpen;
+    private int _seriesStep = 1;
+    private SeriesDraft _seriesDraft = new();
+    private Dictionary<DateTime, List<SheetBooking>> _seriesConflicts = [];
+    private bool _isLoadingSeriesPreview;
+    private bool _isSavingSeries;
+
+    private DateTime WeekStart => _anchorDate.Date.AddDays(-(int)_anchorDate.DayOfWeek);
+
+    private List<SheetBooking> FilteredBookings => _allBookings
+        .Where(b => _openIceOnly ? (b.Category == BookingCategory.Rental && b.State == BookingState.Hold) : _selectedCategories.Contains(b.Category))
+        .ToList();
+
+    private string AnchorLabel => View switch
+    {
+        ViewMode.Month => _anchorDate.ToString("MMMM yyyy"),
+        ViewMode.Week => $"{WeekStart:MMM d} - {WeekStart.AddDays(6):MMM d, yyyy}",
+        _ => _anchorDate.ToString("dddd, MMMM d, yyyy")
+    };
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var (start, end) = View switch
+        {
+            ViewMode.Month => (MonthGridStart(_anchorDate), MonthGridEnd(_anchorDate).AddDays(1)),
+            ViewMode.Week => (WeekStart, WeekStart.AddDays(7)),
+            _ => (_anchorDate.Date, _anchorDate.Date.AddDays(1))
+        };
+
+        _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, end);
+        _activeClubEvents = await ClubEventService.GetEventsAsync(start, end);
+        _loading = false;
+    }
+
+
+    private static DateTime MonthGridStart(DateTime anchor)
+    {
+        var firstOfMonth = new DateTime(anchor.Year, anchor.Month, 1);
+        return firstOfMonth.AddDays(-(int)firstOfMonth.DayOfWeek);
+    }
+
+    private static DateTime MonthGridEnd(DateTime anchor)
+    {
+        var lastOfMonth = new DateTime(anchor.Year, anchor.Month, 1).AddMonths(1).AddDays(-1);
+        return lastOfMonth.AddDays(6 - (int)lastOfMonth.DayOfWeek);
+    }
+
+    private async Task SetView(ViewMode mode)
+    {
+        View = mode;
+        await LoadAsync();
+    }
+
+    private async Task GoPrevious()
+    {
+        _anchorDate = View switch
+        {
+            ViewMode.Month => _anchorDate.AddMonths(-1),
+            ViewMode.Week => _anchorDate.AddDays(-7),
+            _ => _anchorDate.AddDays(-1)
+        };
+        await LoadAsync();
+    }
+
+    private async Task GoNext()
+    {
+        _anchorDate = View switch
+        {
+            ViewMode.Month => _anchorDate.AddMonths(1),
+            ViewMode.Week => _anchorDate.AddDays(7),
+            _ => _anchorDate.AddDays(1)
+        };
+        await LoadAsync();
+    }
+
+    private async Task GoToday()
+    {
+        _anchorDate = DateTime.UtcNow.Date;
+        await LoadAsync();
+    }
+
+    private async Task JumpToDay(DateTime day)
+    {
+        _anchorDate = day.Date;
+        View = ViewMode.Day;
+        await LoadAsync();
+    }
+
+    private void ToggleCategory(BookingCategory cat)
+    {
+        if (!_selectedCategories.Remove(cat))
+        {
+            _selectedCategories.Add(cat);
+        }
+    }
+
+    private void OpenDetail(SheetBooking booking)
+    {
+        // Scoped by date/time as well as group id - a multi-week recurring series shares one
+        // BookingGroupId across every occurrence, and Month view can have several weeks of the
+        // same series loaded at once. Without this, clicking one occurrence could pull in other
+        // weeks' occurrences too. WeekGrid/MonthGrid already filter by date before grouping chips;
+        // this brings the detail lookup in line with that.
+        _detailGroup = _allBookings.Where(b => b.BookingGroupId == booking.BookingGroupId && b.Start == booking.Start && b.End == booking.End).ToList();
+    }
+
+    private void OpenCreateForm()
+    {
+        _draft = new BookingDraft();
+        _draft.Reset(initialStart: _anchorDate.AddHours(18));
+        _formConflicts = [];
+        _formOpen = true;
+    }
+
+    private void OpenSlotForm((string Sheet, DateTime Start) slot)
+    {
+        _draft = new BookingDraft();
+        _draft.Reset(initialSheets: [slot.Sheet], initialStart: slot.Start);
+        _formConflicts = [];
+        _formOpen = true;
+    }
+
+    private void StartEdit(List<SheetBooking> group)
+    {
+        _detailGroup = null;
+        _draft = new BookingDraft();
+        _draft.LoadForEdit(group);
+        _formConflicts = [];
+        _formOpen = true;
+    }
+
+    private void StartCancel(List<SheetBooking> group)
+    {
+        _detailGroup = null;
+        _cancelGroup = group;
+    }
+
+    private void CloseForm()
+    {
+        _formOpen = false;
+        _formConflicts = [];
+    }
+
+    private async Task SaveDraft()
+    {
+        var canSave = _draft.SelectedSheets.Count > 0
+            && !string.IsNullOrWhiteSpace(_draft.RenterName)
+            && (_draft.Category != BookingCategory.Rental || _draft.CreateAsConfirmed.HasValue);
+
+        if (_isSaving || !canSave)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var bookedBy = await GetCurrentUserNameAsync();
+            var newState = _draft.CreateAsConfirmed == true ? BookingState.Confirmed : BookingState.Hold;
+
+            if (_draft.EditingGroup is null)
+            {
+                var template = new SheetBooking
+                {
+                    SheetMailbox = "", // overwritten per-sheet inside CreateAcrossSheetsAsync
+                    Start = _draft.Start,
+                    End = _draft.End,
+                    Category = _draft.Category,
+                    State = newState,
+                    RenterName = _draft.RenterName,
+                    RenterPhone = _draft.RenterPhone,
+                    RenterEmail = _draft.RenterEmail,
+                    Notes = _draft.Notes,
+                    BookedBy = bookedBy
+                };
+
+                var result = await BookingService.CreateAcrossSheetsAsync(_draft.SelectedSheets, template);
+                if (result.IsSuccess)
+                {
+                    CloseForm();
+                    await LoadAsync();
+                }
+                else
+                {
+                    _formConflicts = result.Conflicts;
+                }
+            }
+            else
+            {
+                var updatedFields = new SheetBooking
+                {
+                    SheetMailbox = "",
+                    Start = _draft.Start,
+                    End = _draft.End,
+                    Category = _draft.Category,
+                    State = newState,
+                    RenterName = _draft.RenterName,
+                    RenterPhone = _draft.RenterPhone,
+                    RenterEmail = _draft.RenterEmail,
+                    Notes = _draft.Notes,
+                    BookedBy = bookedBy
+                };
+
+                var membersToUpdate = _draft.EditingGroup.Where(m => _draft.SelectedSheets.Contains(m.SheetMailbox)).ToList();
+
+                // Deselecting a sheet leaves it untouched (still part of whatever it was before -
+                // e.g. an open rental hold). If that leaves it behind, it needs to split off into
+                // its own BookingGroupId - otherwise it'd still show grouped with the sheets that
+                // ARE being updated here, displaying the wrong renter/state when clicked.
+                var isPartialEdit = membersToUpdate.Count < _draft.EditingGroup.Count;
+                var splitGroupId = isPartialEdit ? Guid.NewGuid() : (Guid?)null;
+
+                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, splitGroupId);
+                if (result.IsSuccess)
+                {
+                    CloseForm();
+                    await LoadAsync();
+                }
+                else
+                {
+                    _formConflicts = result.Conflicts;
+                }
+            }
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task ApplyCancelChoice(bool reopenAsRentalHold)
+    {
+        if (_cancelGroup is null)
+        {
+            return;
+        }
+
+        await BookingService.CancelGroupAsync(_cancelGroup, reopenAsRentalHold);
+        _cancelGroup = null;
+        await LoadAsync();
+    }
+
+    private async Task<string> GetCurrentUserNameAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        return authState.User.Identity?.Name ?? "Unknown";
+    }
+
+    private void OpenSeriesWizard()
+    {
+        _seriesDraft = new SeriesDraft();
+        _seriesDraft.Reset();
+        _seriesConflicts = [];
+        _seriesStep = 1;
+        _seriesWizardOpen = true;
+    }
+
+    private void CloseSeriesWizard()
+    {
+        _seriesWizardOpen = false;
+        _seriesStep = 1;
+        _seriesConflicts = [];
+    }
+
+    private async Task PreviewSeries()
+    {
+        _isLoadingSeriesPreview = true;
+        StateHasChanged();
+
+        try
+        {
+            var candidateDates = _seriesDraft.ComputeCandidateDates();
+            _seriesConflicts = await BookingService.PreviewSeriesConflictsAsync(
+                _seriesDraft.SelectedSheets,
+                candidateDates,
+                TimeSpan.FromHours(_seriesDraft.StartHour),
+                TimeSpan.FromHours(_seriesDraft.EndHour));
+            _seriesStep = 2;
+        }
+        finally
+        {
+            _isLoadingSeriesPreview = false;
+        }
+    }
+
+    private async Task CreateSeries()
+    {
+        var canCreate = _seriesDraft.SelectedSheets.Count > 0
+            && !string.IsNullOrWhiteSpace(_seriesDraft.RenterName)
+            && (_seriesDraft.Category != BookingCategory.Rental || _seriesDraft.CreateAsConfirmed.HasValue);
+
+        if (_isSavingSeries || !canCreate)
+        {
+            return;
+        }
+
+        _isSavingSeries = true;
+        StateHasChanged();
+
+        try
+        {
+            var bookedBy = await GetCurrentUserNameAsync();
+            var template = new SheetBooking
+            {
+                SheetMailbox = "", // overwritten per-sheet inside CreateSeriesAsync
+                Start = _seriesDraft.FirstOccurrenceStart,
+                End = _seriesDraft.FirstOccurrenceEnd,
+                Category = _seriesDraft.Category,
+                State = _seriesDraft.CreateAsConfirmed == true ? BookingState.Confirmed : BookingState.Hold,
+                RenterName = _seriesDraft.RenterName,
+                RenterPhone = _seriesDraft.RenterPhone,
+                RenterEmail = _seriesDraft.RenterEmail,
+                Notes = _seriesDraft.Notes,
+                BookedBy = bookedBy
+            };
+
+            await BookingService.CreateSeriesAsync(_seriesDraft.SelectedSheets, template, _seriesDraft.LastDate, _seriesDraft.SkippedDates);
+            CloseSeriesWizard();
+            await LoadAsync();
+        }
+        finally
+        {
+            _isSavingSeries = false;
+        }
+    }
+
+    private void StartCancelSeries(List<SheetBooking> group)
+    {
+        _detailGroup = null;
+        _cancelSeriesGroup = group;
+    }
+
+    private async Task ConfirmCancelSeries()
+    {
+        if (_cancelSeriesGroup is null)
+        {
+            return;
+        }
+
+        await BookingService.CancelSeriesAsync(_cancelSeriesGroup);
+        _cancelSeriesGroup = null;
+        await LoadAsync();
+    }
+}

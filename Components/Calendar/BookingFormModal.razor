@@ -1,0 +1,186 @@
+@using FacilityScheduler.Domain
+
+@if (IsOpen)
+{
+    <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:400px;max-height:88vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <span style="font-size:15px;font-weight:600;color:#1e2a33">@(Draft.EditingGroup is null ? "New Booking" : "Edit Booking")</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:14px;cursor:pointer;padding:2px 6px">&#10005;</span>
+            </div>
+
+            @if (Conflicts.Count > 0)
+            {
+                <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+                    <div style="font-size:12px;font-weight:600;color:#a02c21;margin-bottom:4px">These sheets already have something booked:</div>
+                    @foreach (var c in Conflicts)
+                    {
+                        <div style="font-size:11px;color:#8a5049;line-height:1.5">@DayGridSheetLabel(c.SheetMailbox): @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") (@c.Category)</div>
+                    }
+                    <div style="font-size:10px;color:#8a5049;margin-top:4px">Nothing was saved — deselect the sheet, or change the time.</div>
+                </div>
+            }
+
+            <div style="display:flex;flex-direction:column;gap:11px;font-size:11px;color:#5a7183">
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
+                    <div style="display:flex;gap:6px">
+                        @foreach (var cat in CalendarStyles.SheetCategories)
+                        {
+                            var isSelected = Draft.Category == cat;
+                            <span @onclick="() => Draft.SetCategory(cat)"
+                                  style="background:@(isSelected ? CalendarStyles.CategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.CategoryColor(cat));border:1px solid @CalendarStyles.CategoryColor(cat);padding:3px 12px;border-radius:12px;font-weight:600;cursor:pointer">
+                                @cat
+                            </span>
+                        }
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Sheets <span style="font-weight:400;color:#90a0ab">— tap to toggle</span></div>
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                        @foreach (var sheet in Sheets.All)
+                        {
+                            var isSelected = Draft.SelectedSheets.Contains(sheet);
+                            <span @onclick="() => ToggleSheet(sheet)"
+                                  style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:60px;text-align:center;border-radius:6px;font-weight:600;cursor:pointer">
+                                @DayGridSheetLabel(sheet)
+                            </span>
+                        }
+                    </div>
+                </div>
+
+                <div style="display:flex;gap:8px;align-items:end">
+                    <div style="flex:1.2">
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Date</div>
+                        <input type="date" value="@Draft.Date.ToString("yyyy-MM-dd")" @onchange="OnDateChanged"
+                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box">
+                    </div>
+                    <div style="flex:1">
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
+                        <select value="@Draft.StartHour" @onchange="OnStartHourChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                            @foreach (var h in HourOptions)
+                            {
+                                <option value="@h">@FormatHour(h)</option>
+                            }
+                        </select>
+                    </div>
+                    <div style="flex:1">
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
+                        <select value="@Draft.EndHour" @onchange="OnEndHourChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                            @foreach (var h in HourOptions)
+                            {
+                                <option value="@h">@FormatHour(h)</option>
+                            }
+                        </select>
+                    </div>
+                </div>
+
+                @if (Draft.Category == BookingCategory.Rental)
+                {
+                    <div>
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Booking status</div>
+                        <div style="display:flex;gap:6px">
+                            <span @onclick="() => Draft.CreateAsConfirmed = false"
+                                  style="flex:1;text-align:center;background:@(Draft.CreateAsConfirmed == false ? "#2d5f8a" : "#fff");color:@(Draft.CreateAsConfirmed == false ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;border-radius:6px;font-weight:600;cursor:pointer">
+                                Hold for future rental
+                            </span>
+                            <span @onclick="() => Draft.CreateAsConfirmed = true"
+                                  style="flex:1;text-align:center;background:@(Draft.CreateAsConfirmed == true ? "#2d5f8a" : "#fff");color:@(Draft.CreateAsConfirmed == true ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;border-radius:6px;font-weight:600;cursor:pointer">
+                                Confirmed booking
+                            </span>
+                        </div>
+                    </div>
+                }
+
+                <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Event Title</div>
+                    <input value="@Draft.RenterName" @oninput="e => Draft.RenterName = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+
+                @if (Draft.Category == BookingCategory.Rental)
+                {
+                    <div style="display:flex;gap:8px">
+                        <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Phone <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                            <input value="@Draft.RenterPhone" @oninput="e => Draft.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                        <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Email <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                            <input value="@Draft.RenterEmail" @oninput="e => Draft.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                    </div>
+                }
+
+                <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Notes <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                    <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:14px;font-size:12px;font-weight:600">
+                <span @onclick="HandleSaveClick" style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : CanSave ? "#c62f2f" : "#e8b4ae");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving || !CanSave ? "default" : "pointer")">@(IsSaving ? "Saving..." : "Save")</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 16px;border-radius:6px;cursor:pointer">Cancel</span>
+            </div>
+            @if (!CanSave)
+            {
+                <div style="font-size:10px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public bool IsOpen { get; set; }
+    [Parameter, EditorRequired] public BookingDraft Draft { get; set; } = new();
+    [Parameter] public List<SheetBooking> Conflicts { get; set; } = [];
+    [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private static readonly int[] HourOptions = Enumerable.Range(6, 18).ToArray();
+
+    private bool CanSave => Draft.SelectedSheets.Count > 0
+        && !string.IsNullOrWhiteSpace(Draft.RenterName)
+        && (Draft.Category != BookingCategory.Rental || Draft.CreateAsConfirmed.HasValue);
+
+    private string ValidationMessage =>
+        Draft.SelectedSheets.Count == 0 ? "Select at least one sheet." :
+        string.IsNullOrWhiteSpace(Draft.RenterName) ? "Event title is required." :
+        "Choose Hold for future rental or Confirmed booking.";
+
+    private Task HandleSaveClick() => (IsSaving || !CanSave) ? Task.CompletedTask : OnSave.InvokeAsync();
+
+    private void ToggleSheet(string sheet)
+    {
+        if (!Draft.SelectedSheets.Remove(sheet))
+        {
+            Draft.SelectedSheets.Add(sheet);
+        }
+    }
+
+    private void OnDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var d))
+        {
+            Draft.Date = d;
+        }
+    }
+
+    private void OnStartHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var h))
+        {
+            Draft.StartHour = h;
+        }
+    }
+
+    private void OnEndHourChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var h))
+        {
+            Draft.EndHour = h;
+        }
+    }
+
+    private static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
+
+    private static string DayGridSheetLabel(string sheetMailbox)
+    {
+        var localPart = sheetMailbox.Split('@')[0];
+        var digits = new string(localPart.Where(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
+    }
+}

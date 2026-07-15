@@ -1,0 +1,208 @@
+@page "/club-events"
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@using FacilityScheduler.Components.Calendar
+@inject ClubEventService EventService
+@inject AuthenticationStateProvider AuthProvider
+
+<PageTitle>Club Events</PageTitle>
+
+<div style="padding:16px 24px">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <span style="font-size:14px;font-weight:600;color:#1e2a33">Club Events</span>
+        <span style="font-size:11px;color:#90a0ab">Whole-club events - bonspiels, tournaments, closures. Not tied to a sheet.</span>
+        <span @onclick="OpenCreateForm" style="margin-left:auto;background:#c62f2f;color:#fff;padding:6px 13px;border-radius:6px;font-weight:600;font-size:11.5px;cursor:pointer">+ New Club Event</span>
+    </div>
+
+    @if (_loading)
+    {
+        <p><em>Loading...</em></p>
+    }
+    else
+    {
+        <div style="font-size:11px;font-weight:600;color:#90a0ab;letter-spacing:.05em;margin-bottom:6px">UPCOMING</div>
+        @if (_upcoming.Count == 0)
+        {
+            <div style="color:#c1ccd4;font-size:11px;margin-bottom:16px">No upcoming club events.</div>
+        }
+        else
+        {
+            <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+                @foreach (var e in _upcoming)
+                {
+                    <div @onclick="() => StartEdit(e)"
+                         style="display:flex;align-items:center;gap:10px;border:1px solid #e7ecef;border-radius:6px;padding:9px 12px;cursor:pointer;background:#fff">
+                        <span style="background:@CalendarStyles.ClubEventCategoryColor(e.Category);color:#fff;padding:2px 10px;border-radius:10px;font-weight:600;font-size:10px">@e.Category</span>
+                        <span style="font-weight:600;color:#1e2a33;font-size:12px">@e.Title</span>
+                        <span style="font-size:11px;color:#5a7183">@FormatRange(e)</span>
+                        @if (e.MarksSheetsUnavailable)
+                        {
+                            <span style="margin-left:auto;font-size:10px;color:#a02c21;font-weight:600">All sheets unavailable</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        <div style="font-size:11px;font-weight:600;color:#90a0ab;letter-spacing:.05em;margin-bottom:6px">PAST</div>
+        @if (_past.Count == 0)
+        {
+            <div style="color:#c1ccd4;font-size:11px">No past club events in the last 30 days.</div>
+        }
+        else
+        {
+            <div style="display:flex;flex-direction:column;gap:6px">
+                @foreach (var e in _past)
+                {
+                    <div @onclick="() => StartEdit(e)"
+                         style="display:flex;align-items:center;gap:10px;border:1px solid #e7ecef;border-radius:6px;padding:9px 12px;cursor:pointer;background:#fafbfc">
+                        <span style="background:@CalendarStyles.ClubEventCategoryColor(e.Category);color:#fff;padding:2px 10px;border-radius:10px;font-weight:600;font-size:10px">@e.Category</span>
+                        <span style="font-weight:600;color:#1e2a33;font-size:12px">@e.Title</span>
+                        <span style="font-size:11px;color:#5a7183">@FormatRange(e)</span>
+                        @if (e.MarksSheetsUnavailable)
+                        {
+                            <span style="margin-left:auto;font-size:10px;color:#a02c21;font-weight:600">All sheets unavailable</span>
+                        }
+                    </div>
+                }
+            </div>
+        }
+    }
+</div>
+
+<ClubEventFormModal IsOpen="_formOpen" Draft="_draft" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" OnDelete="DeleteDraft" />
+
+@code {
+    private bool _loading = true;
+    private List<ClubEvent> _upcoming = [];
+    private List<ClubEvent> _past = [];
+
+    private bool _formOpen;
+    private ClubEventDraft _draft = new();
+    private bool _isSaving;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        StateHasChanged();
+
+        var start = DateTime.UtcNow.Date.AddDays(-30);
+        var end = DateTime.UtcNow.Date.AddDays(366);
+        var events = await EventService.GetEventsAsync(start, end);
+
+        var today = DateTime.UtcNow.Date;
+        _upcoming = events.Where(e => e.End.Date >= today).OrderBy(e => e.Start).ToList();
+        _past = events.Where(e => e.End.Date < today).OrderByDescending(e => e.Start).ToList();
+
+        _loading = false;
+    }
+
+    private void OpenCreateForm()
+    {
+        _draft = new ClubEventDraft();
+        _draft.Reset();
+        _formOpen = true;
+    }
+
+    private void StartEdit(ClubEvent e)
+    {
+        _draft = new ClubEventDraft();
+        _draft.LoadForEdit(e);
+        _formOpen = true;
+    }
+
+    private void CloseForm()
+    {
+        _formOpen = false;
+    }
+
+    private async Task SaveDraft()
+    {
+        if (_isSaving || string.IsNullOrWhiteSpace(_draft.Title) || _draft.EndDate.Date < _draft.StartDate.Date)
+        {
+            return;
+        }
+
+        _isSaving = true;
+        StateHasChanged();
+
+        try
+        {
+            var bookedBy = await GetCurrentUserNameAsync();
+
+            if (_draft.EditingEvent is null)
+            {
+                var newEvent = new ClubEvent
+                {
+                    Title = _draft.Title!,
+                    Category = _draft.Category,
+                    Start = _draft.Start,
+                    End = _draft.End,
+                    IsAllDay = _draft.IsAllDay,
+                    MarksSheetsUnavailable = _draft.MarksSheetsUnavailable,
+                    Notes = _draft.Notes,
+                    BookedBy = bookedBy
+                };
+                await EventService.CreateAsync(newEvent);
+            }
+            else
+            {
+                var updated = new ClubEvent
+                {
+                    EventId = _draft.EditingEvent.EventId,
+                    ICalUId = _draft.EditingEvent.ICalUId,
+                    Title = _draft.Title!,
+                    Category = _draft.Category,
+                    Start = _draft.Start,
+                    End = _draft.End,
+                    IsAllDay = _draft.IsAllDay,
+                    MarksSheetsUnavailable = _draft.MarksSheetsUnavailable,
+                    Notes = _draft.Notes,
+                    BookedBy = _draft.EditingEvent.BookedBy
+                };
+                await EventService.UpdateAsync(updated);
+            }
+
+            CloseForm();
+            await LoadAsync();
+        }
+        finally
+        {
+            _isSaving = false;
+        }
+    }
+
+    private async Task DeleteDraft()
+    {
+        if (_draft.EditingEvent?.EventId is null)
+        {
+            return;
+        }
+
+        await EventService.CancelAsync(_draft.EditingEvent.EventId);
+        CloseForm();
+        await LoadAsync();
+    }
+
+    private async Task<string> GetCurrentUserNameAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        return authState.User.Identity?.Name ?? "Unknown";
+    }
+
+    private static string FormatRange(ClubEvent e)
+    {
+        if (e.IsAllDay)
+        {
+            return e.Start.Date == e.End.Date
+                ? e.Start.ToString("ddd, MMM d, yyyy")
+                : $"{e.Start:MMM d} - {e.End:MMM d, yyyy}";
+        }
+
+        return e.Start.Date == e.End.Date
+            ? $"{e.Start:ddd, MMM d, yyyy} - {e.Start:h:mmtt}-{e.End:h:mmtt}"
+            : $"{e.Start:MMM d, h:mmtt} - {e.End:MMM d, h:mmtt yyyy}";
+    }
+}

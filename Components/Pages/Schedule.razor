@@ -52,16 +52,16 @@
                 <label><InputCheckbox @bind-Value="_createAsConfirmed" /> Create as confirmed (not a hold)</label>
             </div>
             <div>
-                <label>Renter name: <InputText @bind-Value="_newBooking.RenterName" /></label>
+                <label>Renter name (optional): <InputText @bind-Value="_newBooking.RenterName" /></label>
             </div>
             <div>
-                <label>Contact: <InputText @bind-Value="_newBooking.RenterContact" /></label>
+                <label>Phone (optional): <InputText @bind-Value="_newBooking.RenterPhone" /></label>
             </div>
             <div>
-                <label>Price: <InputNumber @bind-Value="_newBooking.Price" /></label>
+                <label>Email (optional): <InputText @bind-Value="_newBooking.RenterEmail" /></label>
             </div>
             <div>
-                <label>Notes: <InputTextArea @bind-Value="_newBooking.Notes" /></label>
+                <label>Notes (optional): <InputTextArea @bind-Value="_newBooking.Notes" /></label>
             </div>
             <button type="submit">Create</button>
             <button type="button" @onclick="() => _showCreateForm = false">Cancel</button>
@@ -99,7 +99,6 @@ else
                 <th>Category</th>
                 <th>State</th>
                 <th>Renter</th>
-                <th>Price</th>
                 <th>Booked by</th>
                 <th></th>
             </tr>
@@ -116,7 +115,6 @@ else
                         </span>
                     </td>
                     <td>@booking.RenterName</td>
-                    <td>@(booking.Price?.ToString("C"))</td>
                     <td>@booking.BookedBy</td>
                     <td>
                         @if (booking.State == BookingState.Hold)
@@ -181,8 +179,8 @@ else
             Category = _newBooking.Category,
             State = BookingState.Hold,
             RenterName = _newBooking.RenterName,
-            RenterContact = _newBooking.RenterContact,
-            Price = _newBooking.Price,
+            RenterPhone = _newBooking.RenterPhone,
+            RenterEmail = _newBooking.RenterEmail,
             Notes = _newBooking.Notes,
             BookedBy = bookedBy
         };
@@ -236,8 +234,8 @@ else
         public DateTime End { get; set; } = DateTime.UtcNow.Date.AddHours(20);
         public BookingCategory Category { get; set; } = BookingCategory.Rental;
         public string? RenterName { get; set; }
-        public string? RenterContact { get; set; }
-        public decimal? Price { get; set; }
+        public string? RenterPhone { get; set; }
+        public string? RenterEmail { get; set; }
         public string? Notes { get; set; }
     }
 }

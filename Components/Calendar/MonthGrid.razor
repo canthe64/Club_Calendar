@@ -1,0 +1,70 @@
+@using FacilityScheduler.Domain
+
+<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:10px;max-width:1100px">
+    @foreach (var name in DowNames)
+    {
+        <div style="text-align:center;color:#90a0ab;font-weight:600;padding:2px 0">@name</div>
+    }
+    @foreach (var cell in MonthCells)
+    {
+        var inMonth = cell.Month == AnchorMonth.Month;
+        <div @onclick="() => OnDayClick.InvokeAsync(cell)"
+             style="border:1px solid #e7ecef;border-radius:6px;min-height:92px;padding:3px 4px;background:@(inMonth ? "#fff" : "#fafbfc");cursor:pointer">
+            <div style="font-size:10px;color:@(inMonth ? "#90a0ab" : "#c1ccd4");font-weight:600;padding:1px 2px">@cell.Day</div>
+            @{
+                var dayClubEvents = ClubEvents.Where(ce => ce.Start.Date <= cell.Date && cell.Date <= ce.End.Date).ToList();
+                var dayBookings = Bookings
+                    .Where(b => b.Start.Date == cell.Date)
+                    .GroupBy(b => b.BookingGroupId)
+                    .Select(g => g.First())
+                    .OrderBy(b => b.Start)
+                    .ToList();
+            }
+            @foreach (var ce in dayClubEvents)
+            {
+                <div style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden">
+                    @ce.Title
+                </div>
+            }
+            @foreach (var b in dayBookings.Take(3))
+            {
+                <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
+                     style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden">
+                    @Title(b)
+                </div>
+            }
+            @if (dayBookings.Count > 3)
+            {
+                <div style="color:#90a0ab;margin-top:2px;padding:0 2px">+@(dayBookings.Count - 3) more</div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<SheetBooking> Bookings { get; set; } = [];
+    [Parameter] public List<ClubEvent> ClubEvents { get; set; } = [];
+    [Parameter, EditorRequired] public DateTime AnchorMonth { get; set; }
+    [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
+    [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
+
+    private static readonly string[] DowNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    private IEnumerable<DateTime> MonthCells
+    {
+        get
+        {
+            var firstOfMonth = new DateTime(AnchorMonth.Year, AnchorMonth.Month, 1);
+            var gridStart = firstOfMonth.AddDays(-(int)firstOfMonth.DayOfWeek);
+            var lastOfMonth = firstOfMonth.AddMonths(1).AddDays(-1);
+            var gridEnd = lastOfMonth.AddDays(6 - (int)lastOfMonth.DayOfWeek);
+
+            for (var d = gridStart; d <= gridEnd; d = d.AddDays(1))
+            {
+                yield return d;
+            }
+        }
+    }
+
+    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+}

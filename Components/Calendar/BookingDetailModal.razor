@@ -1,0 +1,74 @@
+@using FacilityScheduler.Domain
+
+@if (Group is { Count: > 0 })
+{
+    var first = Group[0];
+    <div @onclick="() => OnClose.InvokeAsync()" style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div @onclick:stopPropagation="true" style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:380px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
+                <span style="font-size:15px;font-weight:600;color:#1e2a33">@(string.IsNullOrWhiteSpace(first.RenterName) ? first.Category.ToString() : first.RenterName)</span>
+                <span style="background:@CalendarStyles.CategoryLightBg(first.Category);color:@CalendarStyles.CategoryColor(first.Category);font-size:10px;font-weight:600;padding:2px 9px;border-radius:10px">@first.State</span>
+            </div>
+            <div style="font-size:11px;color:#5a7183;margin-bottom:12px">@first.Start.ToString("dddd, MMM d, h:mmtt")-@first.End.ToString("h:mmtt")</div>
+
+            <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                <span style="color:#5a7183">Sheets</span><span style="color:#1e2a33">@string.Join(", ", Group.Select(g => SheetLabel(g.SheetMailbox)))</span>
+            </div>
+            <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                <span style="color:#5a7183">Category</span><span style="color:#1e2a33">@first.Category</span>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(first.RenterPhone))
+            {
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                    <span style="color:#5a7183">Phone</span><span style="color:#1e2a33">@first.RenterPhone</span>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(first.RenterEmail))
+            {
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                    <span style="color:#5a7183">Email</span><span style="color:#1e2a33">@first.RenterEmail</span>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(first.Notes))
+            {
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                    <span style="color:#5a7183">Notes</span><span style="color:#1e2a33">@first.Notes</span>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(first.BookedBy))
+            {
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                    <span style="color:#5a7183">Booked by</span><span style="color:#1e2a33">@first.BookedBy</span>
+                </div>
+            }
+
+            <div style="display:flex;gap:8px;margin-top:14px;font-size:11.5px;font-weight:600">
+                <span @onclick="() => OnEdit.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit booking…</span>
+                <span @onclick="() => OnCancelBooking.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Cancel Booking</span>
+                <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+            </div>
+
+            @if (Group.Any(g => g.SeriesMasterId is not null))
+            {
+                <div style="margin-top:10px;text-align:center">
+                    <span @onclick="() => OnCancelSeries.InvokeAsync(Group)" style="font-size:10px;color:#90a0ab;cursor:pointer;text-decoration:underline">Part of a recurring series — cancel the entire series instead</span>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public List<SheetBooking>? Group { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<List<SheetBooking>> OnEdit { get; set; }
+    [Parameter] public EventCallback<List<SheetBooking>> OnCancelBooking { get; set; }
+    [Parameter] public EventCallback<List<SheetBooking>> OnCancelSeries { get; set; }
+
+    private static string SheetLabel(string sheetMailbox)
+    {
+        var localPart = sheetMailbox.Split('@')[0];
+        var digits = new string(localPart.Where(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
+    }
+}

@@ -5,5 +5,7 @@ public enum BookingCategory
     Rental,
     League,
     Event,
+    Bonspiel,
+    Maintenance,
     Other
 }

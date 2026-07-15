@@ -1,0 +1,112 @@
+@using FacilityScheduler.Domain
+
+<div style="max-width:1000px">
+    @foreach (var ce in ActiveClubEvents)
+    {
+        <div style="display:flex;align-items:center;gap:8px;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:11.5px;font-weight:600;background:@(ce.MarksSheetsUnavailable ? "#fdf1f0" : CalendarStyles.ClubEventCategoryLightBg(ce.Category));color:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:1px solid @(ce.MarksSheetsUnavailable ? "#e8b4ae" : CalendarStyles.ClubEventCategoryColor(ce.Category))">
+            <span>@ClubEventBannerText(ce)</span>
+        </div>
+    }
+    <div style="display:flex;gap:3px;font-size:10px">
+        <div style="width:52px;flex-shrink:0">
+            <div style="height:17px"></div>
+            @foreach (var hour in HourRows)
+            {
+                <div style="height:@(RowHeightPx)px;color:#90a0ab;font-size:9.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">@FormatHour(hour)</div>
+                <div style="height:@(RowGapPx)px"></div>
+            }
+        </div>
+        @foreach (var sheet in Sheets.All)
+        {
+            <div style="flex:1;min-width:0">
+                <div style="text-align:center;color:#5a7183;font-weight:600;height:17px">@SheetLabel(sheet)</div>
+                <div style="position:relative">
+                    @foreach (var hour in HourRows)
+                    {
+                        var slotStart = Date.Date.AddHours(hour);
+                        <div @onclick="() => OnSlotClick.InvokeAsync((sheet, slotStart))"
+                             style="box-sizing:border-box;height:@(RowHeightPx)px;margin-bottom:@(RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3;cursor:pointer">
+                        </div>
+                    }
+                    @foreach (var booking in BookingsForSheet(sheet))
+                    {
+                        <div @onclick="() => OnBookingClick.InvokeAsync(booking)"
+                             style="box-sizing:border-box;position:absolute;top:@(TopPx(booking))px;left:0;right:0;height:@(HeightPx(booking))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(booking);border:@CalendarStyles.BorderStyle(booking);padding:2px 6px;overflow:hidden;cursor:pointer">
+                            <div style="font-size:9.5px;font-weight:600;color:@CalendarStyles.TextColorStyle(booking)">@Title(booking)</div>
+                            <div style="font-size:8.8px;color:@CalendarStyles.TextColorStyle(booking);opacity:.85">@TimeRange(booking)</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+
+    <div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:#5a7183;flex-wrap:wrap">
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#eaf1f8;border:1.5px dashed #2d5f8a;vertical-align:-2px"></span> Open for rental — click to book</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#2d5f8a;vertical-align:-2px"></span> Booked</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#4a8a5f;vertical-align:-2px"></span> League</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#a05fa8;vertical-align:-2px"></span> Event</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#c2622f;vertical-align:-2px"></span> Bonspiel</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#8a97a3;vertical-align:-2px"></span> Maintenance</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#9c9690;vertical-align:-2px"></span> Other</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#f6f8f9;border:1px solid #eef1f3;vertical-align:-2px"></span> No ice time — click to book anyway</span>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public List<SheetBooking> Bookings { get; set; } = [];
+    [Parameter] public List<ClubEvent> ClubEvents { get; set; } = [];
+    [Parameter, EditorRequired] public DateTime Date { get; set; }
+    [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
+    [Parameter] public EventCallback<(string Sheet, DateTime Start)> OnSlotClick { get; set; }
+
+    private List<ClubEvent> ActiveClubEvents =>
+        ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date).ToList();
+
+    // Purely informational - no change to sheet booking/conflict logic here, matching the Club
+    // Events architecture decision D13 ("no cross-check in either direction").
+    private static string ClubEventBannerText(ClubEvent ce)
+    {
+        var dateText = ce.IsAllDay
+            ? (ce.Start.Date == ce.End.Date ? ce.Start.ToString("MMM d") : $"{ce.Start:MMM d}-{ce.End:MMM d}")
+            : $"{ce.Start:MMM d, h:mmtt}-{ce.End:h:mmtt}";
+
+        return ce.MarksSheetsUnavailable ? $"{dateText}: {ce.Title} - all sheets reserved" : $"{dateText}: {ce.Title}";
+    }
+
+    private static readonly int[] HourRows = Enumerable.Range(6, 18).ToArray(); // 6am - 11pm
+    private const double RowHeightPx = 34;
+    private const double RowGapPx = 3;
+    private static readonly int FirstHour = HourRows[0];
+    private static readonly int LastHour = HourRows[^1] + 1; // exclusive upper bound (midnight cap)
+
+    private List<SheetBooking> BookingsForSheet(string sheet) =>
+        Bookings.Where(b => b.SheetMailbox == sheet).ToList();
+
+    private static double TopPx(SheetBooking b)
+    {
+        var startHour = Math.Max(b.Start.Hour, FirstHour);
+        return (startHour - FirstHour) * (RowHeightPx + RowGapPx);
+    }
+
+    private static double HeightPx(SheetBooking b)
+    {
+        var startHour = Math.Max(b.Start.Hour, FirstHour);
+        var endHour = Math.Min(b.End.Hour == 0 ? 24 : b.End.Hour, LastHour);
+        var hours = Math.Max(1, endHour - startHour);
+        return hours * RowHeightPx + (hours - 1) * RowGapPx;
+    }
+
+    private static string SheetLabel(string sheetMailbox)
+    {
+        var localPart = sheetMailbox.Split('@')[0];
+        var digits = new string(localPart.Where(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
+    }
+
+    private static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
+
+    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+
+    private static string TimeRange(SheetBooking b) => $"{b.Start:h:mmtt}-{b.End:h:mmtt}";
+}

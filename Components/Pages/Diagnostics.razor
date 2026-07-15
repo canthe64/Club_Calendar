@@ -77,8 +77,7 @@
                 Category = BookingCategory.Rental,
                 State = BookingState.Hold,
                 RenterName = "Spike Test Renter",
-                RenterContact = "555-0100",
-                Price = 42.50m,
+                RenterPhone = "555-0100",
                 Notes = "SPIKE TEST - delete me",
                 BookedBy = "Diagnostics"
             };
@@ -96,7 +95,7 @@
 
             var createReadBackOk = afterCreate is { State: BookingState.Hold, Category: BookingCategory.Rental }
                 && afterCreate.RenterName == booking.RenterName
-                && afterCreate.Price == booking.Price
+                && afterCreate.RenterPhone == booking.RenterPhone
                 && afterCreate.BookedBy == booking.BookedBy;
 
             if (!createReadBackOk)
@@ -104,7 +103,7 @@
                 _results.Add(new SpikeResult(
                     "Booking service round-trip",
                     "FAILED at read-back",
-                    $"Created event but fields didn't round-trip correctly. State={afterCreate?.State}, Category={afterCreate?.Category}, RenterName={afterCreate?.RenterName}, Price={afterCreate?.Price}, BookedBy={afterCreate?.BookedBy}"));
+                    $"Created event but fields didn't round-trip correctly. State={afterCreate?.State}, Category={afterCreate?.Category}, RenterName={afterCreate?.RenterName}, RenterPhone={afterCreate?.RenterPhone}, BookedBy={afterCreate?.BookedBy}"));
                 return;
             }
 
