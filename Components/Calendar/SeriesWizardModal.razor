@@ -40,6 +40,10 @@
                                     @DayGridSheetLabel(sheet)
                                 </span>
                             }
+                            <span @onclick="SelectAllSheets"
+                                  style="border:1px dashed #2d5f8a;color:#2d5f8a;padding:5px 10px;border-radius:6px;font-weight:600;cursor:pointer">
+                                All Sheets
+                            </span>
                         </div>
                     </div>
 
@@ -60,19 +64,19 @@
                     <div style="display:flex;gap:8px;align-items:end">
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
-                            <select value="@Draft.StartHour" @onchange="OnStartHourChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
-                                @foreach (var h in HourOptions)
+                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
-                                    <option value="@h">@FormatHour(h)</option>
+                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
                                 }
                             </select>
                         </div>
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
-                            <select value="@Draft.EndHour" @onchange="OnEndHourChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
-                                @foreach (var h in HourOptions)
+                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
-                                    <option value="@h">@FormatHour(h)</option>
+                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
                                 }
                             </select>
                         </div>
@@ -125,7 +129,7 @@
                 <div style="font-size:11px;color:#5a7183;margin:10px 0">
                     <b style="color:#1e2a33">@(string.IsNullOrWhiteSpace(Draft.RenterName) ? Draft.Category.ToString() : Draft.RenterName)</b>
                     · @string.Join(", ", Draft.SelectedSheets.Select(DayGridSheetLabel))
-                    · @FormatHour(Draft.StartHour)-@FormatHour(Draft.EndHour)
+                    · @CalendarStyles.FormatMinutes(Draft.StartMinutes)-@CalendarStyles.FormatMinutes(Draft.EndMinutes)
                 </div>
                 <div style="display:flex;align-items:center;gap:6px;background:@(ActiveConflictCount == 0 ? "#eaf6ec" : "#fdf1f0");border:1px solid @(ActiveConflictCount == 0 ? "#a8d5b5" : "#e8b4ae");border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px;font-weight:600;color:@(ActiveConflictCount == 0 ? "#2c7a43" : "#a02c21")">
                     @(ActiveConflictCount == 0 ? "✓ No conflicts — clear to create" : $"⚠ {ActiveConflictCount} date(s) still have conflicts")
@@ -171,9 +175,8 @@
     [Parameter] public EventCallback OnCreate { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
-    private static readonly int[] HourOptions = Enumerable.Range(6, 18).ToArray();
-
-    private bool HasValidSelection => Draft.SelectedSheets.Count > 0
+    private bool HasValidSelection => Draft.Category.HasValue
+        && Draft.SelectedSheets.Count > 0
         && Draft.LastDate.Date >= Draft.FirstDate.Date
         && !string.IsNullOrWhiteSpace(Draft.RenterName)
         && (Draft.Category != BookingCategory.Rental || Draft.CreateAsConfirmed.HasValue);
@@ -181,6 +184,7 @@
     private bool CanPreview => HasValidSelection && !IsLoadingPreview;
 
     private string ValidationMessage =>
+        !Draft.Category.HasValue ? "Choose a category." :
         Draft.SelectedSheets.Count == 0 ? "Select at least one sheet." :
         Draft.LastDate.Date < Draft.FirstDate.Date ? "The last date must be on or after the first date." :
         string.IsNullOrWhiteSpace(Draft.RenterName) ? "Event title is required." :
@@ -200,6 +204,8 @@
             Draft.SelectedSheets.Add(sheet);
         }
     }
+
+    private void SelectAllSheets() => Draft.SelectedSheets = [.. Sheets.All];
 
     private void ToggleSkip(DateTime date)
     {
@@ -225,23 +231,21 @@
         }
     }
 
-    private void OnStartHourChanged(ChangeEventArgs e)
+    private void OnStartMinutesChanged(ChangeEventArgs e)
     {
-        if (int.TryParse(e.Value?.ToString(), out var h))
+        if (int.TryParse(e.Value?.ToString(), out var m))
         {
-            Draft.StartHour = h;
+            Draft.StartMinutes = m;
         }
     }
 
-    private void OnEndHourChanged(ChangeEventArgs e)
+    private void OnEndMinutesChanged(ChangeEventArgs e)
     {
-        if (int.TryParse(e.Value?.ToString(), out var h))
+        if (int.TryParse(e.Value?.ToString(), out var m))
         {
-            Draft.EndHour = h;
+            Draft.EndMinutes = m;
         }
     }
-
-    private static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
 
     private static string DayGridSheetLabel(string sheetMailbox)
     {

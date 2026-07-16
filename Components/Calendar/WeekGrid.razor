@@ -6,33 +6,37 @@
         var dayClubEvents = ClubEvents.Where(ce => ce.Start.Date <= day.Date && day.Date <= ce.End.Date).ToList();
         var dayBookings = Bookings
             .Where(b => b.Start.Date == day.Date)
-            .GroupBy(b => b.BookingGroupId)
+            .GroupBy(DedupeKey)
             .Select(g => g.First())
-            .OrderBy(b => b.Start)
             .ToList();
+        var dayItems = CombineForDay(dayClubEvents, dayBookings, day.Date);
         <div style="display:flex;flex-direction:column;gap:4px;min-height:200px;border:1px solid #e7ecef;border-radius:6px;padding:6px;background:#fff">
             <div @onclick="() => OnDayClick.InvokeAsync(day)" style="text-align:center;padding-bottom:4px;border-bottom:1px solid #f2f5f7;cursor:pointer">
                 <div style="font-weight:600;color:#1e2a33;font-size:11.5px">@day.ToString("ddd")</div>
                 <div style="color:#90a0ab;font-size:9.5px">@day.ToString("MMM d")</div>
             </div>
-            @foreach (var ce in dayClubEvents)
-            {
-                <div style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border-radius:4px;padding:3px 6px;font-size:9.5px;font-weight:600;line-height:1.35">
-                    @ce.Title
-                </div>
-            }
-            @if (dayBookings.Count == 0 && dayClubEvents.Count == 0)
+            @if (dayItems.Count == 0)
             {
                 <div style="color:#c1ccd4;font-size:9.5px;text-align:center;padding:10px 0">no ice activity</div>
             }
             else
             {
-                @foreach (var b in dayBookings)
+                @foreach (var item in dayItems)
                 {
-                    <div @onclick="() => OnBookingClick.InvokeAsync(b)"
-                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:4px;padding:3px 6px;font-size:9.5px;font-weight:600;line-height:1.35;cursor:pointer">
-                        @Title(b) @b.Start.ToString("h:mmtt")
-                    </div>
+                    @if (item.ClubEvent is { } ce)
+                    {
+                        <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
+                             style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border-radius:4px;padding:3px 6px;font-size:9.5px;font-weight:600;line-height:1.35;cursor:pointer">
+                            @ce.Title
+                        </div>
+                    }
+                    else if (item.Booking is { } b)
+                    {
+                        <div @onclick="() => OnBookingClick.InvokeAsync(b)"
+                             style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:4px;padding:3px 6px;font-size:9.5px;font-weight:600;line-height:1.35;cursor:pointer">
+                            @Title(b) @b.Start.ToString("h:mmtt")
+                        </div>
+                    }
                 }
             }
         </div>
@@ -44,9 +48,31 @@
     [Parameter] public List<ClubEvent> ClubEvents { get; set; } = [];
     [Parameter, EditorRequired] public DateTime WeekStart { get; set; }
     [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
+    [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
 
     private IEnumerable<DateTime> WeekDays => Enumerable.Range(0, 7).Select(i => WeekStart.Date.AddDays(i));
 
     private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+
+    // BookingGroupId doesn't reliably read back for untouched occurrences of a recurring series
+    // (only set on the series master, not proven to inherit down to occurrences) - they default to
+    // Guid.Empty. Grouping directly on that would incorrectly merge multiple UNRELATED bookings that
+    // all happen to share the same empty default into one, hiding all but one. Falling back to
+    // (SheetMailbox, EventId) - always unique per booking - for the empty case means only bookings
+    // that share a genuine, real group id ever get merged.
+    private static string DedupeKey(SheetBooking b) =>
+        b.BookingGroupId != Guid.Empty ? b.BookingGroupId.ToString() : $"{b.SheetMailbox}|{b.EventId}";
+
+    // Merges a day's club events and bookings into one chronologically-ordered list. All-day club
+    // events sort as if occurring at midnight (first); timed club events and bookings interleave by
+    // their actual Start. Mirrors MonthGrid's own CombineForDay - not extracted to a shared helper
+    // since both grids already independently mirror DedupeKey/Title the same way.
+    private static List<(ClubEvent? ClubEvent, SheetBooking? Booking)> CombineForDay(
+        List<ClubEvent> clubEvents, List<SheetBooking> bookings, DateTime dayDate)
+    {
+        var events = clubEvents.Select(ce => (SortKey: ce.IsAllDay ? dayDate : ce.Start, ClubEvent: (ClubEvent?)ce, Booking: (SheetBooking?)null));
+        var books = bookings.Select(b => (SortKey: b.Start, ClubEvent: (ClubEvent?)null, Booking: (SheetBooking?)b));
+        return events.Concat(books).OrderBy(i => i.SortKey).Select(i => (i.ClubEvent, i.Booking)).ToList();
+    }
 }

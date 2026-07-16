@@ -3,7 +3,8 @@
 <div style="max-width:1000px">
     @foreach (var ce in ActiveClubEvents)
     {
-        <div style="display:flex;align-items:center;gap:8px;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:11.5px;font-weight:600;background:@(ce.MarksSheetsUnavailable ? "#fdf1f0" : CalendarStyles.ClubEventCategoryLightBg(ce.Category));color:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:1px solid @(ce.MarksSheetsUnavailable ? "#e8b4ae" : CalendarStyles.ClubEventCategoryColor(ce.Category))">
+        <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
+             style="display:flex;align-items:center;gap:8px;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:11.5px;font-weight:600;background:@(ce.MarksSheetsUnavailable ? "#fdf1f0" : CalendarStyles.ClubEventCategoryLightBg(ce.Category));color:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:1px solid @(ce.MarksSheetsUnavailable ? "#e8b4ae" : CalendarStyles.ClubEventCategoryColor(ce.Category));cursor:pointer">
             <span>@ClubEventBannerText(ce)</span>
         </div>
     }
@@ -58,10 +59,15 @@
     [Parameter] public List<ClubEvent> ClubEvents { get; set; } = [];
     [Parameter, EditorRequired] public DateTime Date { get; set; }
     [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
+    [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<(string Sheet, DateTime Start)> OnSlotClick { get; set; }
 
+    // All-day events float to the top (sorted as if occurring at midnight); timed events follow by
+    // their actual Start - same convention as MonthGrid/WeekGrid's CombineForDay.
     private List<ClubEvent> ActiveClubEvents =>
-        ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date).ToList();
+        ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date)
+            .OrderBy(ce => ce.IsAllDay ? Date.Date : ce.Start)
+            .ToList();
 
     // Purely informational - no change to sheet booking/conflict logic here, matching the Club
     // Events architecture decision D13 ("no cross-check in either direction").
@@ -79,22 +85,29 @@
     private const double RowGapPx = 3;
     private static readonly int FirstHour = HourRows[0];
     private static readonly int LastHour = HourRows[^1] + 1; // exclusive upper bound (midnight cap)
+    private const double PxPerHour = RowHeightPx + RowGapPx;
 
     private List<SheetBooking> BookingsForSheet(string sheet) =>
         Bookings.Where(b => b.SheetMailbox == sheet).ToList();
 
-    private static double TopPx(SheetBooking b)
+    // Hours-from-midnight as a double (not b.Start.Hour) so a half-hour start/end (e.g. 6:30 PM)
+    // positions correctly instead of rounding down to the containing hour. Measured from the grid's
+    // own Date rather than b.Start.Date/b.End.Date so a booking ending at midnight reads as 24.0,
+    // not 0.0.
+    private double HoursFromMidnight(DateTime dt) => (dt - Date.Date).TotalHours;
+
+    private double TopPx(SheetBooking b)
     {
-        var startHour = Math.Max(b.Start.Hour, FirstHour);
-        return (startHour - FirstHour) * (RowHeightPx + RowGapPx);
+        var start = Math.Max(HoursFromMidnight(b.Start), FirstHour);
+        return (start - FirstHour) * PxPerHour;
     }
 
-    private static double HeightPx(SheetBooking b)
+    private double HeightPx(SheetBooking b)
     {
-        var startHour = Math.Max(b.Start.Hour, FirstHour);
-        var endHour = Math.Min(b.End.Hour == 0 ? 24 : b.End.Hour, LastHour);
-        var hours = Math.Max(1, endHour - startHour);
-        return hours * RowHeightPx + (hours - 1) * RowGapPx;
+        var start = Math.Max(HoursFromMidnight(b.Start), FirstHour);
+        var end = Math.Min(HoursFromMidnight(b.End), LastHour);
+        var hours = Math.Max(0.5, end - start);
+        return hours * PxPerHour - RowGapPx;
     }
 
     private static string SheetLabel(string sheetMailbox)

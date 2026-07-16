@@ -73,4 +73,24 @@ public static class CalendarStyles
         ClubEventCategory.Other => "#f1efec",
         _ => "#f1efec"
     };
+
+    /// <summary>
+    /// Half-hour increments from 6:00 AM through midnight (inclusive), shared by every booking/
+    /// series/club-event time picker. Midnight is expressed as 1440 (minutes from the anchor day's
+    /// midnight) rather than 0, so it reads as the end of the current day, not the start of it -
+    /// unambiguous here since the range never goes below 6:00 AM.
+    /// </summary>
+    public static readonly int[] TimeOptionsMinutes =
+        Enumerable.Range(12, 37).Select(i => i * 30).ToArray();
+
+    public static string FormatMinutes(int minutesFromMidnight)
+    {
+        if (minutesFromMidnight >= 24 * 60)
+        {
+            return "Midnight";
+        }
+
+        var t = new DateTime(1, 1, 1, 0, 0, 0).AddMinutes(minutesFromMidnight);
+        return t.ToString(minutesFromMidnight % 60 == 0 ? "h tt" : "h:mm tt");
+    }
 }

@@ -38,6 +38,32 @@ anything from the internal booking data directly (architecture doc §5.4). Leagu
 Maintenance, and Other category bookings are not shown either - only explicit Rental holds mean
 "open for the public to book."
 
+## Full calendar page (embeddable via iframe)
+
+There's also a complete, anonymous month-calendar page at `https://YOUR-APP-HOSTNAME/public/calendar`
+- Prev/Next/Today navigation, every category shown (League, Bonspiel, Maintenance, Other, Rental -
+  not just open rental slots), plus club events. This is the *primary* public view; the list-style
+  widget above is a subordinate, rental-availability-focused feature.
+
+To embed it directly in a page instead of linking to it, use a plain iframe:
+
+```html
+<iframe src="https://YOUR-APP-HOSTNAME/public/calendar" style="width:100%;height:800px;border:0"></iframe>
+```
+
+**What it shows:** each entry's title (the same title staff see internally - e.g. a league's name,
+or a renter's name if one happens to be in the title field) and, when tapped, its date/time. The
+one deliberate exception: a *confirmed rental's* renter name is not stripped out programmatically -
+keeping that private on confirmed rentals is handled by staff practice (i.e., what staff choose to
+type in that field), not by this page.
+
+**Security note - possible future hardening:** this page currently has no restriction on who can
+embed it in an iframe (no `Content-Security-Policy: frame-ancestors` set). In practice this means
+any website, not just the club's own, could iframe it. This was a deliberate choice for now (simplicity
+over restricting to a specific domain), but worth revisiting - especially once other club members are
+using the app and its public surface gets more scrutiny - by adding a `frame-ancestors` directive
+scoped to the club's actual website domain.
+
 ## If something looks wrong
 
 - If the widget shows "Availability is temporarily unavailable," check that the app is running and

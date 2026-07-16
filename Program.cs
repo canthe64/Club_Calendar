@@ -96,8 +96,16 @@ app.UseAntiforgery();
 // needed to load one (the actual sign-in screen is hosted by Microsoft, not styled by this app).
 app.MapStaticAssets().AllowAnonymous();
 app.MapRazorPages();
+// Do NOT call .AllowAnonymous() on this registration (tried once, reverted 2026-07-15):
+// MapRazorComponents<App>() maps every routable component through one shared endpoint set, and
+// ASP.NET Core's "AllowAnonymous always wins" rule means marking it anonymous here disables
+// authorization for every page, not just an intended public one - live-verified to fully expose
+// every staff page. Any future public/anonymous page belongs outside this component tree entirely
+// (see PublicCalendarEndpoint/PublicAvailabilityEndpoints - plain endpoints, no Blazor circuit),
+// not carved out of the shared circuit's own authorization.
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.MapPublicAvailabilityEndpoints();
+app.MapPublicCalendarEndpoint();
 
 app.Run();

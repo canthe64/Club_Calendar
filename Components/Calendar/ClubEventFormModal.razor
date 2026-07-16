@@ -49,19 +49,19 @@
                     <div style="display:flex;gap:8px">
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
-                            <select value="@Draft.StartHour" @onchange="OnStartHourChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
-                                @foreach (var h in HourOptions)
+                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
-                                    <option value="@h">@FormatHour(h)</option>
+                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
                                 }
                             </select>
                         </div>
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
-                            <select value="@Draft.EndHour" @onchange="OnEndHourChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
-                                @foreach (var h in HourOptions)
+                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
-                                    <option value="@h">@FormatHour(h)</option>
+                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
                                 }
                             </select>
                         </div>
@@ -116,14 +116,15 @@
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnDelete { get; set; }
 
-    private static readonly int[] HourOptions = Enumerable.Range(6, 18).ToArray();
-
     private bool _confirmingDelete;
     private bool _wasOpen;
 
-    private bool CanSave => !string.IsNullOrWhiteSpace(Draft.Title) && Draft.EndDate.Date >= Draft.StartDate.Date;
+    private bool CanSave => Draft.Category.HasValue
+        && !string.IsNullOrWhiteSpace(Draft.Title)
+        && Draft.EndDate.Date >= Draft.StartDate.Date;
 
     private string ValidationMessage =>
+        !Draft.Category.HasValue ? "Choose a category." :
         string.IsNullOrWhiteSpace(Draft.Title) ? "Event title is required." :
         "The end date must be on or after the start date.";
 
@@ -155,21 +156,19 @@
         }
     }
 
-    private void OnStartHourChanged(ChangeEventArgs e)
+    private void OnStartMinutesChanged(ChangeEventArgs e)
     {
-        if (int.TryParse(e.Value?.ToString(), out var h))
+        if (int.TryParse(e.Value?.ToString(), out var m))
         {
-            Draft.StartHour = h;
+            Draft.StartMinutes = m;
         }
     }
 
-    private void OnEndHourChanged(ChangeEventArgs e)
+    private void OnEndMinutesChanged(ChangeEventArgs e)
     {
-        if (int.TryParse(e.Value?.ToString(), out var h))
+        if (int.TryParse(e.Value?.ToString(), out var m))
         {
-            Draft.EndHour = h;
+            Draft.EndMinutes = m;
         }
     }
-
-    private static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
 }

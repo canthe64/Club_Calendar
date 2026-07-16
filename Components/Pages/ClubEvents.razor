@@ -120,7 +120,7 @@
 
     private async Task SaveDraft()
     {
-        if (_isSaving || string.IsNullOrWhiteSpace(_draft.Title) || _draft.EndDate.Date < _draft.StartDate.Date)
+        if (_isSaving || !_draft.Category.HasValue || string.IsNullOrWhiteSpace(_draft.Title) || _draft.EndDate.Date < _draft.StartDate.Date)
         {
             return;
         }
@@ -131,38 +131,15 @@
         try
         {
             var bookedBy = await GetCurrentUserNameAsync();
+            var clubEvent = _draft.ToClubEvent(bookedBy);
 
             if (_draft.EditingEvent is null)
             {
-                var newEvent = new ClubEvent
-                {
-                    Title = _draft.Title!,
-                    Category = _draft.Category,
-                    Start = _draft.Start,
-                    End = _draft.End,
-                    IsAllDay = _draft.IsAllDay,
-                    MarksSheetsUnavailable = _draft.MarksSheetsUnavailable,
-                    Notes = _draft.Notes,
-                    BookedBy = bookedBy
-                };
-                await EventService.CreateAsync(newEvent);
+                await EventService.CreateAsync(clubEvent);
             }
             else
             {
-                var updated = new ClubEvent
-                {
-                    EventId = _draft.EditingEvent.EventId,
-                    ICalUId = _draft.EditingEvent.ICalUId,
-                    Title = _draft.Title!,
-                    Category = _draft.Category,
-                    Start = _draft.Start,
-                    End = _draft.End,
-                    IsAllDay = _draft.IsAllDay,
-                    MarksSheetsUnavailable = _draft.MarksSheetsUnavailable,
-                    Notes = _draft.Notes,
-                    BookedBy = _draft.EditingEvent.BookedBy
-                };
-                await EventService.UpdateAsync(updated);
+                await EventService.UpdateAsync(clubEvent);
             }
 
             CloseForm();

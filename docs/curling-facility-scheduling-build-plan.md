@@ -96,7 +96,9 @@ No consolidated views, no cache, no Club Events integration yet — this phase i
 
 ---
 
-## Phase 5 — Multi-sheet + consolidated views
+## Phase 5 — Multi-sheet + consolidated views — BACKLOGGED (2026-07-16)
+
+**Struck from the active plan per explicit user decision (2026-07-16).** Not rejected outright - deferred pending real usage/feedback once other club members start using the app (see the "project trajectory" note below and in project memory). Revisit only if raised again.
 
 **Goal:** the actual differentiator — views that don't map 1:1 to a single Exchange calendar.
 

@@ -1,6 +1,8 @@
 using FacilityScheduler.Domain;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
+using System.Collections.Concurrent;
 
 namespace FacilityScheduler.Services;
 
@@ -11,7 +13,7 @@ namespace FacilityScheduler.Services;
 /// sheet bookings nor between club events themselves) - build-simplicity is the explicit design
 /// choice here, not an oversight.
 /// </summary>
-public class ClubEventService(GraphServiceClient graphClient)
+public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache)
 {
     private const string PropertyGuid = FacilityGraphConventions.PropertyGuid;
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name ClubEventBookedBy";
@@ -22,12 +24,28 @@ public class ClubEventService(GraphServiceClient graphClient)
         $"singleValueExtendedProperties($filter=id eq '{BookedByPropertyId}' or id eq '{MarksUnavailablePropertyId}')"
     ];
 
+    // Phase 7: same short-TTL read cache as SheetBookingService.GetBookingsForAllSheetsAsync, for the
+    // same reason - this service has no conflict-check path at all (D13), so unlike SheetBookingService
+    // there's no "never cache this" method to carve out; the whole read surface is just GetEventsAsync.
+    private readonly ConcurrentDictionary<string, byte> _viewCacheKeys = new();
+    private static readonly TimeSpan ViewCacheTtl = TimeSpan.FromSeconds(30);
+
+    private void InvalidateViewCache()
+    {
+        foreach (var key in _viewCacheKeys.Keys)
+        {
+            cache.Remove(key);
+        }
+        _viewCacheKeys.Clear();
+    }
+
     public async Task<ClubEvent> CreateAsync(ClubEvent clubEvent, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
         var created = await graphClient.Users[Sheets.ClubEvents].Events.PostAsync(graphEvent, cancellationToken: ct);
         clubEvent.EventId = created?.Id;
         clubEvent.ICalUId = created?.ICalUId;
+        InvalidateViewCache();
         return clubEvent;
     }
 
@@ -35,15 +53,28 @@ public class ClubEventService(GraphServiceClient graphClient)
     {
         var graphEvent = ToGraphEvent(clubEvent);
         await graphClient.Users[Sheets.ClubEvents].Events[clubEvent.EventId!].PatchAsync(graphEvent, cancellationToken: ct);
+        InvalidateViewCache();
     }
 
     public async Task CancelAsync(string eventId, CancellationToken ct = default)
     {
         await graphClient.Users[Sheets.ClubEvents].Events[eventId].DeleteAsync(cancellationToken: ct);
+        InvalidateViewCache();
     }
 
+    /// <summary>Read-cached (Phase 7, 30s TTL) - used by Calendar.razor, ClubEvents.razor, both
+    /// PublicAvailabilityService methods, and Calendar.razor's closure-conflict check. A brief cache
+    /// window here is acceptable even for the closure check: invalidation fires the instant a closure
+    /// is created through this app, so staleness only applies to a closure added directly in Outlook -
+    /// the same caveat that already applies to every other cached read.</summary>
     public async Task<List<ClubEvent>> GetEventsAsync(DateTime start, DateTime end, CancellationToken ct = default)
     {
+        var cacheKey = $"clubevents:{start:O}:{end:O}";
+        if (cache.TryGetValue(cacheKey, out List<ClubEvent>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
         var allEvents = new List<Event>();
         var response = await graphClient.Users[Sheets.ClubEvents].CalendarView.GetAsync(config =>
         {
@@ -70,7 +101,10 @@ public class ClubEventService(GraphServiceClient graphClient)
                 : null;
         }
 
-        return allEvents.Select(FromGraphEvent).ToList();
+        var result = allEvents.Select(FromGraphEvent).ToList();
+        cache.Set(cacheKey, result, ViewCacheTtl);
+        _viewCacheKeys[cacheKey] = 0;
+        return result;
     }
 
     private static Event ToGraphEvent(ClubEvent clubEvent)

@@ -8,19 +8,26 @@ namespace FacilityScheduler.Domain;
 public class ClubEventDraft
 {
     public string? Title { get; set; }
-    public ClubEventCategory Category { get; set; } = ClubEventCategory.Bonspiel;
+
+    /// <summary>Null until staff explicitly picks a category - never silently defaults to one on a
+    /// new club event.</summary>
+    public ClubEventCategory? Category { get; set; }
 
     public bool IsAllDay { get; set; } = true;
     public DateTime StartDate { get; set; } = DateTime.UtcNow.Date.AddDays(1);
     public DateTime EndDate { get; set; } = DateTime.UtcNow.Date.AddDays(1);
-    public int StartHour { get; set; } = 9;
-    public int EndHour { get; set; } = 17;
+
+    /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
+    /// 1440 represents midnight at the end of the day, not the start of it. Only meaningful when
+    /// <see cref="IsAllDay"/> is false.</summary>
+    public int StartMinutes { get; set; } = 9 * 60;
+    public int EndMinutes { get; set; } = 17 * 60;
 
     public bool MarksSheetsUnavailable { get; set; }
     public string? Notes { get; set; }
 
-    public DateTime Start => IsAllDay ? StartDate.Date : StartDate.Date.AddHours(StartHour);
-    public DateTime End => IsAllDay ? EndDate.Date : EndDate.Date.AddHours(EndHour);
+    public DateTime Start => IsAllDay ? StartDate.Date : StartDate.Date.AddMinutes(StartMinutes);
+    public DateTime End => IsAllDay ? EndDate.Date : EndDate.Date.AddMinutes(EndMinutes);
 
     /// <summary>Non-null when editing an existing club event.</summary>
     public ClubEvent? EditingEvent { get; set; }
@@ -28,12 +35,12 @@ public class ClubEventDraft
     public void Reset()
     {
         Title = null;
-        Category = ClubEventCategory.Bonspiel;
+        Category = null;
         IsAllDay = true;
         StartDate = DateTime.UtcNow.Date.AddDays(1);
         EndDate = DateTime.UtcNow.Date.AddDays(1);
-        StartHour = 9;
-        EndHour = 17;
+        StartMinutes = 9 * 60;
+        EndMinutes = 17 * 60;
         MarksSheetsUnavailable = false;
         Notes = null;
         EditingEvent = null;
@@ -46,10 +53,30 @@ public class ClubEventDraft
         IsAllDay = clubEvent.IsAllDay;
         StartDate = clubEvent.Start.Date;
         EndDate = clubEvent.End.Date;
-        StartHour = clubEvent.IsAllDay ? 9 : clubEvent.Start.Hour;
-        EndHour = clubEvent.IsAllDay ? 17 : clubEvent.End.Hour;
+        // Relative to Start's own date so an end time crossing midnight reads as 1440, not 0.
+        StartMinutes = clubEvent.IsAllDay ? 9 * 60 : (int)(clubEvent.Start - clubEvent.Start.Date).TotalMinutes;
+        EndMinutes = clubEvent.IsAllDay ? 17 * 60 : (int)(clubEvent.End - clubEvent.Start.Date).TotalMinutes;
         MarksSheetsUnavailable = clubEvent.MarksSheetsUnavailable;
         Notes = clubEvent.Notes;
         EditingEvent = clubEvent;
     }
+
+    /// <summary>Builds the ClubEvent to send to CreateAsync/UpdateAsync - same mapping regardless of
+    /// caller, so every call site (currently ClubEvents.razor and Calendar.razor) stays in sync
+    /// automatically if a field is ever added. <paramref name="currentUser"/> is only used for a new
+    /// event; editing preserves the original BookedBy rather than overwriting it with whoever made
+    /// this particular edit.</summary>
+    public ClubEvent ToClubEvent(string currentUser) => new()
+    {
+        EventId = EditingEvent?.EventId,
+        ICalUId = EditingEvent?.ICalUId,
+        Title = Title!,
+        Category = Category!.Value,
+        Start = Start,
+        End = End,
+        IsAllDay = IsAllDay,
+        MarksSheetsUnavailable = MarksSheetsUnavailable,
+        Notes = Notes,
+        BookedBy = EditingEvent?.BookedBy ?? currentUser
+    };
 }

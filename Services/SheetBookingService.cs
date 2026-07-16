@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
 using FacilityScheduler.Domain;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
@@ -12,12 +13,32 @@ namespace FacilityScheduler.Services;
 /// Booking Attendant (confirmed via spike, architecture doc D3/S6.1), so this service is the
 /// only thing standing between two overlapping bookings on the same sheet.
 /// </summary>
-public class SheetBookingService(GraphServiceClient graphClient)
+public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache)
 {
     // One semaphore per sheet mailbox, lazily created. Serializes create/confirm/cancel per
     // sheet so the check-then-write conflict check can't race. Adequate at the app's known
     // concurrency (1-2 staff); would need a distributed lock if this ever ran multi-instance.
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> SheetLocks = new();
+
+    // Phase 7: a short-TTL read cache for GetBookingsForAllSheetsAsync only - the "give me
+    // everything in this window, for display" method used by Calendar.razor and
+    // PublicAvailabilityService. Deliberately NOT applied to GetEventsInRangeAsync/GetBookingsAsync,
+    // which every conflict check (CreateAsync, CreateAcrossSheetsAsync, UpdateGroupAsync,
+    // PreviewSeriesConflictsAsync) reads directly - conflict enforcement must always see live data,
+    // never a cached snapshot that could mask a just-created booking. Keys are tracked here (not
+    // static, since this service is registered as a singleton) so a write can invalidate every
+    // outstanding view-cache entry without needing precise per-window overlap logic.
+    private readonly ConcurrentDictionary<string, byte> _viewCacheKeys = new();
+    private static readonly TimeSpan ViewCacheTtl = TimeSpan.FromSeconds(30);
+
+    private void InvalidateViewCache()
+    {
+        foreach (var key in _viewCacheKeys.Keys)
+        {
+            cache.Remove(key);
+        }
+        _viewCacheKeys.Clear();
+    }
 
     // Fixed GUID namespace for this app's custom extended properties. BookedBy and
     // BookingGroupId are named, individually filterable properties; everything display-only
@@ -71,6 +92,7 @@ public class SheetBookingService(GraphServiceClient graphClient)
 
             booking.EventId = created?.Id;
             booking.ICalUId = created?.ICalUId;
+            InvalidateViewCache();
             return BookingResult.Success(booking);
         }
         finally
@@ -137,6 +159,7 @@ public class SheetBookingService(GraphServiceClient graphClient)
                 created.Add(booking);
             }
 
+            InvalidateViewCache();
             return GroupBookingResult.Success(created);
         }
         finally
@@ -152,12 +175,14 @@ public class SheetBookingService(GraphServiceClient graphClient)
     {
         var update = new Event { ShowAs = FreeBusyStatus.Busy };
         await graphClient.Users[sheetMailbox].Events[eventId].PatchAsync(update, cancellationToken: ct);
+        InvalidateViewCache();
         return await GetEventAsync(sheetMailbox, eventId, ct);
     }
 
     public async Task CancelAsync(string sheetMailbox, string eventId, CancellationToken ct = default)
     {
         await graphClient.Users[sheetMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
+        InvalidateViewCache();
     }
 
     /// <summary>
@@ -234,6 +259,7 @@ public class SheetBookingService(GraphServiceClient graphClient)
                 updated.Add(merged);
             }
 
+            InvalidateViewCache();
             return GroupBookingResult.Success(updated);
         }
         finally
@@ -281,6 +307,8 @@ public class SheetBookingService(GraphServiceClient graphClient)
                 await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
             }
         }
+
+        InvalidateViewCache();
     }
 
     /// <summary>
@@ -418,6 +446,7 @@ public class SheetBookingService(GraphServiceClient graphClient)
             }
         }
 
+        InvalidateViewCache();
         return created;
     }
 
@@ -446,6 +475,8 @@ public class SheetBookingService(GraphServiceClient graphClient)
                 // member abort the rest of the group's cancellation.
             }
         }
+
+        InvalidateViewCache();
     }
 
     public async Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct = default)
@@ -456,12 +487,24 @@ public class SheetBookingService(GraphServiceClient graphClient)
 
     /// <summary>Fans out across all 5 sheets in parallel and merges the results - each item
     /// already carries its own SheetMailbox, so callers can group by sheet or by
-    /// BookingGroupId as needed.</summary>
+    /// BookingGroupId as needed. Read-cached (Phase 7, 30s TTL) - this is the view-rendering read
+    /// path (Calendar.razor, PublicAvailabilityService), not a conflict check, so a short-lived
+    /// cached snapshot is safe here even though it never is for GetEventsInRangeAsync/GetBookingsAsync.</summary>
     public async Task<List<SheetBooking>> GetBookingsForAllSheetsAsync(DateTime start, DateTime end, CancellationToken ct = default)
     {
+        var cacheKey = $"sheetbookings:{start:O}:{end:O}";
+        if (cache.TryGetValue(cacheKey, out List<SheetBooking>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
         var tasks = Sheets.All.Select(sheet => GetBookingsAsync(sheet, start, end, ct));
         var results = await Task.WhenAll(tasks);
-        return results.SelectMany(r => r).ToList();
+        var combined = results.SelectMany(r => r).ToList();
+
+        cache.Set(cacheKey, combined, ViewCacheTtl);
+        _viewCacheKeys[cacheKey] = 0;
+        return combined;
     }
 
     private async Task<SheetBooking> GetEventAsync(string sheetMailbox, string eventId, CancellationToken ct)

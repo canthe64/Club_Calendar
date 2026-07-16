@@ -8,22 +8,29 @@ namespace FacilityScheduler.Domain;
 public class BookingDraft
 {
     public HashSet<string> SelectedSheets { get; set; } = [];
-    public BookingCategory Category { get; set; } = BookingCategory.Rental;
+
+    /// <summary>Null until staff explicitly picks a category - never silently defaults to one on a
+    /// new booking (avoids staff mistakenly leaving a booking under whatever category happened to
+    /// be selected last).</summary>
+    public BookingCategory? Category { get; set; }
 
     /// <summary>Null until staff explicitly picks Hold or Confirmed - never silently defaults to
     /// one or the other on a new booking. Only meaningful while <see cref="Category"/> is Rental;
     /// forced to true otherwise.</summary>
     public bool? CreateAsConfirmed { get; set; }
     public DateTime Date { get; set; } = DateTime.UtcNow.Date;
-    public int StartHour { get; set; } = 18;
-    public int EndHour { get; set; } = 20;
+
+    /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
+    /// 1440 represents midnight at the end of <see cref="Date"/>, not the start of it.</summary>
+    public int StartMinutes { get; set; } = 18 * 60;
+    public int EndMinutes { get; set; } = 20 * 60;
     public string? RenterName { get; set; }
     public string? RenterPhone { get; set; }
     public string? RenterEmail { get; set; }
     public string? Notes { get; set; }
 
-    public DateTime Start => Date.Date.AddHours(StartHour);
-    public DateTime End => Date.Date.AddHours(EndHour);
+    public DateTime Start => Date.Date.AddMinutes(StartMinutes);
+    public DateTime End => Date.Date.AddMinutes(EndMinutes);
 
     /// <summary>Non-null when editing an existing booking - the sibling events sharing its BookingGroupId.</summary>
     public List<SheetBooking>? EditingGroup { get; set; }
@@ -53,11 +60,12 @@ public class BookingDraft
     public void Reset(IEnumerable<string>? initialSheets = null, DateTime? initialStart = null)
     {
         SelectedSheets = initialSheets is null ? [] : [.. initialSheets];
-        Category = BookingCategory.Rental;
+        Category = null;
         CreateAsConfirmed = null;
-        Date = (initialStart ?? DateTime.UtcNow.Date.AddDays(1)).Date;
-        StartHour = initialStart?.Hour ?? 18;
-        EndHour = StartHour + 2;
+        var effectiveStart = initialStart ?? DateTime.UtcNow.Date.AddDays(1);
+        Date = effectiveStart.Date;
+        StartMinutes = initialStart.HasValue ? initialStart.Value.Hour * 60 + initialStart.Value.Minute : 18 * 60;
+        EndMinutes = StartMinutes + 120;
         RenterName = null;
         RenterPhone = null;
         RenterEmail = null;
@@ -72,8 +80,10 @@ public class BookingDraft
         Category = first.Category;
         CreateAsConfirmed = first.Category != BookingCategory.Rental || first.State == BookingState.Confirmed;
         Date = first.Start.Date;
-        StartHour = first.Start.Hour;
-        EndHour = first.End.Hour;
+        // Relative to Start's own date (not End's Hour/Minute) so an end time that rolls into the
+        // next calendar day - i.e. midnight - reads as 1440, not 0.
+        StartMinutes = (int)(first.Start - first.Start.Date).TotalMinutes;
+        EndMinutes = (int)(first.End - first.Start.Date).TotalMinutes;
         RenterName = first.RenterName;
         RenterPhone = first.RenterPhone;
         RenterEmail = first.RenterEmail;

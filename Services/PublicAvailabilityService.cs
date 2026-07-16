@@ -51,11 +51,65 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             .ToList();
 
         var eventLabels = clubEvents
-            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
+            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
             .OrderBy(e => e.Start)
             .ToList();
 
         return new PublicAvailabilityResponse(DateTime.UtcNow, openSlots, eventLabels);
+    }
+
+    /// <summary>
+    /// The public month calendar's data - unlike GetAvailabilityAsync (Rental+Hold "available for
+    /// rental" slots only, a subordinate feature), this covers every category and state, reduced to
+    /// just category+time+confirmed-state. The public calendar's primary purpose is letting members
+    /// see what's going on club-wide while unauthenticated, not just where they can rent ice.
+    /// Deliberately does NOT dedupe by BookingGroupId here - a multi-week recurring series shares one
+    /// group id across every date, and deduping across the whole month range (rather than per-day,
+    /// the way the internal MonthGrid does it) would collapse different dates' occurrences into one.
+    /// That dedup happens per-day in the page itself, same as the internal view.
+    /// </summary>
+    public async Task<PublicMonthView> GetMonthViewAsync(DateTime monthAnchor, CancellationToken ct = default)
+    {
+        var gridStart = MonthGridStart(monthAnchor);
+        var gridEnd = MonthGridEnd(monthAnchor).AddDays(1);
+        var cacheKey = $"public-month:{monthAnchor:yyyyMM}";
+
+        if (cache.TryGetValue(cacheKey, out PublicMonthView? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var bookings = await bookingService.GetBookingsForAllSheetsAsync(gridStart, gridEnd, ct);
+        var clubEvents = await clubEventService.GetEventsAsync(gridStart, gridEnd, ct);
+
+        var bookingLabels = bookings
+            .Select(b => new PublicMonthBooking(
+                string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName,
+                b.Category.ToString(),
+                b.Start,
+                b.End,
+                b.State == BookingState.Confirmed))
+            .ToList();
+
+        var eventLabels = clubEvents
+            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
+            .ToList();
+
+        var view = new PublicMonthView(bookingLabels, eventLabels);
+        cache.Set(cacheKey, view, CacheTtl);
+        return view;
+    }
+
+    private static DateTime MonthGridStart(DateTime anchor)
+    {
+        var firstOfMonth = new DateTime(anchor.Year, anchor.Month, 1);
+        return firstOfMonth.AddDays(-(int)firstOfMonth.DayOfWeek);
+    }
+
+    private static DateTime MonthGridEnd(DateTime anchor)
+    {
+        var lastOfMonth = new DateTime(anchor.Year, anchor.Month, 1).AddMonths(1).AddDays(-1);
+        return lastOfMonth.AddDays(6 - (int)lastOfMonth.DayOfWeek);
     }
 
     private static bool Overlaps(SheetBooking booking, ClubEvent closure)

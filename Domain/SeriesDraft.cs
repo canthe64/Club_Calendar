@@ -8,16 +8,22 @@ namespace FacilityScheduler.Domain;
 public class SeriesDraft
 {
     public HashSet<string> SelectedSheets { get; set; } = [];
-    public BookingCategory Category { get; set; } = BookingCategory.League;
+
+    /// <summary>Null until staff explicitly picks a category - never silently defaults to one on a
+    /// new series.</summary>
+    public BookingCategory? Category { get; set; }
 
     /// <summary>Null until staff explicitly picks Hold or Confirmed - never silently defaults to
     /// one or the other. Only meaningful while <see cref="Category"/> is Rental; forced to true
     /// otherwise.</summary>
-    public bool? CreateAsConfirmed { get; set; } = true;
+    public bool? CreateAsConfirmed { get; set; }
     public DateTime FirstDate { get; set; } = DateTime.UtcNow.Date.AddDays(7);
     public DateTime LastDate { get; set; } = DateTime.UtcNow.Date.AddDays(7 * 8);
-    public int StartHour { get; set; } = 19;
-    public int EndHour { get; set; } = 21;
+
+    /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
+    /// 1440 represents midnight at the end of the day, not the start of it.</summary>
+    public int StartMinutes { get; set; } = 19 * 60;
+    public int EndMinutes { get; set; } = 21 * 60;
     public string? RenterName { get; set; }
     public string? RenterPhone { get; set; }
     public string? RenterEmail { get; set; }
@@ -25,8 +31,8 @@ public class SeriesDraft
 
     public HashSet<DateTime> SkippedDates { get; set; } = [];
 
-    public DateTime FirstOccurrenceStart => FirstDate.Date.AddHours(StartHour);
-    public DateTime FirstOccurrenceEnd => FirstDate.Date.AddHours(EndHour);
+    public DateTime FirstOccurrenceStart => FirstDate.Date.AddMinutes(StartMinutes);
+    public DateTime FirstOccurrenceEnd => FirstDate.Date.AddMinutes(EndMinutes);
 
     public void SetCategory(BookingCategory category)
     {
@@ -45,12 +51,12 @@ public class SeriesDraft
     public void Reset()
     {
         SelectedSheets = [];
-        Category = BookingCategory.League;
-        CreateAsConfirmed = true;
+        Category = null;
+        CreateAsConfirmed = null;
         FirstDate = DateTime.UtcNow.Date.AddDays(7);
         LastDate = DateTime.UtcNow.Date.AddDays(7 * 8);
-        StartHour = 19;
-        EndHour = 21;
+        StartMinutes = 19 * 60;
+        EndMinutes = 21 * 60;
         RenterName = null;
         RenterPhone = null;
         RenterEmail = null;
