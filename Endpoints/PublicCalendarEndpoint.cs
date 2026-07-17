@@ -26,11 +26,27 @@ public static class PublicCalendarEndpoint
             var view = await service.GetMonthViewAsync(anchorMonth, ct);
             return Results.Content(RenderPage(anchorMonth, view), "text/html; charset=utf-8");
         })
-        .AllowAnonymous();
+        .AllowAnonymous()
+        .RequireRateLimiting("public-api");
     }
 
-    private static DateTime? ParseMonth(string? month) =>
-        !string.IsNullOrWhiteSpace(month) && DateTime.TryParse(month + "-01", out var parsed) ? parsed : null;
+    // The month is clamped to a window around today, not accepted verbatim: DateTime.TryParse
+    // allows years 0001-9999, i.e. ~120k distinct values - and every previously-unseen month is a
+    // cache miss in GetMonthViewAsync that fans out live Graph calls across every mailbox and adds
+    // a new never-evicted cache entry. Unclamped, an anonymous client iterating months could burn
+    // Graph quota and grow the cache without bound. A year back and two years forward covers every
+    // legitimate use (members browsing the season) while capping the anonymous surface at ~37 keys.
+    private static DateTime? ParseMonth(string? month)
+    {
+        if (string.IsNullOrWhiteSpace(month) || !DateTime.TryParse(month + "-01", out var parsed))
+        {
+            return null;
+        }
+
+        var min = new DateTime(DateTime.UtcNow.Year - 1, DateTime.UtcNow.Month, 1);
+        var max = new DateTime(DateTime.UtcNow.Year + 2, DateTime.UtcNow.Month, 1);
+        return parsed < min ? min : parsed > max ? max : parsed;
+    }
 
     private static string Query(DateTime month) => month.ToString("yyyy-MM");
 

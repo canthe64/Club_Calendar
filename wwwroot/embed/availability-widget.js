@@ -50,10 +50,21 @@
         data.sheetSlots.forEach(function (slot) {
             var row = document.createElement('div');
             row.style.cssText = 'display:flex;gap:10px;align-items:center;border:1px solid #e7ecef;border-radius:6px;padding:7px 10px;font-size:13px';
-            row.innerHTML =
-                '<span style="font-weight:600;color:#2d5f8a">' + slot.sheetLabel + '</span>' +
-                '<span style="color:#1e2a33">' + formatDate(slot.start) + '</span>' +
-                '<span style="color:#5a7183">' + formatTime(slot.start) + ' - ' + formatTime(slot.end) + '</span>';
+            // Built with textContent, never innerHTML interpolation - this script runs on the
+            // club's own website, so any HTML sneaking through server data would be stored XSS
+            // there, not here. sheetLabel is admin-config-derived today, but don't depend on that.
+            var label = document.createElement('span');
+            label.style.cssText = 'font-weight:600;color:#2d5f8a';
+            label.textContent = slot.sheetLabel;
+            var date = document.createElement('span');
+            date.style.cssText = 'color:#1e2a33';
+            date.textContent = formatDate(slot.start);
+            var time = document.createElement('span');
+            time.style.cssText = 'color:#5a7183';
+            time.textContent = formatTime(slot.start) + ' - ' + formatTime(slot.end);
+            row.appendChild(label);
+            row.appendChild(date);
+            row.appendChild(time);
             list.appendChild(row);
         });
         container.appendChild(list);
