@@ -1,4 +1,6 @@
 @using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject FacilityConfiguration Facility
 
 <div style="max-width:1000px">
     @foreach (var ce in ActiveClubEvents)
@@ -17,7 +19,7 @@
                 <div style="height:@(RowGapPx)px"></div>
             }
         </div>
-        @foreach (var sheet in Sheets.All)
+        @foreach (var sheet in Facility.SheetMailboxes)
         {
             <div style="flex:1;min-width:0">
                 <div style="text-align:center;color:#5a7183;font-weight:600;height:17px">@SheetLabel(sheet)</div>

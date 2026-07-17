@@ -1,61 +1,67 @@
 # Facility Scheduling System — Architecture & Design
 
 **Project:** Curling sheet scheduling and availability management on Exchange Online
-**Status:** Design phase — no implementation yet
-**Date:** 2026-07-11 (updated — Club Events feature; stack decided)
+**Status:** As-built. Phases 0–9 complete; Phase 10 (production hardening) in progress.
+**Date:** 2026-07-16 (wholesale rewrite reflecting the actual built system — supersedes the 2026-07-11 pre-build design this document originally described)
 **Author:** Design iteration between club operator and Claude
-**Stack:** .NET / C# (explicitly specified by the operator for this project — see §9, D14)
+**Stack:** .NET / C#, Blazor Server (.NET 10) — see §9, D14
 
 ---
 
 ## 1. Executive Summary
 
-A web-based system for managing the scheduling and availability of curling sheets, built on Microsoft Exchange Online (EXO) resource mailboxes as the system of record. Each sheet is modeled as an EXO resource mailbox; every booking is a calendar event on that mailbox. A custom web application — not Outlook — is the operational interface for staff, providing per-sheet and consolidated availability views, booking management with domain-specific states (e.g., "potential rental hold" vs. "confirmed rental"), and a minimized read-only public view embeddable in the club's CMS website.
+A web-based system for managing the scheduling and availability of curling sheets, built on Microsoft Exchange Online (EXO) resource mailboxes as the system of record. Each sheet is modeled as an EXO resource mailbox; every booking is a calendar event on that mailbox. A custom Blazor Server application — not Outlook — is the operational interface for staff: per-sheet/consolidated calendar views (Month/Week/Day), one-off and recurring bookings spanning multiple sheets at once, a separate whole-club "Club Events" resource, and two distinct public-facing surfaces (a minimized JSON availability API for a thin CMS embed, and a full read-only public calendar page members browse directly).
 
-The design deliberately avoids any adjacent authoritative datastore: all booking data, including rich metadata (renter contact, pricing, notes), lives on the calendar event itself. The only additional infrastructure is a short-lived, disposable read cache.
+The design still avoids any adjacent authoritative datastore: all booking data, including rich metadata (renter contact, notes), lives on the calendar event itself. The only additional infrastructure is a short-lived, disposable read cache, deliberately scoped to never touch the paths that enforce double-booking prevention.
 
-The pattern generalizes to other bookable facilities (bowling lanes, tennis courts, etc.) — nothing in the architecture is curling-specific except the vocabulary.
+Every tenant-specific value (the M365 tenant domain, which mailboxes are sheets vs. Club Events, the facility's local time zone) is configuration, not code — the same deployed app can be repointed at a different tenant, or stood up fresh for a different facility, without a recompile (§4.6).
+
+The pattern generalizes to other bookable facilities (bowling lanes, tennis courts, etc.) — nothing in the architecture is curling-specific except the vocabulary and the configured sheet count.
 
 ---
 
 ## 2. Scope and Requirements
 
-### 2.1 In Scope
+### 2.1 Delivered
 
-| # | Requirement |
-|---|-------------|
-| R1 | Model each curling sheet (5 initially) as an independently bookable resource with its own calendar |
-| R2 | Staff-mediated booking: staff create, modify, and cancel all bookings through a custom web UI |
-| R3 | Booking states beyond free/busy: at minimum **potential rental hold** (soft, blocks other bookings) and **confirmed rental** (hard) |
-| R4 | Booking categories: **Rental / League / Event / Other**, consistently represented across all sheets |
-| R5 | Rich contextual metadata attached to the booking itself: renter name, contact, price, notes |
-| R6 | Multiple views for different purposes: per-sheet grid, all-sheets aligned timeline, and derived/consolidated views (e.g., "times when ≥2 sheets are available for rental") |
-| R7 | Anonymous public read-only view of summarized availability, embeddable in the club website (Drupal today, possibly WordPress later) |
-| R8 | Outlook/OWA remains available as a **read-only fallback** for viewing calendars — bookings must look sensible there (subjects, colors, free/busy) |
-| R9 | Recurring bookings (league blocks) supported via native calendar recurrence |
-| R10 | Double-booking prevention — enforced by the application (see §6.1) |
-| R11 | **Club Events**: a whole-club shorthand for large events (bonspiels, tournaments) spanning all sheets, kept separate from individual sheet reservations for simpler viewing/filtering (see §4.4) |
+| # | Requirement | Status |
+|---|-------------|--------|
+| R1 | Model each curling sheet as an independently bookable resource with its own calendar | Done — sheet count and mailbox addresses are configuration (§4.6), not a hardcoded "5" |
+| R2 | Staff-mediated booking: staff create, modify, and cancel all bookings through a custom web UI | Done |
+| R3 | Booking states beyond free/busy: **Hold** (soft, blocks other bookings) and **Confirmed** (hard) | Done — Hold is available only for Rental; every other category is always Confirmed (§4.2) |
+| R4 | Booking categories, consistently represented across all sheets | Done — sheet categories: Rental / League / Bonspiel / Maintenance / Other (Event is reserved for Club Events, §4.4) |
+| R5 | Rich contextual metadata attached to the booking itself: renter name, contact, notes | Done (Price was cut from scope during build — never used) |
+| R6 | Multiple views: per-sheet/all-sheets Month, Week, and Day grids | Done. The originally-scoped derived "≥N sheets available" consolidated view (interval-merge engine) is **backlogged**, not built — deprioritized twice during build in favor of higher-value work, revisit only if raised again |
+| R7 | Anonymous public read-only view, embeddable in the club website | Done, as **two** distinct surfaces (§5.4): a minimized JSON availability API + CMS embed widget, and a separate full public month calendar page |
+| R8 | Outlook/OWA remains available as a read-only fallback | Done |
+| R9 | Recurring bookings supported via native calendar recurrence | Done (§4.5) |
+| R10 | Double-booking prevention, enforced by the application | Done (§6.1); the Phase 7 read cache is deliberately scoped to never weaken this (§4.3) |
+| R11 | **Club Events**: a whole-club resource for large events, separate from individual sheet reservations | Done (§4.4), including a closure-conflict cross-check added after build (§4.4) |
+| R12 | Configuration-driven tenant/mailbox/timezone, no hardcoded tenant values in code | Done (§4.6), added during Phase 10 |
 
 ### 2.2 Out of Scope (explicitly deferred or rejected)
 
-- Payments, fees, deposits
+- Payments, fees, deposits (Price field was added then removed — never used)
 - Membership rules, booking caps, priority tiers, waitlists
-- Member/public self-service booking (no member identity object)
+- Member/public self-service booking (no member identity object; public calendar is read-only)
 - Post-season reporting or cancellation audit history — cancelled bookings are hard-deleted, metadata loss on cancellation is accepted
-- Automatic expiration of rental holds (revisit later; manual for now)
+- Automatic expiration of rental holds
 - ICS calendar publishing (evaluated and rejected based on prior operational experience)
-- Companion/adjacent authoritative database (explicit constraint: all data of record stays on the calendar event)
+- Companion/adjacent authoritative database (all data of record stays on the calendar event)
+- The consolidated "≥N sheets available" derived view (R6) — backlogged, not built
+- Bulk rental-availability painting tool (a multi-weekday bulk-create wizard) — scoped, then explicitly shelved as overkill for a once-per-season, near-empty-calendar operation; the series wizard covers the real need
 
 ### 2.3 Constraints and Environment
 
 | Constraint | Detail |
 |---|---|
-| Tenant | Existing Microsoft 365 tenant, lower licensing tier (not E3/E5). Resource mailboxes require no license below the size threshold — verify against the specific SKU before build. |
+| Tenant | Configuration-driven (§4.6) — a trial tenant was used through most of the build; the app now deploys against whichever tenant its `Facility`/`Graph` configuration points at, without a recompile. |
 | Concurrency | Effectively 1 staff user at a time; 2 by rare coincidence. |
 | Source of truth | Exchange Online. The web app holds no authoritative data. |
-| Cache | Ephemeral only: short-TTL, non-authoritative, fully rebuildable from EXO at any moment. |
-| Public surface | Must never expose booking metadata (PII, pricing); server-side minimization is mandatory. |
-| CMS | Public view integrates as a thin embed calling the app's public endpoint — no Graph logic inside the CMS, keeping it portable across the Drupal-vs-WordPress decision. |
+| Cache | Ephemeral only: short-TTL, non-authoritative, fully rebuildable from EXO at any moment; deliberately never applied to conflict-check reads (§4.3). |
+| Public surface | Must never expose booking metadata beyond what staff themselves type into a title (§5.4); server-side minimization is mandatory for the JSON API; the full public calendar shows titles by design (staff are trained not to put renter PII in a title, rather than the app stripping it programmatically). |
+| CMS | Public view integrates as a thin embed calling the app's public endpoint — no Graph logic inside the CMS. |
+| Deployment | Azure App Service is the primary target; see `docs/deployment-guide.md` for the full deployment process and a platform-agnostic requirements section for other hosts. |
 
 ---
 
@@ -65,29 +71,29 @@ The pattern generalizes to other bookable facilities (bowling lanes, tennis cour
 
 ```mermaid
 flowchart TB
-    subgraph M365 ["Microsoft 365 Tenant"]
+    subgraph M365 ["Microsoft 365 Tenant (configuration-driven, §4.6)"]
         EID["Entra ID<br/>(staff SSO + app registration)"]
         subgraph EXO ["Exchange Online — system of record"]
-            S1["Resource mailbox<br/>Sheet 1"]
-            S2["Resource mailbox<br/>Sheet 2"]
-            S3["Resource mailbox<br/>Sheet 3"]
-            S4["Resource mailbox<br/>Sheet 4"]
-            S5["Resource mailbox<br/>Sheet 5"]
+            SN["Resource mailboxes<br/>Sheet 1..N (configured count)"]
+            CE["Resource mailbox<br/>Club Events"]
         end
     end
 
-    subgraph App ["Scheduling Web Application (standalone deployment)"]
-        UI["Staff web UI<br/>(booking grid, consolidated views)"]
-        API["Backend API<br/>booking logic · conflict enforcement<br/>interval-merge aggregation"]
-        CACHE["Ephemeral cache<br/>(in-memory / short-TTL)<br/>non-authoritative, disposable"]
-        PUB["Public read-only endpoint<br/>(minimized summary payload)"]
+    subgraph App ["Blazor Server Application (single deployment)"]
+        UI["Staff calendar UI<br/>(Month/Week/Day, series wizard,<br/>Club Events, filters)"]
+        API["Services<br/>SheetBookingService · ClubEventService<br/>conflict enforcement · FacilityConfiguration"]
+        CACHE["Ephemeral cache (IMemoryCache)<br/>view-reads only, 30s TTL<br/>never the conflict-check path"]
+        PUBAPI["Public JSON endpoint<br/>+ embed widget JS"]
+        PUBCAL["Public calendar endpoint<br/>(plain Minimal API, no Blazor circuit)"]
     end
 
     subgraph Web ["Club website (CMS)"]
-        EMBED["Thin embed block/shortcode<br/>(calls public endpoint, renders)"]
+        EMBED["Thin embed block<br/>(calls public JSON endpoint)"]
+        IFRAME["iframe<br/>(embeds public calendar page)"]
     end
 
     STAFF(("Staff")) -->|"HTTPS + Entra SSO"| UI
+    MEMBER(("Club members<br/>(anonymous)")) --> IFRAME
     ANON(("Public visitors")) --> EMBED
     STAFF -.->|"read-only fallback<br/>(Reviewer permission)"| EXO
 
@@ -95,35 +101,35 @@ flowchart TB
     API <--> CACHE
     API -->|"Microsoft Graph<br/>(REST/JSON)"| EXO
     API <-->|"OAuth 2.0 tokens"| EID
-    EMBED --> PUB
-    PUB --> CACHE
+    EMBED --> PUBAPI
+    IFRAME --> PUBCAL
+    PUBAPI --> API
+    PUBCAL --> API
 ```
-
-> **Note:** this diagram predates the Club Events feature (§4.4, added 2026-07-11) and does not yet show the 6th "Club Events" resource mailbox alongside the 5 sheet mailboxes. Functionally it sits in the same EXO subgraph as another peer resource mailbox — regenerate this diagram before build if a visual is needed.
 
 Key structural decisions visible above:
 
-- **The staff app is a standalone deployment**, isolated from the CMS's failure domain (core updates, plugin conflicts, theme changes on the website cannot take down booking).
-- **The CMS integration is one thin block** that renders JSON from the public endpoint. It contains no credentials and no Graph logic, so it survives a Drupal upgrade or a WordPress migration with trivial rework.
-- **The public endpoint reads only from cache**, never triggering Graph calls per anonymous request — unpredictable public/bot traffic cannot exhaust Graph quota.
-- **Outlook is a read path only.** Staff hold Reviewer (read-only) calendar permission on the resource mailboxes, which structurally prevents out-of-band edits — the one class of change the app couldn't see (having no webhook infrastructure).
+- **One Blazor Server deployment**, not a separate CMS-side service — the CMS integration is a thin embed/iframe with no credentials and no Graph logic.
+- **Two public surfaces, not one.** The JSON API + widget is a subordinate feature (per-sheet rental availability only). The public calendar page is the *primary* way club members see what's happening club-wide while unauthenticated — every category, every title, no hour-level detail until a chip is clicked. Both read through the same services, which read through the same cache.
+- **Public pages are plain Minimal API endpoints, never Blazor components** sharing the staff app's authenticated circuit (`MapRazorComponents<App>()`). This is a hard architectural rule established the hard way (§8) — not a style preference.
+- **The cache is scoped to view-rendering reads only.** Every conflict-check read (the thing standing between two staff members double-booking a sheet) always hits Graph live, never the cache. See §4.3.
+- **Outlook is a read path only.** Staff hold Reviewer (read-only) calendar permission on the resource mailboxes.
 
 ### 3.2 What Exchange Provides vs. What the App Owns
-
-An honest division of labor (this was sharpened during design review — see §6.1):
 
 | Concern | Owner |
 |---|---|
 | Durable storage of bookings + metadata | Exchange Online |
-| Recurrence semantics (league series, occurrences, exceptions) | Exchange Online |
-| Free/busy computation (`getSchedule`) | Exchange Online |
+| Recurrence semantics (series, occurrences, exceptions) | Exchange Online |
 | Fallback human-readable calendar UI | Exchange Online (Outlook/OWA) |
 | Mailbox permissions, audit logging | Exchange Online |
 | **Conflict / double-booking enforcement** | **Application** (direct writes bypass the Resource Booking Attendant) |
-| Slot granularity & business validation (e.g., start-on-the-hour) | Application |
+| Multi-sheet grouping identity (`BookingGroupId`) | Application (§4.5) |
 | State vocabulary and category schema integrity | Application (sole writer discipline; Exchange validates nothing) |
-| Consolidated/derived views (interval merge) | Application |
+| Recurring series creation, per-occurrence edit/cancel semantics | Application |
+| Club Events / closure-conflict cross-check | Application (§4.4) |
 | Public data minimization | Application |
+| Tenant/mailbox/timezone configuration | Application, externalized to config (§4.6) |
 
 ---
 
@@ -131,72 +137,87 @@ An honest division of labor (this was sharpened during design review — see §6
 
 ### 4.1 Anatomy of a Booking (one EXO calendar event)
 
-Every piece of booking data lives on the event object. Fields are allocated to native properties by *access pattern*:
+Every piece of booking data lives on the event object:
 
-```mermaid
-flowchart LR
-    subgraph EV ["Calendar event on a sheet's resource mailbox"]
-        direction TB
-        N1["<b>subject</b><br/>human-readable, for Outlook fallback<br/><i>'Rental — Smith party'</i>"]
-        N2["<b>start / end (+ timezone)</b><br/>the reserved slot"]
-        N3["<b>showAs</b><br/>tentative = potential rental hold<br/>busy = confirmed booking<br/><i>drives free/busy; informational for conflicts</i>"]
-        N4["<b>categories</b><br/>one of: Rental · League · Event · Other<br/><i>vocabulary enforced by app, not Exchange</i>"]
-        N5["<b>recurrence</b><br/>native series for league blocks"]
-        N6["<b>Named extended properties</b><br/>one per filterable field:<br/>bookingState · bookedBy · renterName …<br/><i>usable in Graph $filter</i>"]
-        N7["<b>JSON blob</b> (single extended property<br/>or open extension)<br/>display-only fields: contact details,<br/>price, free-form notes<br/><i>opaque to Graph queries</i>"]
-        N8["<b>iCalUId</b><br/>durable event identifier<br/><i>(not the REST id, which can change)</i>"]
-    end
-```
+- **subject** — human-readable, for the Outlook fallback (`"{Category} - {RenterName}"` or just `{Category}` if blank).
+- **start / end (+ timezone)** — the reserved slot, tagged with the facility's configured local time zone (§4.6), never UTC.
+- **showAs** — `tentative` = Hold, `busy` = Confirmed. Drives free/busy and the hold-vs-confirmed encoding; conflict enforcement itself is the app's job regardless of `showAs` (§6.1).
+- **categories** — one of Rental / League / Bonspiel / Maintenance / Other for sheets (Event is reserved for Club Events, never offered in the sheet-booking picker); Bonspiel / Activities / Closure / Other for Club Events.
+- **recurrence** — native Graph recurring series for league blocks etc. (§4.5).
+- **Named extended properties** (server-side filterable): `BookedBy`, `BookingGroupId` (§4.5).
+- **JSON blob** (one extended property, display-only): renter name, phone, email, notes.
+- **iCalUId / EventId** — `EventId` is the Graph REST id (not durable across some mailbox operations); `ICalUId` is the durable identifier.
 
-**Design rule:** any field that could ever appear in a "show me all bookings where X" query gets its own named single-value extended property (server-side filterable to a useful degree). Everything display-only goes in the JSON blob. Both mechanisms are for small payloads — notes stay a single text field, never an append-only log.
+**Design rule (unchanged from original design):** anything filterable gets its own named extended property; everything else goes in the JSON blob, kept small.
 
-**Integrity note:** Exchange validates none of this — not category strings, not extended-property shape. Schema integrity comes entirely from the application being the *sole writer* with a fixed vocabulary. This is a load-bearing invariant, reinforced structurally by staff having read-only Outlook access.
-
-**Read gotcha (found during Phase 3 build, 2026-07-11):** `singleValueExtendedProperties` are never returned on a Graph read by default — writes succeed silently, but any `GET`/`calendarView` call that doesn't explicitly expand them comes back with `RenterName`/`Price`/`BookedBy`/etc. all null, even though the data is genuinely stored. Costly to miss because the failure is silent at the write, not the read. **A blanket `$expand=singleValueExtendedProperties` was not sufficient in testing** — it had to be scoped with a `$filter` sub-clause naming the specific property IDs (`$expand=singleValueExtendedProperties($filter=id eq '...' or id eq '...')`) to actually populate results. Every read path that needs metadata must use the filter-scoped form.
+**Read gotcha (confirmed during build):** `singleValueExtendedProperties` are never returned by default — a blanket `$expand` is insufficient; it must be scoped with a `$filter` sub-clause naming the specific property IDs. Every read path that needs metadata uses the filter-scoped form.
 
 ### 4.2 State Model
 
 | Business state | `showAs` | Category | Blocks other bookings? |
 |---|---|---|---|
 | Open / available | *(no event)* | — | No |
-| Potential rental hold | `tentative` | Rental | **Yes** (app-enforced) |
-| Confirmed rental | `busy` | Rental | Yes |
-| League block | `busy` (or `tentative` if provisional) | League | Yes |
-| Event / Other | `busy` | Event / Other | Yes |
+| Hold | `tentative` | Rental only | **Yes** (app-enforced) |
+| Confirmed | `busy` | Any | Yes |
 
-- `showAs` does double duty: it keeps `getSchedule` free/busy and the Outlook fallback view semantically honest, and it encodes the hold-vs-confirmed distinction. Conflict *enforcement*, however, is the app's job regardless of `showAs` (§6.1).
-- Confirming a rental = update `showAs` from `tentative` → `busy` on the existing event (plus metadata updates). The event's identity and slot are unchanged.
-- Cancellation = hard delete of the event. Accepted consequence: metadata is unrecoverable beyond EXO's recoverable-items window (~weeks). Re-entry cost of a lost booking is low at this scale.
-- Additional states/categories are expected later; the mechanism (category taxonomy + extended properties) absorbs them without structural change. Auto-expiring holds are a possible future addition (deferred).
+- **Only Rental can be a Hold** — every other category is always a hard (Confirmed) booking, enforced client-side (the Hold/Confirmed toggle and phone/email fields are hidden entirely for non-Rental categories) and coerced server-side.
+- **No category defaults on a new booking, series, or Club Event** — staff must explicitly pick one; Save/Create is disabled with a validation message until they do. This was added after live-testing feedback surfaced confusion from a silently-preselected category. Editing an existing item still loads its real stored category, unaffected.
+- **Hold vs. Confirmed also has no default** — a new Rental booking's state is `null` until staff explicitly picks Hold or Confirmed.
+- Confirming a rental = update `showAs` `tentative` → `busy` on the existing event.
+- Cancellation = hard delete, with one exception: a Rental cancel offers "reopen for rental" (flips back to an unclaimed Hold, renter fields stripped) as an alternative to permanent deletion.
+- Time entry is 30-minute increments, extending through midnight (represented internally as minutes-from-midnight, with 1440 meaning "end of this day" rather than colliding with a start-of-day option).
 
 ### 4.3 Ephemeral Cache
 
-| Property | Value |
+Two layers, added at different points in the build, deliberately kept separate:
+
+| Layer | Scope | TTL | What it must never touch |
+|---|---|---|---|
+| Staff-facing view cache (Phase 7) | `SheetBookingService.GetBookingsForAllSheetsAsync`, `ClubEventService.GetEventsAsync` — the "everything in this window, for display" reads used by the calendar pages | 30s | `GetEventsInRangeAsync`/`GetBookingsAsync` (the per-sheet reads every conflict check uses) are **never cached** — a cached snapshot there could mask a just-created booking and allow a double-booking within the TTL window. This is the one invariant this cache design cannot compromise. |
+| Public-facing response cache (Phase 8/9) | `PublicAvailabilityService`'s own computed `GetAvailabilityAsync`/`GetMonthViewAsync` responses | 60s | Sits as an outer layer on top of the staff-facing cache above — a cold public cache still benefits from a warm inner cache, and vice versa. |
+
+Invalidation for the staff-facing layer is a full clear (not precise per-window overlap tracking) of that service's own tracked cache keys, on every successful write — simple, and proportionate given this app's actual write volume (1–2 staff). The public-facing layer expires on its own TTL only, since it doesn't sit behind a write path.
+
+**Explicitly rejected:** Graph change-notification webhooks (subscriptions expire and need renewal/reconciliation infrastructure to catch out-of-band edits, of which there are structurally none — sole-writer app + read-only Outlook access).
+
+### 4.4 Club Events
+
+A dedicated resource mailbox, not tied to any physical sheet, for whole-club-scale events (bonspiels, closures, club activities) that would otherwise require booking every sheet simultaneously.
+
+**Why a dedicated mailbox instead of writing the same event to every sheet calendar:** independent per-sheet Graph writes have no transactional guarantee; a single event on a single dedicated calendar is atomic by construction.
+
+**Category taxonomy as built:** Bonspiel / Activities / Closure / Other (the original design's "Tournament" was renamed to "Activities" during build, and "Other" was added). Kept structurally separate from the sheet-level category enum.
+
+**Display:** Club Events render **inline within the day cells** of Month/Week/Day views (not a page-level banner — that was the first cut and corrected immediately after review), sorted chronologically alongside sheet bookings (all-day events sort first). Clicking a Club Event chip anywhere on the staff calendar opens its edit form directly (a bug where the click instead bubbled up to the day cell's own "jump to Day view" handler was found and fixed). A "Show club events" toggle lets staff hide them from the calendar entirely.
+
+**Integration with sheet bookings — narrower than originally designed:**
+
+| Mechanism | Behavior |
 |---|---|
-| Contents | Recently fetched availability data and event detail, keyed by sheet + time window; precomputed consolidated views |
-| TTL | Short (order of 30–60 s) — near-real-time without webhook infrastructure |
-| Invalidation | On every write the app itself performs (it is the sole writer, so this is complete) |
-| Authority | None. Holds no data of record; empty/stale cache simply rebuilds from Graph on next read |
-| Technology | In-memory in the app process; Redis only if deployment topology later demands it |
+| Write-path conflict check | **Narrowed after build** from the original "no cross-check in either direction" (D13): a Club Event flagged `MarksSheetsUnavailable=true` now *is* cross-checked against new sheet bookings/series, since staff live-testing surfaced this as a real gap. Implemented at the `Calendar.razor` page level (not inside either service — `SheetBookingService`/`ClubEventService` stay mutually decoupled, per D13's original build-simplicity intent). Blocking for a single booking's create/edit (same UX as a real sheet conflict); informational-only for the series wizard preview (staff can still choose to skip a flagged date, matching how every other series-preview conflict already works). Club-Event-vs-Club-Event and non-closure-Club-Event-vs-sheet-booking checks remain intentionally absent. |
+| Public view | Club Events get a distinct label on the public calendar rather than being folded into generic per-sheet blocks. |
+| Provisioning | Add as step 1a: create the Club Events resource mailbox alongside the sheet mailboxes; same security group/access policy scope. |
 
-**Explicitly rejected:** Graph change-notification webhooks. Subscriptions expire (~3 days max) and require renewal jobs and missed-notification reconciliation — infrastructure that exists to catch out-of-band edits, of which there are none by construction (sole-writer app + read-only staff access in Outlook). Revisit only if out-of-band edits ever become possible.
+### 4.5 Recurring Series and Multi-Sheet Bookings
 
-### 4.4 Club Events (added 2026-07-11)
+Two related mechanisms added during build, beyond the original design's scope:
 
-A **6th resource mailbox, "Club Events,"** not tied to any physical sheet — a single calendar for whole-club-scale events (bonspiels, tournaments) that would otherwise require booking all 5 sheets simultaneously.
+**Multi-sheet bookings.** A single conceptual booking (e.g., a rental spanning 3 sheets) is represented as one event per sheet, linked by a shared `BookingGroupId` (a named extended property) — every booking gets one, even single-sheet ones, so downstream code never branches on single-vs-multi. Creation across sheets is all-or-nothing: every requested sheet is conflict-checked before anything is written.
 
-**Why a dedicated mailbox instead of writing the same event to all 5 sheet calendars:** five independent Graph writes have no transactional guarantee — a partial failure (3 of 5 succeed) leaves the club in an inconsistent state that's hard to detect and reconcile. A single event on a single dedicated calendar is atomic by construction, and it directly satisfies the stated goal ("simpler viewing and filtering") — a calendar containing only bonspiels and tournaments needs no filtering logic at all to view in isolation.
+**Recurring series.** Graph has no concept of a recurring series spanning multiple mailboxes, so a multi-sheet recurring booking (e.g., a 5-sheet league) is five independent native Graph recurring series — one per sheet — sharing one `BookingGroupId`. Conflicts during series review are informational only, never auto-skipped; staff explicitly choose which candidate dates to skip.
 
-**Data model:** same mechanism as sheet bookings (named extended properties for filterable fields, JSON blob for free-form detail), with its own category taxonomy (e.g., Bonspiel / Tournament / Closure) kept separate from the sheet-level Rental/League/Event/Other set, since it's a structurally different kind of object rather than another instance of the same one. Multi-day events are just a single event with a longer span — no special recurrence handling needed for one-off tournaments.
+**A real bug found and fixed via live testing:** `BookingGroupId` does **not** reliably propagate from a recurring series' master event down to its individual occurrences — it only persists on an occurrence once that specific occurrence has been individually edited. An untouched occurrence always reads back `BookingGroupId = Guid.Empty`. Naively grouping chips by `BookingGroupId` in Month/Week view therefore incorrectly merged multiple *unrelated* bookings that happened to share that same empty default, hiding all but one. Fixed by falling back to `(SheetMailbox, EventId)` — always unique per booking — as the grouping key whenever `BookingGroupId == Guid.Empty`. Diagnosed via a differential test: Day view (which doesn't group by `BookingGroupId` at all) showed the data correctly, isolating the bug to the dedup/display layer rather than the fetch.
 
-**Integration with existing mechanisms:**
+### 4.6 Configuration Model (Phase 10)
 
-| Mechanism | How Club Events participates |
-|---|---|
-| Availability views (§5.3) | A second input source to the interval merge: any window covered by a Club Events entry forces every sheet to "unavailable," overriding what each sheet's own calendar shows. |
-| Write-path conflict check (§5.2, §6.1) | **No cross-check in either direction** (decided 2026-07-11): creating a sheet-level booking does not check the Club Events calendar, and creating a club event does not check individual sheet calendars. Simplest to build; conflicts between a booked bonspiel and an existing sheet booking are surfaced only if/when staff notice them. Revisit if this proves to cause real double-booking incidents in practice. |
-| Public view (§5.4) | Club events get a **distinct label** on the public page (decided 2026-07-11) — e.g., "Aug 15–17: Club Bonspiel — all sheets reserved" — rather than being folded into generic per-sheet "unavailable" blocks, since these are typically publicly-promoted events anyway. |
-| Provisioning (§7) | Add as step 1a: create the Club Events resource mailbox alongside the 5 sheet mailboxes; include it in the same security group and Application Access Policy / RBAC scope. |
+Added during production hardening. Nothing tenant-specific is hardcoded in source:
+
+- **`FacilityOptions`** (bound from a `Facility` config section, same pattern as the pre-existing `GraphOptions`): `TenantDomain`, `SheetMailboxLocalParts` (an explicit array, not a count — a different facility's mailboxes won't necessarily follow a `sheet1..sheetN` naming convention), `ClubEventsMailboxLocalPart`, `TimeZone`, plus `Name` and `LogoPath` (accepted now for future white-labeling; not yet wired into any UI).
+- **`FacilityConfiguration`** — a singleton service that validates and derives the actual mailbox addresses/`TimeZoneInfo` from those options. Fails fast at application startup (not lazily on first request) if `TenantDomain`, `SheetMailboxLocalParts`, or `TimeZone` are missing — deliberate, given this app has already shipped two real bugs from silent wrong timezone defaults; a misconfigured deployment should error immediately, not limp along wrong.
+- `GraphOptions` (the Entra app-registration credential: `TenantId`/`ClientId`/`ClientSecret`) remains a separate config concern, unchanged.
+- The provisioning script (`docs/provision-categories.ps1`) takes `-TenantDomain` and `-SheetCount` parameters rather than hardcoding either.
+
+See `docs/deployment-guide.md` for the full configuration reference and where each value belongs (user-secrets locally, Azure App Service Application Settings or equivalent in production).
 
 ---
 
@@ -206,163 +227,99 @@ A **6th resource mailbox, "Club Events,"** not tied to any physical sheet — a 
 
 | Operation | Graph call | Notes |
 |---|---|---|
-| Coarse availability, all sheets | `POST /users/{any}/calendar/getSchedule` | One batched call for all 5 mailboxes; returns free/tentative/busy intervals. 62-day window cap per call, confirmed exactly via spike test (§8) — chunk season-long views. |
-| Rich per-sheet detail (grid with categories/states) | `GET /users/{sheet}/calendarView?startDateTime=…&endDateTime=…` + `$expand`/property selection | `calendarView` (not `/events`) so recurrences expand into occurrences. Request extended properties explicitly. |
-| Create booking | `POST /users/{sheet}/calendar/events` | Direct write; preceded by app-side conflict check under per-sheet lock (§6.1). |
-| Confirm hold / edit booking | `PATCH /users/{sheet}/events/{id}` | Update `showAs`, metadata properties. Resolve current REST `id` via `iCalUId` if needed. |
-| Cancel booking | `DELETE /users/{sheet}/events/{id}` | Hard delete per §4.2. |
-| Category palette setup (one-time) | `GET/POST /users/{sheet}/outlook/masterCategories` | Provision identical name+color sets on every sheet mailbox; repeat when adding sheet #6. |
+| Per-sheet/consolidated calendar detail | `GET /users/{sheet}/calendarView?startDateTime=…&endDateTime=…` + `$expand` | `calendarView` (not `/events`) so recurrences expand into occurrences. Paginated — every read path follows `@odata.nextLink` until exhausted (a real bug: a wide Month-view window with several expanded recurring series could exceed one page, silently truncating results if only the first page was read). |
+| Create booking (single or multi-sheet) | `POST /users/{sheet}/calendar/events` | Direct write; preceded by an app-side conflict check under a per-sheet lock (§6.1), across every requested sheet, all-or-nothing. |
+| Create recurring series | `POST /users/{sheet}/calendar/events` + `Recurrence` | One native recurring series per sheet, per §4.5. |
+| Confirm hold / edit booking | `PATCH /users/{sheet}/events/{id}` | Occurrence PATCHes must omit `Start`/`End` entirely unless the time actually changed — Graph rejects a resent-but-unchanged time on a recurring occurrence with "Modified occurrence is crossing or overlapping adjacent occurrence." |
+| Cancel booking / series | `DELETE /users/{sheet}/events/{id}` (occurrence) or `.../{seriesMasterId}` (whole series) | Whole-series cancel is a deliberately de-emphasized "backdoor," not a primary UX path. |
+| Category palette setup (one-time) | `GET/POST /users/{sheet}/outlook/masterCategories` | Provisioned via `docs/provision-categories.ps1`, parameterized by tenant domain and sheet count (§4.6). |
 
-Timezone rule for every read: pass `Prefer: outlook.timezone` explicitly. The season spans two DST transitions; never assume a fixed UTC offset.
+Timezone rule for every read/write: pass `Prefer: outlook.timezone` (reads) and tag `Start`/`End`/`RecurrenceTimeZone` (writes) with the facility's configured zone (§4.6) — never assume UTC. A distinct, separately-discovered gotcha: `calendarView`'s `startDateTime`/`endDateTime` **query parameters** are always interpreted as UTC when no explicit offset is present, and are *not* reinterpreted by the `Prefer` header the way an event body's own `Start`/`End` are — query bounds must be converted to a true UTC instant first (`FacilityConfiguration.ToUtcQueryString`).
 
 ### 5.2 Booking Creation (write path)
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Staff
-    participant UI as Staff Web UI
-    participant API as Backend API
-    participant L as Per-sheet lock
-    participant G as Microsoft Graph
-    participant EXO as Sheet mailbox (EXO)
+Unchanged in spirit from the original design: validate → acquire a per-sheet lock (sorted lock order across every requested sheet, to avoid deadlock on overlapping multi-sheet requests) → `calendarView` conflict check on every requested sheet → write only if every sheet is clear → invalidate the staff-facing view cache → release locks. All-or-nothing across sheets, not just per-sheet.
 
-    Staff->>UI: Book Sheet 3, Sat 18:00–20:00, Rental hold
-    UI->>API: POST /bookings (sheet, slot, state, category, metadata)
-    API->>API: Validate: vocabulary, slot granularity, required fields
-    API->>L: Acquire lock(sheet 3)
-    API->>G: calendarView(sheet 3, 18:00–20:00)
-    G->>EXO: read
-    EXO-->>API: overlapping events (if any)
-    alt Slot conflicts
-        API-->>UI: 409 Conflict — slot not available
-    else Slot clear
-        API->>G: POST events (subject, showAs=tentative,<br/>categories=[Rental], extended props, JSON blob)
-        G->>EXO: create event
-        EXO-->>API: created (capture iCalUId)
-        API->>API: Invalidate cache (sheet 3, window)
-        API-->>UI: 201 Created
-    end
-    API->>L: Release lock(sheet 3)
-```
+Added after build: the same page-level check also queries for an overlapping `MarksSheetsUnavailable` Club Event before writing (§4.4) — blocking for a direct create/edit, informational for series preview.
 
-The check-then-write under a per-sheet lock closes the race window between two simultaneous staff bookings. At 1–2 concurrent users this is comfortably sufficient; it is correct at any scale where this app remains the sole writer.
+### 5.3 Consolidated Availability — Backlogged
 
-### 5.3 Consolidated Availability (derived read path)
+The originally-designed "≥N sheets available for rental" interval-merge view (R6) was **not built**. It was deprioritized during the build sequence in favor of Club Events and the public-facing work, and explicitly struck from the active plan afterward, pending real feedback once other club members start using the app. Revisit only if raised again.
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor Staff
-    participant UI as Staff Web UI
-    participant API as Backend API
-    participant C as Cache
-    participant G as Microsoft Graph
+### 5.4 Public Views (anonymous read path) — two distinct surfaces
 
-    Staff->>UI: "When are ≥2 sheets available for rental?"
-    UI->>API: GET /views/consolidated?rule=rentable&min=2&window=…
-    API->>C: lookup(view key)
-    alt Cache hit (fresh)
-        C-->>API: precomputed result
-    else Miss / stale
-        API->>G: calendarView × 5 sheets (with categories + extended props)
-        Note over API,G: getSchedule alone is insufficient here:<br/>"available for rental" depends on category + state,<br/>not just free/busy (a tentative Rental hold counts;<br/>a tentative League block does not)
-        G-->>API: full event sets per sheet
-        API->>API: Interval merge (sweep-line):<br/>slice timeline at every state boundary,<br/>evaluate rule per sub-interval, count qualifying sheets
-        API->>C: store(view key, TTL)
-    end
-    API-->>UI: qualifying time windows
-```
+**5.4.1 JSON availability API + CMS embed widget** (`/api/public/availability`, `/embed/availability-widget.js`) — a subordinate feature. "Available" here means an existing Rental+Hold booking (the same "AVAILABLE FOR RENTAL" slots staff already create), not raw free/busy — simpler than computing complementary free time, and more correct, since unbooked League/Bonspiel/practice time isn't necessarily something staff want the public renting. Excludes any window overlapping a `MarksSheetsUnavailable` Club Event. Rate-limited (fixed window, 60/min) and CORS-scoped (`AllowAnyOrigin`, GET-only) — safe specifically because this data is intentionally public and anonymous, no cookies/credentials ever flow through it.
 
-Bookings across sheets don't align to a common grid, so aggregation is an interval-overlay computation owned by the app. Each named view (per-sheet grid, consolidated rental availability, future views) is a rule over the same fetched data — the cache absorbs the fan-out so five differently-shaped views don't mean five independent Graph storms.
+**5.4.2 Public month calendar** (`/public/calendar`) — the *primary* way club members see what's going on club-wide while unauthenticated. Shows every category and state, with titles (a league's own name, a renter's own chosen title) — not just rental-availability slots. The one deliberate privacy exception: a confirmed rental's actual renter name is not stripped programmatically; staff are expected to handle that via what they type into the title field, not the app. Chips are clickable, opening a small popup with the exact time (the month-grid itself doesn't show hour-level detail). Iframe-embeddable; currently has **no `Content-Security-Policy: frame-ancestors` restriction** (documented, deliberate, revisit once the public surface gets more real-world scrutiny).
 
-### 5.4 Public View (anonymous read path)
-
-```mermaid
-sequenceDiagram
-    autonumber
-    actor V as Anonymous visitor
-    participant CMS as Club website (CMS embed)
-    participant PUB as Public endpoint
-    participant C as Cache
-
-    V->>CMS: loads page with availability block
-    CMS->>PUB: GET /public/availability
-    PUB->>C: read summarized view
-    C-->>PUB: availability data
-    PUB->>PUB: Minimize: hand-built mapping to<br/>{sheet, window, available|unavailable} only.<br/>Never the raw event. No names, prices, notes.
-    PUB-->>CMS: minimal JSON
-    CMS-->>V: rendered availability
-```
-
-The minimization step is a deliberate, separately-maintained mapping — **not** a reuse of the internal API with anonymous access allowed. This prevents the failure mode where a field added to the internal payload silently leaks to the public page. If the cache is cold, the endpoint may serve slightly stale data or trigger one guarded refresh — but anonymous traffic volume never translates 1:1 into Graph calls.
+**The architectural incident behind both surfaces' final shape:** an earlier attempt to make public-calendar chips clickable used Blazor Server's own `@onclick`, which requires the interactive SignalR circuit — and a first fix attempt (`.AllowAnonymous()` applied to the shared `MapRazorComponents<App>()` registration) was live-tested and found to **disable authorization for every staff page in the app**, not just the intended public one, because ASP.NET Core's authorization rule is "if `AllowAnonymous` metadata is present anywhere on an endpoint, it wins" and `MapRazorComponents<App>()` maps every routable component through one shared endpoint set. Reverted immediately. A second attempt (vanilla JS instead of Blazor event handlers) fixed the clicks but still showed an unremovable "unhandled error" banner for anonymous visitors, traced to the shared host shell (`App.razor`) always loading `blazor.web.js` regardless of the specific page's render mode. The user explicitly rejected hiding the error banner rather than fixing the actual cause. **The real fix, and the standing rule for any future anonymous page:** both public routes are plain Minimal API endpoints (`Endpoints/PublicAvailabilityEndpoints.cs`, `Endpoints/PublicCalendarEndpoint.cs`), each with its own explicit `.AllowAnonymous()`, hand-building their response outside the Blazor component tree entirely — zero shared circuit, nothing for anonymous traffic to be rejected from. The public calendar's HTML is hand-built via `StringBuilder`, with every dynamic string passed through `WebUtility.HtmlEncode` (no Razor auto-escaping to fall back on, and titles are staff-entered free text — a real stored-XSS risk if skipped).
 
 ---
 
 ## 6. Identity, Security, and Permissions
 
-### 6.1 Conflict Enforcement — Why the App Owns It (design-review finding)
+### 6.1 Conflict Enforcement — Why the App Owns It
 
-Exchange's native double-booking prevention (`Set-CalendarProcessing` … `AllowConflicts $false`) is enforced by the **Resource Booking Attendant**, which only processes *meeting requests* sent to the resource. This app creates events **directly** on the resource calendar via Graph — no meeting request exists, the attendant never runs, and Exchange will accept overlapping events. This is confirmed, documented behavior, not an edge case.
-
-Booking via meeting invites would restore Exchange arbitration but is asynchronous (accept/decline arrives as a response message) and drags organizer-mailbox semantics into a staff UI that wants instant feedback. **Decision:** direct writes + application-owned conflict enforcement (validate → lock per sheet → check → write), which the concurrency profile (1–2 users) makes trivially safe. Consequence: `showAs` is informational (free/busy honesty, hold-vs-confirmed encoding), not an enforcement mechanism.
+Unchanged: the Resource Booking Attendant only processes meeting requests, and this app writes events directly — the attendant never runs, and Exchange accepts overlapping events. Confirmed via spike, not just documentation. Direct writes + application-owned conflict enforcement (validate → lock per sheet → check → write) is trivially safe at the 1–2-user concurrency profile; the Phase 7 cache is deliberately scoped so it can never weaken this (§4.3).
 
 ### 6.2 Identity Model
 
 | Principal | Mechanism | Used for |
 |---|---|---|
-| Staff (interactive) | Entra ID SSO → delegated Graph permissions | Booking create/edit/delete from the UI. Exchange natively records the acting staff member — attribution for free. Requires per-staff Editor permission on each sheet's calendar folder (onboarding/offboarding step). |
-| App service identity | Client credentials → application permissions | Background work not tied to a session: cache refresh, scheduled fetches, the public endpoint's data source. |
-| Staff (fallback viewing) | Reviewer (read-only) calendar permission | Opening sheet calendars in Outlook/OWA. Read-only by design — prevents out-of-band edits. |
-| Anonymous public | None — never touches Graph | Receives only the minimized payload from the public endpoint. |
-
-If operational simplicity later wins out and *all* writes move to the app identity, "booked by" attribution must be written into the event's extended properties (the `bookedBy` field exists for exactly this), and mailbox audit logging becomes more important.
+| Staff (interactive) | Entra ID SSO, identity/audit only | Booking create/edit/delete from the UI. Graph itself stays on the app-only credential below, not a delegated on-behalf-of flow — deliberately, to avoid per-request token acquisition complexity for a benefit (native Exchange attribution) the design accepted skipping. |
+| App service identity | Client credentials → application permissions | All Graph reads/writes, including the public endpoints' data source. |
+| Staff (fallback viewing) | Reviewer (read-only) calendar permission | Opening sheet calendars in Outlook/OWA. |
+| Anonymous public | None — never touches Graph directly | Served only by the two plain Minimal API endpoints (§5.4), through the app's own service layer. |
 
 ### 6.3 Scoping the App Identity (mandatory, not optional)
 
-An unscoped application permission for calendars can touch **every mailbox in the tenant**. Before the app identity is granted anything:
-
-- Place all sheet resource mailboxes in a dedicated mail-enabled security group.
-- Constrain the app registration to that group via **Application Access Policy** (`New-ApplicationAccessPolicy`) or its successor, **RBAC for Applications** in Exchange Online — evaluate both at build time and prefer the RBAC mechanism if the tenant supports it.
-- Test the scoping negatively: verify the app identity is *denied* access to a non-resource mailbox.
+Unchanged: sheet + Club Events mailboxes live in a dedicated mail-enabled security group; the app registration is constrained to that group via Application Access Policy or RBAC for Applications; negatively tested (verify the app identity is denied access to a mailbox outside the group).
 
 ### 6.4 Other Security Requirements
 
-- No secrets in code or plaintext config — environment injection locally, a managed secret store (e.g., Azure Key Vault) in production; client secrets/certificates for the app registration handled the same way.
-- The public endpoint is the only internet-anonymous surface: keep it read-only, minimal, rate-limited, and architecturally isolated so what it *can* expose is easy to reason about.
-- Enable mailbox audit logging on the resource mailboxes.
-- Standard OWASP hygiene on the web app (it is small, but it is still a web app with an authenticated write path).
+- No secrets in code or plaintext config — user-secrets locally, Azure App Service Application Settings (or equivalent secret-injection mechanism for another host) in production. See `docs/deployment-guide.md`.
+- The two public endpoints are the app's only internet-anonymous surface: read-only, minimized (JSON API) or hand-encoded (public calendar), rate-limited, CORS-scoped only to those routes.
+- **A specific, live-verified gotcha:** never apply `.AllowAnonymous()` to `MapRazorComponents<App>()` itself — it disables authorization for every page in the app, not just an intended public one (§5.4). Any future anonymous page must be a plain Minimal API endpoint outside the Blazor component tree.
+- Static assets (CSS/JS/images) are explicitly `.AllowAnonymous()`'d (`app.MapStaticAssets().AllowAnonymous()`) — safe, since they carry nothing sensitive, and necessary since the global `FallbackPolicy` otherwise gates every routed endpoint including these.
+- Mailbox audit logging enabled on every resource mailbox.
+- Standard OWASP hygiene — a full security review pass is a Phase 10 follow-up item.
 
 ---
 
 ## 7. Tenant Provisioning Checklist (one-time + per-new-sheet)
 
-1. Create resource mailboxes (room or equipment type), one per sheet, **plus one "Club Events" mailbox (§4.4)** — no license required below the size threshold (verify against the tenant's SKU).
-2. Create the mail-enabled security group for sheet mailboxes; add all sheets.
-3. `Set-CalendarProcessing` per mailbox: primarily calendar hygiene at this point (e.g., retain subjects/organizer detail rather than blanking them) since booking-policy enforcement is app-owned. Settings verified during the build spike (§8).
-4. Provision the identical master category list (Rental / League / Event / Other, name + color) on every sheet mailbox.
-5. Entra ID app registration: delegated calendar scopes for staff sign-in; application calendar scopes for the service identity; admin consent.
+1. Create resource mailboxes, one per configured sheet, plus one Club Events mailbox.
+2. Create the mail-enabled security group for all facility mailboxes; add every mailbox.
+3. `Set-CalendarProcessing` per mailbox — calendar hygiene (booking-policy enforcement is app-owned, not Exchange's).
+4. Provision the master category list on every sheet mailbox (Rental/League/Bonspiel/Maintenance/Other) and the Club Events mailbox (Bonspiel/Activities/Closure/Other) via `docs/provision-categories.ps1`, parameterized by `-TenantId`, `-ClientId`, `-TenantDomain`, `-SheetCount`.
+5. Entra ID app registration: delegated scope for staff SSO (identity/audit only), application scope for the service identity that does all Graph work.
 6. Scope the application permissions to the security group (Application Access Policy or RBAC for Applications) and negatively test it.
-7. Grant staff: Editor on each sheet calendar folder (delegated write path) and/or Reviewer for read-only Outlook fallback, per §6.2.
-8. Enable mailbox audit logging on the resource mailboxes.
-9. **Repeat steps 1, 2 (membership), 4, 7 for every sheet added later** — script this from day one.
+7. Grant staff Reviewer (read-only Outlook fallback) permission per §6.2.
+8. Enable mailbox audit logging.
+9. Set the app's `Facility`/`Graph` configuration (§4.6) to this tenant's real values.
+10. Repeat steps 1, 2 (membership), 4, 7 for every sheet added later.
+
+See `docs/deployment-guide.md` for the full deployment process this checklist feeds into.
 
 ---
 
-## 8. Risks, Limitations, and Pre-Build Verification Spikes
+## 8. Risks, Limitations, and Resolved Verification Spikes
 
-| Item | Nature | Mitigation / action |
-|---|---|---|
-| Direct-write bypasses booking attendant | **CONFIRMED via spike (2026-07-11)** — two overlapping events created directly against a live test mailbox were both accepted, no conflict rejection | Validates D3/§6.1 empirically, not just from documentation. App-owned conflict enforcement is load-bearing, as designed. |
-| Category filter behavior in `calendarView` | **RESOLVED (2026-07-11) — server-side `$filter` on categories works.** Spike confirmed `$filter=categories/any(c:c eq 'Rental')` correctly returned only the matching test event. | Design can rely on server-side category filtering for category-specific views (e.g., a future "all upcoming rentals" list) instead of always fetching broad and filtering in-app. Note: the core consolidated-availability interval merge (§5.3) still needs the full per-sheet event set regardless of category, since non-Rental bookings also block slots — this finding mainly benefits category-scoped views, not the core aggregation. |
-| Extended property / open extension size limits | **RESOLVED (2026-07-11)** — a 4000-character single-value extended property was accepted without error. | Confirms the "small payloads only" design assumption holds comfortably; no need to test further upward since the design doesn't require larger values. |
-| `getSchedule` 62-day window cap | **CONFIRMED EXACTLY (2026-07-11)** — a 90-day request was rejected with: *"The requested time duration specified for FreeBusyViewOptions.TimeWindow is too long. The allowed limit = 62 days; the actual limit = 90 days."* | Chunking season-long queries into ≤62-day windows is required, not optional. Already reflected in §5.1; no design change needed, just confirmed as a hard rather than approximate limit. |
-| Category color consistency in Outlook shared-calendar views | Still open — client-dependent resolution of master lists, not tested via automated spike | Low stakes (fallback view only); manual visual check across OWA/desktop if it's ever worth closing out, otherwise not blocking. |
-| Recurring-series metadata on exceptions | Editing one occurrence's properties creates exceptions with independent values | Design the league-booking edit flows explicitly around occurrence vs. series semantics |
-| Accidental deletion of active bookings | Recoverable-items window (~weeks) is the only net; no point-in-time restore in EXO | Accepted at this scale — re-entry from a phone call is cheap |
-| Resource mailbox licensing on this SKU | Assumed free below size threshold | Confirm against the tenant's actual licensing docs before build |
-| Graph throttling | Non-issue at 5 sheets / handful of staff | Cache absorbs bursts; none expected |
-| Schema drift (categories, property names) | Exchange validates nothing | Single fixed vocabulary module in app code; sole-writer invariant; read-only staff access in Outlook |
+| Item | Status |
+|---|---|
+| Direct-write bypasses booking attendant | **CONFIRMED** via spike — validates D3/§6.1. |
+| Category filter behavior in `calendarView` | **RESOLVED** — server-side `$filter` on categories works, better than the original design assumed. |
+| Extended property size limits | **RESOLVED** — 4000-character values accepted without error. |
+| `getSchedule` 62-day window cap | **CONFIRMED EXACTLY** at 62 days (not used in the shipped design, since the consolidated-availability view that would have needed it is backlogged, §5.3). |
+| `calendarView` pagination | **Found live, not a pre-build spike** — a wide Month-view window with several expanded recurring series can exceed one page; every read path now follows `@odata.nextLink`. |
+| `BookingGroupId` propagation to recurring occurrences | **Found false via live testing** (§4.5) — only persists once an occurrence is individually edited; fixed via a dedup-key fallback. |
+| Blazor circuit + anonymous pages | **Serious incident, resolved** (§5.4) — public pages are now plain Minimal API endpoints, never Blazor components sharing the staff circuit. |
+| Category color consistency in Outlook shared-calendar views | Still open, low stakes, client-dependent; not automated. |
+| Accidental deletion of active bookings | Recoverable-items window (~weeks) is the only net; accepted at this scale. |
+| Resource mailbox licensing | Confirmed against the tenant's actual SKU during Phase 1. |
+| Graph throttling | Non-issue at this scale; cache absorbs bursts. |
+| Schema drift (categories, property names) | Mitigated by the sole-writer invariant + read-only staff Outlook access. |
+| iframe embedding of the public calendar | No `frame-ancestors` CSP restriction — deliberate for now (simplicity over locking to a specific domain), documented as a future hardening candidate. |
 
 ---
 
@@ -370,23 +327,26 @@ An unscoped application permission for calendars can touch **every mailbox in th
 
 | # | Decision | Rationale |
 |---|---|---|
-| D1 | EXO resource mailboxes as system of record | Zero-infrastructure hosted store in a tenant already paid for; native recurrence, free/busy, permissions/audit; Outlook as emergency fallback UI. A pragmatic fit rather than a perfect one — accepted with eyes open (Exchange is the datastore and calendar engine, not the referee). |
-| D2 | Custom web UI; Outlook read-only fallback | Custom views + contextual metadata are core requirements Outlook can't serve; read-only staff access also protects the sole-writer invariant. |
-| D3 | Direct event writes; app-owned conflict enforcement | Resource Booking Attendant doesn't run on direct writes; invite-based flow is asynchronous and clunky for a staff UI. Per-sheet lock + check-then-write is trivially safe at 1–2 users. |
-| D4 | `showAs` tentative/busy encodes hold vs. confirmed | Keeps free/busy and Outlook fallback semantically honest; native enum is not extensible, so business taxonomy lives elsewhere. |
-| D5 | `categories` for booking type (Rental/League/Event/Other) | Free-form strings validated by app discipline; master-list provisioning gives consistent Outlook colors; web UI owns its own color mapping independently. |
-| D6 | Metadata on the event itself: named extended properties (filterable fields) + one JSON blob (display-only) | Explicit constraint against adjacent datastores; split by access pattern works within Graph's filtering limitations. |
-| D7 | No companion database | User constraint: avoid fragility/complexity of a second authoritative store. Consequence accepted: cross-event queries are fetch-then-filter in app code. |
-| D8 | Ephemeral short-TTL cache; no webhooks | Sole-writer + read-only Outlook access means nothing to catch out-of-band; 30–60 s TTL gives near-real-time views without subscription renewal/reconciliation infrastructure. |
-| D9 | Hard delete on cancellation | Cancellation audit/reporting explicitly out of scope; simplifies views; recoverable-items window accepted as the only net. |
-| D10 | Standalone app deployment + thin CMS embed | Decouples booking operations from website failure domain; makes the Drupal/WordPress decision irrelevant to this project. |
-| D11 | Hand-built minimized public payload | Prevents accidental PII/price leakage; public endpoint reads cache only, insulating Graph quota from anonymous traffic. |
-| D12 | Microsoft Bookings and Power Apps rejected | Bookings targets customer self-service, not staff-mediated management with custom states/metadata/consolidated views; Power Apps trades away the custom-view flexibility that motivated the project. |
-| D13 | Club Events as a 6th dedicated resource mailbox, no cross-conflict-check with sheet bookings | Atomic single-write vs. 5 non-transactional writes; satisfies "simpler viewing" directly. No cross-check chosen for build simplicity — revisit only if real double-booking incidents occur. |
-| D14 | .NET / C# for the standalone app | Explicitly specified by the operator for this project (2026-07-11). A prior recommendation of Node.js/TypeScript was retracted — it had been justified partly by consistency with an unrelated project, which is not a valid basis for this project's stack decisions. |
+| D1 | EXO resource mailboxes as system of record | Zero-infrastructure hosted store; native recurrence, free/busy, permissions/audit; Outlook as emergency fallback UI. |
+| D2 | Custom web UI; Outlook read-only fallback | Custom views + contextual metadata Outlook can't serve; read-only staff access protects the sole-writer invariant. |
+| D3 | Direct event writes; app-owned conflict enforcement | Resource Booking Attendant doesn't run on direct writes; invite-based flow is asynchronous and clunky for a staff UI. |
+| D4 | `showAs` tentative/busy encodes hold vs. confirmed | Keeps free/busy and Outlook fallback semantically honest. |
+| D5 | `categories` for booking type | Free-form strings validated by app discipline; own color mapping independent of Exchange's. |
+| D6 | Metadata on the event itself: named extended properties + one JSON blob | Explicit constraint against adjacent datastores. |
+| D7 | No companion database | Avoid fragility/complexity of a second authoritative store. |
+| D8 | Ephemeral short-TTL cache; no webhooks | Sole-writer + read-only Outlook access means nothing out-of-band to catch. |
+| D9 | Hard delete on cancellation | Audit/reporting explicitly out of scope. |
+| D10 | Single Blazor Server deployment + thin CMS embed | Decouples booking operations from the website's failure domain. |
+| D11 | Hand-built minimized public payload | Prevents accidental PII leakage; a deliberately separate mapping, never a reuse of the internal API with anonymous access bolted on. |
+| D12 | Microsoft Bookings and Power Apps rejected | Bookings targets customer self-service; Power Apps trades away custom-view flexibility. |
+| D13 | Club Events as a dedicated resource mailbox, no cross-conflict-check with sheet bookings | Atomic single-write vs. non-transactional multi-write. **Narrowed after build** (§4.4): closure (`MarksSheetsUnavailable`) events now are cross-checked against new sheet bookings/series; everything else about D13 stands. |
+| D14 | .NET / C#, Blazor Server for the app | Explicitly specified by the operator for this project, independent of any other project's stack. |
+| D15 | Public/anonymous pages are always plain Minimal API endpoints, never Blazor components | Established after a live-verified incident (§5.4) where sharing the authenticated Blazor circuit's endpoint registration either exposed every staff page or left an unfixable client-runtime error banner for anonymous visitors. Not a style preference — a hard rule for any future public page. |
+| D16 | The ephemeral cache is scoped to view-rendering reads only, never conflict-check reads | A cached snapshot on the conflict-check path could mask a just-created booking and allow a double-booking within the TTL window — unacceptable given D3's whole premise. The two read paths are kept structurally separate in code specifically so this can't happen by accident. |
+| D17 | Tenant/mailbox/timezone are configuration, never hardcoded | Added during Phase 10 once a real production tenant existed — the same deployed app must be repointable at a different tenant, or stood up fresh for a different facility, without a recompile (§4.6). |
 
 ---
 
 ## 10. Generalization Note
 
-To reuse this for bowling lanes, tennis courts, or other facilities: the resource-mailbox-per-unit model, state/category mechanism, conflict enforcement, interval-merge views, and public endpoint are all facility-agnostic. What changes is vocabulary (categories, states), slot-granularity rules, and view definitions — all of which live in the application's configuration/vocabulary layer, not the architecture.
+To reuse this for bowling lanes, tennis courts, or other facilities: the resource-mailbox-per-unit model, state/category mechanism, conflict enforcement, and public-endpoint pattern are all facility-agnostic, and — as of Phase 10 — the sheet count, mailbox naming, tenant, and time zone are genuinely configuration, not code. What still changes per facility is vocabulary (categories, states) and slot-granularity rules, which live in the application's domain layer (`Domain/BookingCategory.cs`, `Domain/ClubEventCategory.cs`), not its architecture.

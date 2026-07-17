@@ -74,6 +74,7 @@
 
 <BookingFormModal IsOpen="_formOpen" Draft="_draft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" />
 <ClubEventFormModal IsOpen="_clubEventFormOpen" Draft="_clubEventDraft" IsSaving="_isSavingClubEvent" OnSave="SaveClubEventDraft" OnCancel="CloseClubEventForm" OnDelete="DeleteClubEventDraft" />
+<ClubEventDetailModal ClubEvent="_clubEventDetail" OnClose="() => _clubEventDetail = null" OnEdit="StartEditClubEvent" OnDelete="DeleteClubEventDirect" />
 <BookingDetailModal Group="_detailGroup" OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" />
 <CancelChoiceModal Group="_cancelGroup" OnChoice="ApplyCancelChoice" OnKeep="() => _cancelGroup = null" />
 <SeriesWizardModal IsOpen="_seriesWizardOpen" Draft="_seriesDraft" Step="_seriesStep" Conflicts="_seriesConflicts"
@@ -116,6 +117,7 @@
     private bool _clubEventFormOpen;
     private ClubEventDraft _clubEventDraft = new();
     private bool _isSavingClubEvent;
+    private ClubEvent? _clubEventDetail;
 
     private List<SheetBooking>? _detailGroup;
     private List<SheetBooking>? _cancelGroup;
@@ -506,6 +508,12 @@
 
     private void OpenClubEventDetail(ClubEvent ce)
     {
+        _clubEventDetail = ce;
+    }
+
+    private void StartEditClubEvent(ClubEvent ce)
+    {
+        _clubEventDetail = null;
         _clubEventDraft = new ClubEventDraft();
         _clubEventDraft.LoadForEdit(ce);
         _clubEventFormOpen = true;
@@ -514,6 +522,18 @@
     private void CloseClubEventForm()
     {
         _clubEventFormOpen = false;
+    }
+
+    private async Task DeleteClubEventDirect(ClubEvent ce)
+    {
+        _clubEventDetail = null;
+        if (ce.EventId is null)
+        {
+            return;
+        }
+
+        await ClubEventService.CancelAsync(ce.EventId);
+        await LoadAsync();
     }
 
     private async Task SaveClubEventDraft()

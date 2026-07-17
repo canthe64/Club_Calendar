@@ -3,6 +3,7 @@
 @using FacilityScheduler.Services
 @inject SheetBookingService BookingService
 @inject AuthenticationStateProvider AuthProvider
+@inject FacilityConfiguration Facility
 
 <PageTitle>Schedule</PageTitle>
 
@@ -12,7 +13,7 @@
     <label>
         Sheet:
         <select @bind="SelectedSheet" @bind:after="LoadBookingsAsync">
-            @foreach (var sheet in Sheets.All)
+            @foreach (var sheet in Facility.SheetMailboxes)
             {
                 <option value="@sheet">@sheet</option>
             }
@@ -130,7 +131,7 @@ else
 }
 
 @code {
-    private string SelectedSheet { get; set; } = Sheets.All[0];
+    private string SelectedSheet { get; set; } = string.Empty;
     private DateTime SelectedDate { get; set; } = DateTime.UtcNow.Date;
     private List<SheetBooking>? _bookings;
     private bool _showCreateForm;
@@ -140,6 +141,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        SelectedSheet = Facility.SheetMailboxes[0];
         await LoadBookingsAsync();
     }
 

@@ -1,4 +1,6 @@
 @using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject FacilityConfiguration Facility
 
 @if (IsOpen)
 {
@@ -46,7 +48,7 @@
                 <div>
                     <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Sheets <span style="font-weight:400;color:#90a0ab">— tap to toggle</span></div>
                     <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
-                        @foreach (var sheet in Sheets.All)
+                        @foreach (var sheet in Facility.SheetMailboxes)
                         {
                             var isSelected = Draft.SelectedSheets.Contains(sheet);
                             <span @onclick="() => ToggleSheet(sheet)"
@@ -162,7 +164,7 @@
         }
     }
 
-    private void SelectAllSheets() => Draft.SelectedSheets = [.. Sheets.All];
+    private void SelectAllSheets() => Draft.SelectedSheets = [.. Facility.SheetMailboxes];
 
     private void OnDateChanged(ChangeEventArgs e)
     {

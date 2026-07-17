@@ -18,6 +18,7 @@ builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
 builder.Services.Configure<GraphOptions>(builder.Configuration.GetSection(GraphOptions.SectionName));
+builder.Services.Configure<FacilityOptions>(builder.Configuration.GetSection(FacilityOptions.SectionName));
 
 builder.Services.AddSingleton(sp =>
 {
@@ -26,6 +27,7 @@ builder.Services.AddSingleton(sp =>
     return new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
 });
 
+builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
 builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
@@ -72,6 +74,11 @@ builder.Services.AddRazorPages()
     .AddMicrosoftIdentityUI();
 
 var app = builder.Build();
+
+// Force FacilityConfiguration to construct now, not lazily on first request - a misconfigured
+// deployment (missing tenant domain/sheet mailboxes/timezone) should fail immediately and visibly
+// at startup, not surface as a confusing error to the first user.
+app.Services.GetRequiredService<FacilityScheduler.Services.FacilityConfiguration>();
 
 // Configure the HTTP request pipeline.
 if (!app.Environment.IsDevelopment())

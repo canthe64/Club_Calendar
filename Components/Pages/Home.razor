@@ -1,11 +1,13 @@
 @page "/"
 @using Microsoft.Graph
+@using FacilityScheduler.Services
 @inject GraphServiceClient GraphClient
+@inject FacilityConfiguration Facility
 
 <PageTitle>Facility Scheduler - Connectivity Check</PageTitle>
 
 <h1>Facility Scheduler</h1>
-<p>Graph connectivity check against the 6 resource mailboxes.</p>
+<p>Graph connectivity check against the @Mailboxes.Length resource mailboxes.</p>
 
 @if (_results is null)
 {
@@ -37,15 +39,7 @@ else
 @code {
     private List<MailboxCheckResult>? _results;
 
-    private static readonly string[] Mailboxes =
-    [
-        "sheet1@anthefamily.onmicrosoft.com",
-        "sheet2@anthefamily.onmicrosoft.com",
-        "sheet3@anthefamily.onmicrosoft.com",
-        "sheet4@anthefamily.onmicrosoft.com",
-        "sheet5@anthefamily.onmicrosoft.com",
-        "clubevents@anthefamily.onmicrosoft.com",
-    ];
+    private string[] Mailboxes => [.. Facility.SheetMailboxes, Facility.ClubEventsMailbox];
 
     protected override async Task OnInitializedAsync()
     {

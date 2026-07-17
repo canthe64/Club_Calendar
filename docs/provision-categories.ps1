@@ -1,12 +1,14 @@
 <#
-Provisions master categories on the 6 facility resource mailboxes (5 sheets + Club Events).
-Idempotent: safe to re-run - skips any category that already exists by displayName.
+Provisions master categories on the facility's resource mailboxes (the configured sheet count,
+plus Club Events). Idempotent: safe to re-run - skips any category that already exists by displayName.
 Requires: $env:CURLING_APP_CLIENT_SECRET set in this session before running.
 #>
 
 param(
     [string]$TenantId = "<tenant-id>",
-    [string]$ClientId = "<client-id>"
+    [string]$ClientId = "<client-id>",
+    [string]$TenantDomain = "<tenant-domain>",
+    [int]$SheetCount = 5
 )
 
 if (-not $env:CURLING_APP_CLIENT_SECRET) {
@@ -65,10 +67,10 @@ function Set-MailboxCategories {
     }
 }
 
-foreach ($mb in (1..5 | ForEach-Object { "sheet$_@anthefamily.onmicrosoft.com" })) {
+foreach ($mb in (1..$SheetCount | ForEach-Object { "sheet$_@$TenantDomain" })) {
     Set-MailboxCategories -Mailbox $mb -Categories $sheetCategories
 }
-Set-MailboxCategories -Mailbox "clubevents@anthefamily.onmicrosoft.com" -Categories $clubEventCategories
+Set-MailboxCategories -Mailbox "clubevents@$TenantDomain" -Categories $clubEventCategories
 
 $results | Format-Table -AutoSize
 

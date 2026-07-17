@@ -1,0 +1,83 @@
+@using FacilityScheduler.Domain
+
+@if (ClubEvent is not null)
+{
+    var ce = ClubEvent;
+    <div @onclick="() => OnClose.InvokeAsync()" style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div @onclick:stopPropagation="true" style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:380px">
+            <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
+                <span style="font-size:15px;font-weight:600;color:#1e2a33">@ce.Title</span>
+                <span style="background:@CalendarStyles.ClubEventCategoryLightBg(ce.Category);color:@CalendarStyles.ClubEventCategoryColor(ce.Category);font-size:10px;font-weight:600;padding:2px 9px;border-radius:10px">@ce.Category</span>
+            </div>
+            <div style="font-size:11px;color:#5a7183;margin-bottom:12px">@DateRangeText(ce)</div>
+
+            <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                <span style="color:#5a7183">Marks sheets unavailable</span><span style="color:#1e2a33">@(ce.MarksSheetsUnavailable ? "Yes" : "No")</span>
+            </div>
+            @if (!string.IsNullOrWhiteSpace(ce.Notes))
+            {
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                    <span style="color:#5a7183">Notes</span><span style="color:#1e2a33">@ce.Notes</span>
+                </div>
+            }
+            @if (!string.IsNullOrWhiteSpace(ce.BookedBy))
+            {
+                <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:11.5px">
+                    <span style="color:#5a7183">Booked by</span><span style="color:#1e2a33">@ce.BookedBy</span>
+                </div>
+            }
+
+            @if (_confirmingDelete)
+            {
+                <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:11px">
+                    <div style="color:#a02c21;font-weight:600;margin-bottom:6px">Delete this club event? This can't be undone.</div>
+                    <div style="display:flex;gap:8px;font-weight:600">
+                        <span @onclick="() => OnDelete.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:6px 0;cursor:pointer">Yes, delete</span>
+                        <span @onclick="() => _confirmingDelete = false" style="flex:1;text-align:center;color:#90a0ab;cursor:pointer;padding:6px 0">Never mind</span>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div style="display:flex;gap:8px;margin-top:14px;font-size:11.5px;font-weight:600">
+                    <span @onclick="() => OnEdit.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit event…</span>
+                    <span @onclick="() => _confirmingDelete = true" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Delete Club Event</span>
+                    <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public ClubEvent? ClubEvent { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<ClubEvent> OnEdit { get; set; }
+    [Parameter] public EventCallback<ClubEvent> OnDelete { get; set; }
+
+    private bool _confirmingDelete;
+    private ClubEvent? _lastClubEvent;
+
+    protected override void OnParametersSet()
+    {
+        if (!ReferenceEquals(ClubEvent, _lastClubEvent))
+        {
+            _confirmingDelete = false;
+            _lastClubEvent = ClubEvent;
+        }
+    }
+
+    private static string DateRangeText(ClubEvent ce)
+    {
+        if (ce.IsAllDay)
+        {
+            return ce.Start.Date == ce.End.Date
+                ? ce.Start.ToString("dddd, MMM d")
+                : $"{ce.Start:MMM d} - {ce.End:MMM d, yyyy}";
+        }
+
+        return ce.Start.Date == ce.End.Date
+            ? $"{ce.Start:dddd, MMM d} · {ce.Start:h:mmtt}-{ce.End:h:mmtt}"
+            : $"{ce.Start:MMM d, h:mmtt} - {ce.End:MMM d, h:mmtt yyyy}";
+    }
+}

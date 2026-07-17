@@ -17,7 +17,7 @@ public class ClubEvent
     public required DateTime End { get; set; }
     public bool IsAllDay { get; set; } = true;
 
-    /// <summary>Whether this event closes all 5 sheets for its duration - a per-event staff choice,
+    /// <summary>Whether this event closes every sheet for its duration - a per-event staff choice,
     /// not implied by category (e.g. a promotional tournament listing might not close the ice).</summary>
     public bool MarksSheetsUnavailable { get; set; }
 

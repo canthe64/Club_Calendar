@@ -13,7 +13,7 @@ namespace FacilityScheduler.Services;
 /// sheet bookings nor between club events themselves) - build-simplicity is the explicit design
 /// choice here, not an oversight.
 /// </summary>
-public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache)
+public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility)
 {
     private const string PropertyGuid = FacilityGraphConventions.PropertyGuid;
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name ClubEventBookedBy";
@@ -42,7 +42,7 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
     public async Task<ClubEvent> CreateAsync(ClubEvent clubEvent, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
-        var created = await graphClient.Users[Sheets.ClubEvents].Events.PostAsync(graphEvent, cancellationToken: ct);
+        var created = await graphClient.Users[facility.ClubEventsMailbox].Events.PostAsync(graphEvent, cancellationToken: ct);
         clubEvent.EventId = created?.Id;
         clubEvent.ICalUId = created?.ICalUId;
         InvalidateViewCache();
@@ -52,13 +52,13 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
     public async Task UpdateAsync(ClubEvent clubEvent, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
-        await graphClient.Users[Sheets.ClubEvents].Events[clubEvent.EventId!].PatchAsync(graphEvent, cancellationToken: ct);
+        await graphClient.Users[facility.ClubEventsMailbox].Events[clubEvent.EventId!].PatchAsync(graphEvent, cancellationToken: ct);
         InvalidateViewCache();
     }
 
     public async Task CancelAsync(string eventId, CancellationToken ct = default)
     {
-        await graphClient.Users[Sheets.ClubEvents].Events[eventId].DeleteAsync(cancellationToken: ct);
+        await graphClient.Users[facility.ClubEventsMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
         InvalidateViewCache();
     }
 
@@ -76,15 +76,16 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
         }
 
         var allEvents = new List<Event>();
-        var response = await graphClient.Users[Sheets.ClubEvents].CalendarView.GetAsync(config =>
+        var response = await graphClient.Users[facility.ClubEventsMailbox].CalendarView.GetAsync(config =>
         {
-            config.QueryParameters.StartDateTime = FacilityGraphConventions.ToUtcQueryString(start);
-            config.QueryParameters.EndDateTime = FacilityGraphConventions.ToUtcQueryString(end);
+            config.QueryParameters.StartDateTime = facility.ToUtcQueryString(start);
+            config.QueryParameters.EndDateTime = facility.ToUtcQueryString(end);
             config.QueryParameters.Expand = ExtendedPropertiesExpand;
             // Exchange auto-converts/wraps a plain-text event body internally regardless of the
-            // ContentType we send on write ("converted from text" HTML wrapper) - this second Prefer
+            // ContentType we send on write ("converted from text" HTML wrapper) - this Prefer
             // directive asks Graph to normalize the response body back to plain text on the way out.
-            config.Headers.Add("Prefer", $"outlook.timezone=\"{FacilityGraphConventions.FacilityTimeZone}\", outlook.body-content-type=\"text\"");
+            // No outlook.timezone preference here (deliberately) - see FacilityConfiguration.FromUtcResponseString.
+            config.Headers.Add("Prefer", "outlook.body-content-type=\"text\"");
         }, ct);
 
         // Same pagination gotcha as SheetBookingService.GetEventsInRangeAsync - a wide window can
@@ -97,7 +98,7 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
             }
 
             response = response.OdataNextLink is not null
-                ? await graphClient.Users[Sheets.ClubEvents].CalendarView.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct)
+                ? await graphClient.Users[facility.ClubEventsMailbox].CalendarView.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct)
                 : null;
         }
 
@@ -107,7 +108,7 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
         return result;
     }
 
-    private static Event ToGraphEvent(ClubEvent clubEvent)
+    private Event ToGraphEvent(ClubEvent clubEvent)
     {
         var extendedProps = new List<SingleValueLegacyExtendedProperty>
         {
@@ -132,33 +133,48 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
         {
             // Graph's all-day events use an exclusive end date - an inclusive Aug 15-17 span is
             // Start=Aug15, End=Aug18. Staff enter (and this app otherwise treats) an inclusive end.
-            graphEvent.Start = new DateTimeTimeZone { DateTime = clubEvent.Start.Date.ToString("s"), TimeZone = FacilityGraphConventions.FacilityTimeZone };
-            graphEvent.End = new DateTimeTimeZone { DateTime = clubEvent.End.Date.AddDays(1).ToString("s"), TimeZone = FacilityGraphConventions.FacilityTimeZone };
+            graphEvent.Start = new DateTimeTimeZone { DateTime = clubEvent.Start.Date.ToString("s"), TimeZone = facility.TimeZone };
+            graphEvent.End = new DateTimeTimeZone { DateTime = clubEvent.End.Date.AddDays(1).ToString("s"), TimeZone = facility.TimeZone };
         }
         else
         {
-            graphEvent.Start = new DateTimeTimeZone { DateTime = clubEvent.Start.ToString("s"), TimeZone = FacilityGraphConventions.FacilityTimeZone };
-            graphEvent.End = new DateTimeTimeZone { DateTime = clubEvent.End.ToString("s"), TimeZone = FacilityGraphConventions.FacilityTimeZone };
+            graphEvent.Start = new DateTimeTimeZone { DateTime = clubEvent.Start.ToString("s"), TimeZone = facility.TimeZone };
+            graphEvent.End = new DateTimeTimeZone { DateTime = clubEvent.End.ToString("s"), TimeZone = facility.TimeZone };
         }
 
         return graphEvent;
     }
 
-    private static ClubEvent FromGraphEvent(Event e)
+    private ClubEvent FromGraphEvent(Event e)
     {
         var category = Enum.TryParse<ClubEventCategory>(e.Categories?.FirstOrDefault(), out var parsedCategory)
             ? parsedCategory
             : ClubEventCategory.Other;
 
         var isAllDay = e.IsAllDay ?? false;
-        var start = DateTime.Parse(e.Start?.DateTime ?? DateTime.UtcNow.ToString("s"));
-        var end = DateTime.Parse(e.End?.DateTime ?? DateTime.UtcNow.ToString("s"));
+        DateTime start, end;
 
         if (isAllDay)
         {
+            // Graph returns an all-day event's Start/End as a bare midnight date labeled "UTC" -
+            // that's Graph's convention for "this is a calendar date, not a real instant," not an
+            // actual UTC timestamp needing conversion. Running it through FromUtcResponseString
+            // (built for genuine UTC instants) shifted the date backward by the facility's UTC
+            // offset before truncating - e.g. "2026-07-31T00:00:00" (meant to just mean July 31)
+            // got converted to Pacific time and landed on July 30 instead. Parse it as a literal
+            // calendar date instead - live-confirmed 2026-07-16 via an edit that silently reverted
+            // to (new date - 1 day) on every read, which is exactly this off-by-one-UTC-offset shift.
+            start = DateTime.Parse(e.Start?.DateTime ?? DateTime.UtcNow.ToString("o"), System.Globalization.CultureInfo.InvariantCulture).Date;
+            end = DateTime.Parse(e.End?.DateTime ?? DateTime.UtcNow.ToString("o"), System.Globalization.CultureInfo.InvariantCulture).Date;
+
             // Undo the +1 day exclusive-end conversion applied on write, back to the inclusive
             // last day staff entered.
-            end = end.Date.AddDays(-1);
+            end = end.AddDays(-1);
+        }
+        else
+        {
+            start = facility.FromUtcResponseString(e.Start?.DateTime ?? DateTime.UtcNow.ToString("o"));
+            end = facility.FromUtcResponseString(e.End?.DateTime ?? DateTime.UtcNow.ToString("o"));
         }
 
         var marksUnavailableRaw = e.SingleValueExtendedProperties?.FirstOrDefault(p => p.Id == MarksUnavailablePropertyId)?.Value;

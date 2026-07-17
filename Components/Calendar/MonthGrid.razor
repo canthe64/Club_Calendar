@@ -19,8 +19,10 @@
                     .Select(g => g.First())
                     .ToList();
                 var dayItems = CombineForDay(dayClubEvents, dayBookings, cell.Date);
+                var isExpanded = _expandedDays.Contains(cell.Date);
+                var visibleItems = isExpanded ? dayItems : dayItems.Take(3).ToList();
             }
-            @foreach (var item in dayItems.Take(3))
+            @foreach (var item in visibleItems)
             {
                 @if (item.ClubEvent is { } ce)
                 {
@@ -37,9 +39,10 @@
                     </div>
                 }
             }
-            @if (dayItems.Count > 3)
+            @if (!isExpanded && dayItems.Count > 3)
             {
-                <div style="color:#90a0ab;margin-top:2px;padding:0 2px">+@(dayItems.Count - 3) more</div>
+                <div @onclick="() => ExpandDay(cell.Date)" @onclick:stopPropagation="true"
+                     style="color:#90a0ab;margin-top:2px;padding:0 2px;cursor:pointer;text-decoration:underline">+@(dayItems.Count - 3) more</div>
             }
         </div>
     }
@@ -54,6 +57,14 @@
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
 
     private static readonly string[] DowNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    // Which day cells have had their "+N more" expanded to show every item. Resets naturally when
+    // this component is torn down (switching away from Month view, or navigating to a different
+    // month reloads the page's data but keeps the same component instance - deliberately left
+    // expanded across a Prev/Next/Today navigation within Month view, only clearing on remount).
+    private readonly HashSet<DateTime> _expandedDays = [];
+
+    private void ExpandDay(DateTime date) => _expandedDays.Add(date);
 
     private IEnumerable<DateTime> MonthCells
     {

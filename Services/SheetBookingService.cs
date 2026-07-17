@@ -13,7 +13,7 @@ namespace FacilityScheduler.Services;
 /// Booking Attendant (confirmed via spike, architecture doc D3/S6.1), so this service is the
 /// only thing standing between two overlapping bookings on the same sheet.
 /// </summary>
-public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache)
+public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility)
 {
     // One semaphore per sheet mailbox, lazily created. Serializes create/confirm/cancel per
     // sheet so the check-then-write conflict check can't race. Adequate at the app's known
@@ -43,7 +43,6 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     // Fixed GUID namespace for this app's custom extended properties. BookedBy and
     // BookingGroupId are named, individually filterable properties; everything display-only
     // is bundled into one JSON blob (architecture doc S4.1 design rule).
-    private const string FacilityTimeZone = FacilityGraphConventions.FacilityTimeZone;
     private const string PropertyGuid = FacilityGraphConventions.PropertyGuid;
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name BookedBy";
     private const string DetailsPropertyId = $"String {{{PropertyGuid}}} Name BookingDetails";
@@ -397,7 +396,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                     Type = RecurrenceRangeType.EndDate,
                     StartDate = new Microsoft.Kiota.Abstractions.Date(template.Start.Year, template.Start.Month, template.Start.Day),
                     EndDate = new Microsoft.Kiota.Abstractions.Date(lastOccurrenceDate.Year, lastOccurrenceDate.Month, lastOccurrenceDate.Day),
-                    RecurrenceTimeZone = FacilityTimeZone
+                    RecurrenceTimeZone = facility.TimeZone
                 }
             };
 
@@ -411,9 +410,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 var allInstances = new List<Event>();
                 var instances = await graphClient.Users[sheet].Events[result.Id].Instances.GetAsync(config =>
                 {
-                    config.QueryParameters.StartDateTime = FacilityGraphConventions.ToUtcQueryString(template.Start);
-                    config.QueryParameters.EndDateTime = FacilityGraphConventions.ToUtcQueryString(lastOccurrenceDate.Date.AddDays(1));
-                    config.Headers.Add("Prefer", $"outlook.timezone=\"{FacilityTimeZone}\"");
+                    config.QueryParameters.StartDateTime = facility.ToUtcQueryString(template.Start);
+                    config.QueryParameters.EndDateTime = facility.ToUtcQueryString(lastOccurrenceDate.Date.AddDays(1));
                 }, ct);
 
                 // Same pagination gotcha as GetEventsInRangeAsync - a long season's worth of
@@ -437,7 +435,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                         continue;
                     }
 
-                    var instanceDate = DateTime.Parse(instance.Start.DateTime).Date;
+                    var instanceDate = facility.FromUtcResponseString(instance.Start.DateTime).Date;
                     if (excluded.Contains(instanceDate))
                     {
                         await graphClient.Users[sheet].Events[instance.Id].DeleteAsync(cancellationToken: ct);
@@ -485,7 +483,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         return events.Select(e => FromGraphEvent(sheetMailbox, e)).ToList();
     }
 
-    /// <summary>Fans out across all 5 sheets in parallel and merges the results - each item
+    /// <summary>Fans out across every configured sheet in parallel and merges the results - each item
     /// already carries its own SheetMailbox, so callers can group by sheet or by
     /// BookingGroupId as needed. Read-cached (Phase 7, 30s TTL) - this is the view-rendering read
     /// path (Calendar.razor, PublicAvailabilityService), not a conflict check, so a short-lived
@@ -498,7 +496,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             return cached;
         }
 
-        var tasks = Sheets.All.Select(sheet => GetBookingsAsync(sheet, start, end, ct));
+        var tasks = facility.SheetMailboxes.Select(sheet => GetBookingsAsync(sheet, start, end, ct));
         var results = await Task.WhenAll(tasks);
         var combined = results.SelectMany(r => r).ToList();
 
@@ -514,7 +512,6 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         var refreshed = await graphClient.Users[sheetMailbox].Events[eventId].GetAsync(config =>
         {
             config.QueryParameters.Expand = ExtendedPropertiesExpand;
-            config.Headers.Add("Prefer", $"outlook.timezone=\"{FacilityTimeZone}\"");
         }, ct);
 
         return FromGraphEvent(sheetMailbox, refreshed!);
@@ -525,10 +522,9 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         var allEvents = new List<Event>();
         var response = await graphClient.Users[sheetMailbox].CalendarView.GetAsync(config =>
         {
-            config.QueryParameters.StartDateTime = FacilityGraphConventions.ToUtcQueryString(start);
-            config.QueryParameters.EndDateTime = FacilityGraphConventions.ToUtcQueryString(end);
+            config.QueryParameters.StartDateTime = facility.ToUtcQueryString(start);
+            config.QueryParameters.EndDateTime = facility.ToUtcQueryString(end);
             config.QueryParameters.Expand = ExtendedPropertiesExpand;
-            config.Headers.Add("Prefer", $"outlook.timezone=\"{FacilityTimeZone}\"");
         }, ct);
 
         // calendarView pages its results - a wide window (e.g. a 6-week month view) with several
@@ -549,7 +545,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         return allEvents;
     }
 
-    private static Event ToGraphEvent(SheetBooking booking, bool includeTime = true)
+    private Event ToGraphEvent(SheetBooking booking, bool includeTime = true)
     {
         var subject = string.IsNullOrWhiteSpace(booking.RenterName)
             ? booking.Category.ToString()
@@ -584,14 +580,14 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
         if (includeTime)
         {
-            graphEvent.Start = new DateTimeTimeZone { DateTime = booking.Start.ToString("s"), TimeZone = FacilityTimeZone };
-            graphEvent.End = new DateTimeTimeZone { DateTime = booking.End.ToString("s"), TimeZone = FacilityTimeZone };
+            graphEvent.Start = new DateTimeTimeZone { DateTime = booking.Start.ToString("s"), TimeZone = facility.TimeZone };
+            graphEvent.End = new DateTimeTimeZone { DateTime = booking.End.ToString("s"), TimeZone = facility.TimeZone };
         }
 
         return graphEvent;
     }
 
-    private static SheetBooking FromGraphEvent(string sheetMailbox, Event e)
+    private SheetBooking FromGraphEvent(string sheetMailbox, Event e)
     {
         var category = Enum.TryParse<BookingCategory>(e.Categories?.FirstOrDefault(), out var parsedCategory)
             ? parsedCategory
@@ -615,8 +611,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             EventId = e.Id,
             ICalUId = e.ICalUId,
             SheetMailbox = sheetMailbox,
-            Start = DateTime.Parse(e.Start?.DateTime ?? DateTime.UtcNow.ToString("s")),
-            End = DateTime.Parse(e.End?.DateTime ?? DateTime.UtcNow.ToString("s")),
+            Start = facility.FromUtcResponseString(e.Start?.DateTime ?? DateTime.UtcNow.ToString("o")),
+            End = facility.FromUtcResponseString(e.End?.DateTime ?? DateTime.UtcNow.ToString("o")),
             Category = category,
             State = state,
             RenterName = details?.RenterName,

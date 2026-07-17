@@ -5,6 +5,7 @@
 @using FacilityScheduler.Services
 @inject GraphServiceClient GraphClient
 @inject SheetBookingService BookingService
+@inject FacilityConfiguration Facility
 
 <PageTitle>Diagnostics</PageTitle>
 
@@ -39,7 +40,7 @@
 }
 
 @code {
-    private const string TestMailbox = "sheet1@anthefamily.onmicrosoft.com";
+    private string TestMailbox => Facility.SheetMailboxes[0];
     private bool _running;
     private readonly List<SpikeResult> _results = [];
 
