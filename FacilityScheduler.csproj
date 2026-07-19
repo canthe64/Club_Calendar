@@ -6,6 +6,14 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UserSecretsId>c3794faa-1424-4466-b475-551c703eacff</UserSecretsId>
+    <!-- The SDK only excludes bin/ and obj/ from its default item globs by default - a local
+         "dotnet publish -o ./publish" (or any other output folder left inside the project tree)
+         gets re-globbed as source input on the next build, and a copied .razor.js with no sibling
+         .razor file next to it in that folder trips BLAZOR106 ("JS module file was defined but no
+         associated razor component or view was found for it"). Live-hit 2026-07-16 - excluding any
+         top-level "publish" folder here means this can't recur regardless of where a future local
+         publish happens to land. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish/**;publish\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>
