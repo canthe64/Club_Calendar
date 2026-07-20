@@ -15,7 +15,7 @@ public class BookingDraft
     public BookingCategory? Category { get; set; }
 
     /// <summary>Null until staff explicitly picks Hold or Confirmed - never silently defaults to
-    /// one or the other on a new booking. Only meaningful while <see cref="Category"/> is Rental;
+    /// one or the other on a new booking. Only meaningful while <see cref="Category"/> is GroupEvent;
     /// forced to true otherwise.</summary>
     public bool? CreateAsConfirmed { get; set; }
     public DateTime Date { get; set; } = DateTime.UtcNow.Date;
@@ -36,22 +36,22 @@ public class BookingDraft
     public List<SheetBooking>? EditingGroup { get; set; }
 
     /// <summary>
-    /// Only Rentals can be a soft "hold" - every other category is a hard booking. Call this
-    /// from the category picker so switching away from Rental coerces the state immediately,
-    /// not just visually (the checkbox is hidden for non-Rental categories in the UI, but this
+    /// Only Group Events can be a soft "hold" - every other category is a hard booking. Call this
+    /// from the category picker so switching away from GroupEvent coerces the state immediately,
+    /// not just visually (the checkbox is hidden for non-GroupEvent categories in the UI, but this
     /// keeps the underlying value honest even if something else reads it first). Switching INTO
-    /// Rental resets the choice to unset, forcing staff to explicitly pick Hold or Confirmed again -
-    /// but re-clicking Rental while already on Rental leaves an existing choice alone.
+    /// GroupEvent resets the choice to unset, forcing staff to explicitly pick Hold or Confirmed
+    /// again - but re-clicking GroupEvent while already on GroupEvent leaves an existing choice alone.
     /// </summary>
     public void SetCategory(BookingCategory category)
     {
-        var wasRental = Category == BookingCategory.Rental;
+        var wasGroupEvent = Category == BookingCategory.GroupEvent;
         Category = category;
-        if (category != BookingCategory.Rental)
+        if (category != BookingCategory.GroupEvent)
         {
             CreateAsConfirmed = true;
         }
-        else if (!wasRental)
+        else if (!wasGroupEvent)
         {
             CreateAsConfirmed = null;
         }
@@ -78,7 +78,7 @@ public class BookingDraft
         var first = group[0];
         SelectedSheets = [.. group.Select(b => b.SheetMailbox)];
         Category = first.Category;
-        CreateAsConfirmed = first.Category != BookingCategory.Rental || first.State == BookingState.Confirmed;
+        CreateAsConfirmed = first.Category != BookingCategory.GroupEvent || first.State == BookingState.Confirmed;
         Date = first.Start.Date;
         // Relative to Start's own date (not End's Hour/Minute) so an end time that rolls into the
         // next calendar day - i.e. midnight - reads as 1440, not 0.

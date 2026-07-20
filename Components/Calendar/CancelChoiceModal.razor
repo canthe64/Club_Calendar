@@ -7,15 +7,15 @@
         <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.4);padding:18px 20px;width:380px">
             <div style="font-size:14px;font-weight:600;color:#1e2a33;margin-bottom:4px">Cancel this booking?</div>
             <div style="font-size:11px;color:#5a7183;margin-bottom:12px">
-                @(string.IsNullOrWhiteSpace(first.RenterName) ? first.Category.ToString() : first.RenterName)
+                @(string.IsNullOrWhiteSpace(first.RenterName) ? CalendarStyles.CategoryLabel(first.Category) : first.RenterName)
                 — @string.Join(", ", Group.Select(g => SheetLabel(g.SheetMailbox)))
                 · @first.Start.ToString("MMM d, h:mmtt")-@first.End.ToString("h:mmtt")
             </div>
             <div style="display:flex;flex-direction:column;gap:7px;font-size:11.5px;font-weight:600">
-                @if (first.Category == BookingCategory.Rental)
+                @if (first.Category == BookingCategory.GroupEvent)
                 {
                     <span @onclick="() => OnChoice.InvokeAsync(true)" style="border:1.5px solid #2d5f8a;background:#eaf1f8;color:#2d5f8a;border-radius:6px;padding:8px 12px;cursor:pointer">
-                        Cancel &amp; reopen for rental<br>
+                        Cancel &amp; reopen for group event<br>
                         <span style="font-weight:400;font-size:10px;color:#5a7ba0">slot goes back to "Open" — publicly bookable again</span>
                     </span>
                 }

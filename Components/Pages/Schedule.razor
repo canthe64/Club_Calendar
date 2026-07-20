@@ -44,7 +44,7 @@
                     <InputSelect @bind-Value="_newBooking.Category">
                         @foreach (var c in Enum.GetValues<BookingCategory>())
                         {
-                            <option value="@c">@c</option>
+                            <option value="@c">@CalendarStyles.CategoryLabel(c)</option>
                         }
                     </InputSelect>
                 </label>
@@ -109,7 +109,7 @@ else
             {
                 <tr style="background-color: @CategoryColor(booking.Category)">
                     <td>@booking.Start.ToString("h:mm tt") - @booking.End.ToString("h:mm tt")</td>
-                    <td>@booking.Category</td>
+                    <td>@CalendarStyles.CategoryLabel(booking.Category)</td>
                     <td>
                         <span style="font-weight: @(booking.State == BookingState.Confirmed ? "bold" : "normal")">
                             @booking.State
@@ -223,7 +223,7 @@ else
     // for familiarity, but this mapping is not derived from Exchange in any way.
     private static string CategoryColor(BookingCategory category) => category switch
     {
-        BookingCategory.Rental => "#d4f4dd", // light green
+        BookingCategory.GroupEvent => "#d4f4dd", // light green
         BookingCategory.League => "#d6ecfb", // sky blue
         BookingCategory.Event => "#fbd6ea",  // pink
         BookingCategory.Other => "#e8e0f5",  // lavender
@@ -234,7 +234,7 @@ else
     {
         public DateTime Start { get; set; } = DateTime.UtcNow.Date.AddHours(18);
         public DateTime End { get; set; } = DateTime.UtcNow.Date.AddHours(20);
-        public BookingCategory Category { get; set; } = BookingCategory.Rental;
+        public BookingCategory Category { get; set; } = BookingCategory.GroupEvent;
         public string? RenterName { get; set; }
         public string? RenterPhone { get; set; }
         public string? RenterEmail { get; set; }

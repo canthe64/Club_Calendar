@@ -2,56 +2,88 @@
 @using FacilityScheduler.Services
 @inject FacilityConfiguration Facility
 
-<div style="max-width:1000px">
-    @foreach (var ce in ActiveClubEvents)
-    {
-        <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
-             style="display:flex;align-items:center;gap:8px;border-radius:6px;padding:8px 12px;margin-bottom:8px;font-size:11.5px;font-weight:600;background:@(ce.MarksSheetsUnavailable ? "#fdf1f0" : CalendarStyles.ClubEventCategoryLightBg(ce.Category));color:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:1px solid @(ce.MarksSheetsUnavailable ? "#e8b4ae" : CalendarStyles.ClubEventCategoryColor(ce.Category));cursor:pointer">
-            <span>@ClubEventBannerText(ce)</span>
-        </div>
-    }
+<div style="max-width:1000px;border:1px solid #e7ecef;border-radius:8px;padding:10px;background:#fff">
     <div style="display:flex;gap:3px;font-size:10px">
         <div style="width:52px;flex-shrink:0">
             <div style="height:17px"></div>
-            @foreach (var hour in HourRows)
+            @if (AllDayClubEvents.Count > 0)
             {
-                <div style="height:@(RowHeightPx)px;color:#90a0ab;font-size:9.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">@FormatHour(hour)</div>
-                <div style="height:@(RowGapPx)px"></div>
+                <div style="height:@(AllDayRowHeightPx)px"></div>
+            }
+            @foreach (var hour in CalendarStyles.HourRows)
+            {
+                <div style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;color:#90a0ab;font-size:9.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">@CalendarStyles.FormatHour(hour)</div>
+                <div style="height:@(CalendarStyles.RowGapPx)px"></div>
             }
         </div>
-        @foreach (var sheet in Facility.SheetMailboxes)
-        {
-            <div style="flex:1;min-width:0">
-                <div style="text-align:center;color:#5a7183;font-weight:600;height:17px">@SheetLabel(sheet)</div>
-                <div style="position:relative">
-                    @foreach (var hour in HourRows)
+        <div style="flex:1;min-width:0">
+            <div style="display:flex;gap:3px">
+                @foreach (var sheet in Facility.SheetMailboxes)
+                {
+                    <div style="flex:1;text-align:center;color:#5a7183;font-weight:600;height:17px">@SheetLabel(sheet)</div>
+                }
+            </div>
+            @if (AllDayClubEvents.Count > 0)
+            {
+                <div style="display:flex;flex-direction:column;gap:2px;padding:2px 0 4px">
+                    @foreach (var ce in AllDayClubEvents)
                     {
-                        var slotStart = Date.Date.AddHours(hour);
-                        <div @onclick="() => OnSlotClick.InvokeAsync((sheet, slotStart))"
-                             style="box-sizing:border-box;height:@(RowHeightPx)px;margin-bottom:@(RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3;cursor:pointer">
-                        </div>
-                    }
-                    @foreach (var booking in BookingsForSheet(sheet))
-                    {
-                        <div @onclick="() => OnBookingClick.InvokeAsync(booking)"
-                             style="box-sizing:border-box;position:absolute;top:@(TopPx(booking))px;left:0;right:0;height:@(HeightPx(booking))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(booking);border:@CalendarStyles.BorderStyle(booking);padding:2px 6px;overflow:hidden;cursor:pointer">
-                            <div style="font-size:9.5px;font-weight:600;color:@CalendarStyles.TextColorStyle(booking)">@Title(booking)</div>
-                            <div style="font-size:8.8px;color:@CalendarStyles.TextColorStyle(booking);opacity:.85">@TimeRange(booking)</div>
+                        <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
+                             style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:3px 8px;font-size:9.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                            @ClubEventText(ce)
                         </div>
                     }
                 </div>
+            }
+            <div style="position:relative">
+                <div style="display:flex;gap:3px">
+                    @foreach (var sheet in Facility.SheetMailboxes)
+                    {
+                        <div style="flex:1;min-width:0;position:relative">
+                            @foreach (var hour in CalendarStyles.HourRows)
+                            {
+                                var slotStart = Date.Date.AddHours(hour);
+                                <div @onclick="() => OnSlotClick.InvokeAsync((sheet, slotStart))"
+                                     style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;margin-bottom:@(CalendarStyles.RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3;cursor:pointer">
+                                </div>
+                            }
+                            @foreach (var booking in BookingsForSheet(sheet))
+                            {
+                                <div @onclick="() => OnBookingClick.InvokeAsync(booking)"
+                                     style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(booking.Start, Date))px;left:0;right:0;height:@(CalendarStyles.HeightPx(booking.Start, booking.End, Date))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(booking);border:@CalendarStyles.BorderStyle(booking);padding:2px 6px;overflow:hidden;cursor:pointer">
+                                    <div style="font-size:9.5px;font-weight:600;color:@CalendarStyles.TextColorStyle(booking)">@($"{CalendarStyles.CellStartTimeLabel(booking.Start)} - {Title(booking)}")</div>
+                                    <div style="font-size:8.8px;color:@CalendarStyles.TextColorStyle(booking);opacity:.85">@TimeRange(booking)</div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+                @if (TimedClubEvents.Count > 0)
+                {
+                    <div style="position:absolute;inset:0;pointer-events:none">
+                        @foreach (var ce in TimedClubEvents)
+                        {
+                            <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
+                                 style="pointer-events:auto;box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(ce.Start, Date))px;left:0;right:0;height:@(CalendarStyles.HeightPx(ce.Start, ce.End, Date))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 6px;overflow:hidden;cursor:pointer;opacity:.92">
+                                <div style="font-size:9.5px;font-weight:600">@ClubEventText(ce)</div>
+                            </div>
+                        }
+                    </div>
+                }
             </div>
-        }
+        </div>
     </div>
 
     <div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:#5a7183;flex-wrap:wrap">
-        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#eaf1f8;border:1.5px dashed #2d5f8a;vertical-align:-2px"></span> Open for rental — click to book</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#eaf1f8;border:1.5px dashed #2d5f8a;vertical-align:-2px"></span> Open for group event — click to book</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#2d5f8a;vertical-align:-2px"></span> Booked</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#4a8a5f;vertical-align:-2px"></span> League</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#a05fa8;vertical-align:-2px"></span> Event</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#c2622f;vertical-align:-2px"></span> Bonspiel</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#8a97a3;vertical-align:-2px"></span> Maintenance</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#1e8a8a;vertical-align:-2px"></span> Practice Ice</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#9c9690;vertical-align:-2px"></span> Other</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#6b7680;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;vertical-align:-2px"></span> Club event — dotted outline</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#f6f8f9;border:1px solid #eef1f3;vertical-align:-2px"></span> No ice time — click to book anyway</span>
     </div>
 </div>
@@ -64,53 +96,37 @@
     [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<(string Sheet, DateTime Start)> OnSlotClick { get; set; }
 
-    // All-day events float to the top (sorted as if occurring at midnight); timed events follow by
-    // their actual Start - same convention as MonthGrid/WeekGrid's CombineForDay.
+    private const double AllDayChipHeightPx = 20;
+    private const double AllDayChipGapPx = 2;
+
     private List<ClubEvent> ActiveClubEvents =>
-        ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date)
-            .OrderBy(ce => ce.IsAllDay ? Date.Date : ce.Start)
-            .ToList();
+        ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date).ToList();
+
+    // All-day club events get their own pinned row at the top of the grid (no hour to position them
+    // at); timed ones are placed directly in the hourly timeline alongside bookings, as full-width
+    // bands spanning every sheet column - both live inside the same calendar box now, not a
+    // detached banner floating above it.
+    private List<ClubEvent> AllDayClubEvents => ActiveClubEvents.Where(ce => ce.IsAllDay).OrderBy(ce => ce.Title).ToList();
+    private List<ClubEvent> TimedClubEvents => ActiveClubEvents.Where(ce => !ce.IsAllDay).OrderBy(ce => ce.Start).ToList();
+
+    private double AllDayRowHeightPx =>
+        AllDayClubEvents.Count * AllDayChipHeightPx + Math.Max(0, AllDayClubEvents.Count - 1) * AllDayChipGapPx + 6;
 
     // Purely informational - no change to sheet booking/conflict logic here, matching the Club
     // Events architecture decision D13 ("no cross-check in either direction").
-    private static string ClubEventBannerText(ClubEvent ce)
+    private static string ClubEventText(ClubEvent ce)
     {
-        var dateText = ce.IsAllDay
-            ? (ce.Start.Date == ce.End.Date ? ce.Start.ToString("MMM d") : $"{ce.Start:MMM d}-{ce.End:MMM d}")
-            : $"{ce.Start:MMM d, h:mmtt}-{ce.End:h:mmtt}";
+        if (ce.IsAllDay)
+        {
+            return ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets reserved" : ce.Title;
+        }
 
-        return ce.MarksSheetsUnavailable ? $"{dateText}: {ce.Title} - all sheets reserved" : $"{dateText}: {ce.Title}";
+        var titleWithTime = $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
+        return ce.MarksSheetsUnavailable ? $"{titleWithTime} - all sheets reserved" : titleWithTime;
     }
-
-    private static readonly int[] HourRows = Enumerable.Range(6, 18).ToArray(); // 6am - 11pm
-    private const double RowHeightPx = 34;
-    private const double RowGapPx = 3;
-    private static readonly int FirstHour = HourRows[0];
-    private static readonly int LastHour = HourRows[^1] + 1; // exclusive upper bound (midnight cap)
-    private const double PxPerHour = RowHeightPx + RowGapPx;
 
     private List<SheetBooking> BookingsForSheet(string sheet) =>
         Bookings.Where(b => b.SheetMailbox == sheet).ToList();
-
-    // Hours-from-midnight as a double (not b.Start.Hour) so a half-hour start/end (e.g. 6:30 PM)
-    // positions correctly instead of rounding down to the containing hour. Measured from the grid's
-    // own Date rather than b.Start.Date/b.End.Date so a booking ending at midnight reads as 24.0,
-    // not 0.0.
-    private double HoursFromMidnight(DateTime dt) => (dt - Date.Date).TotalHours;
-
-    private double TopPx(SheetBooking b)
-    {
-        var start = Math.Max(HoursFromMidnight(b.Start), FirstHour);
-        return (start - FirstHour) * PxPerHour;
-    }
-
-    private double HeightPx(SheetBooking b)
-    {
-        var start = Math.Max(HoursFromMidnight(b.Start), FirstHour);
-        var end = Math.Min(HoursFromMidnight(b.End), LastHour);
-        var hours = Math.Max(0.5, end - start);
-        return hours * PxPerHour - RowGapPx;
-    }
 
     private static string SheetLabel(string sheetMailbox)
     {
@@ -119,9 +135,7 @@
         return digits.Length > 0 ? $"Sheet {digits}" : localPart;
     }
 
-    private static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
-
-    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
 
     private static string TimeRange(SheetBooking b) => $"{b.Start:h:mmtt}-{b.End:h:mmtt}";
 }

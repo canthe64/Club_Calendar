@@ -75,7 +75,7 @@
                 SheetMailbox = TestMailbox,
                 Start = start,
                 End = end,
-                Category = BookingCategory.Rental,
+                Category = BookingCategory.GroupEvent,
                 State = BookingState.Hold,
                 RenterName = "Spike Test Renter",
                 RenterPhone = "555-0100",
@@ -94,7 +94,7 @@
             var afterCreate = (await BookingService.GetBookingsAsync(TestMailbox, window.Item1, window.Item2))
                 .FirstOrDefault(b => b.EventId == eventId);
 
-            var createReadBackOk = afterCreate is { State: BookingState.Hold, Category: BookingCategory.Rental }
+            var createReadBackOk = afterCreate is { State: BookingState.Hold, Category: BookingCategory.GroupEvent }
                 && afterCreate.RenterName == booking.RenterName
                 && afterCreate.RenterPhone == booking.RenterPhone
                 && afterCreate.BookedBy == booking.BookedBy;
@@ -222,7 +222,7 @@
         try
         {
             var testEvent = BuildTestEvent("SPIKE TEST - category filter - delete me", start, start.AddHours(1));
-            testEvent.Categories = ["Rental"];
+            testEvent.Categories = ["GroupEvent"];
 
             var created = await GraphClient.Users[TestMailbox].Events.PostAsync(testEvent);
             if (created?.Id is not null) createdIds.Add(created.Id);
@@ -234,7 +234,7 @@
             {
                 config.QueryParameters.StartDateTime = viewStart.ToString("o");
                 config.QueryParameters.EndDateTime = viewEnd.ToString("o");
-                config.QueryParameters.Filter = "categories/any(c:c eq 'Rental')";
+                config.QueryParameters.Filter = "categories/any(c:c eq 'GroupEvent')";
             });
 
             var found = filtered?.Value?.Any(e => e.Id == created?.Id) ?? false;

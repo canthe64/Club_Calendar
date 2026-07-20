@@ -32,12 +32,12 @@ Both endpoints are registered with `.AllowAnonymous()`, rate-limited via a share
 limiter (`public-api`: 60 requests/minute per limiter instance, no queueing - excess requests get an
 immediate `429`), and never touch or expose renter-identifying data, resource mailbox addresses, or
 any booking category the club hasn't chosen to publish (architecture doc §5.4). Non-public categories
-(League, Bonspiel, Maintenance, Other) are excluded from the availability feed entirely; the month
-calendar shows every category but strips nothing except the underlying mailbox address.
+(League, Bonspiel, Maintenance, Practice Ice, Other) are excluded from the availability feed entirely;
+the month calendar shows every category but strips nothing except the underlying mailbox address.
 
 ### `GET /api/public/availability`
 
-Returns open-for-rental time slots and upcoming club-wide events as JSON. Backs the CMS embed widget
+Returns open-for-group-event time slots and upcoming club-wide events as JSON. Backs the CMS embed widget
 (`wwwroot/embed/availability-widget.js`) - see [public-embed-instructions.md](public-embed-instructions.md).
 
 - **Auth:** none (anonymous).
@@ -77,7 +77,7 @@ Returns open-for-rental time slots and upcoming club-wide events as JSON. Backs 
 | Field | Type | Description |
 |---|---|---|
 | `generatedAtUtc` | datetime | When this response was computed (UTC). |
-| `sheetSlots` | array | Open-for-rental windows only - an existing Rental-category booking still in **Hold** state. Confirmed rentals and every other category (League/Bonspiel/Maintenance/Other) are never included here. |
+| `sheetSlots` | array | Open-for-group-event windows only - an existing Group Event-category booking still in **Hold** state. Confirmed group event bookings and every other category (League/Bonspiel/Maintenance/Practice Ice/Other) are never included here. |
 | `sheetSlots[].sheetLabel` | string | Public-safe display name (e.g. `"Sheet 1"`) - never the underlying resource mailbox address. |
 | `sheetSlots[].start` / `.end` | datetime | Local facility time (not UTC), ISO 8601, no offset. |
 | `clubEvents` | array | Every club-wide event in the window, regardless of category. |
@@ -85,8 +85,8 @@ Returns open-for-rental time slots and upcoming club-wide events as JSON. Backs 
 | `clubEvents[].marksSheetsUnavailable` | boolean | `true` when this event closes every sheet for its duration - the widget shows "all sheets reserved" wording specifically for these. |
 
 A slot that overlaps a `marksSheetsUnavailable` club event is excluded from `sheetSlots` even if a
-Rental hold technically still exists on Graph, so the public feed never promises ice that's actually
-closed.
+Group Event hold technically still exists on Graph, so the public feed never promises ice that's
+actually closed.
 
 **Errors:** a malformed `days` value (non-integer) is ignored and the default (`30`) is used - there
 is no `400` response path on this endpoint today.
@@ -114,13 +114,15 @@ in [Overview](#overview) - no Blazor circuit, no client runtime to reject.
 
 A full HTML document: a header, a 7-column month grid with Prev/Today/Next navigation links (each a
 plain `<a href="/public/calendar?month=...">`, no JS routing), color-coded entry chips (confirmed
-booking, hold, club event), and a click-to-reveal detail overlay built with vanilla JS. Every day
-shows up to 3 entries with a "+N more" expander for busier days.
+booking, hold, club event - club event chips get a dotted border, matching the staff calendar's
+visual language for distinguishing them from sheet bookings), and a click-to-reveal detail overlay
+built with vanilla JS. Every day shows up to 3 entries with a "+N more" expander for busier days.
 
-Each entry chip shows: title (renter name if present, else the category - e.g. a league's name;
-the one exception is a confirmed rental's renter name, which staff practice keeps private rather
-than the page stripping it), category + hold/confirmed state, and formatted date/time on click. No
-phone numbers, emails, notes, or resource mailbox addresses ever appear.
+Each entry chip's visible text is its start time followed by its title (e.g. "7PM - League
+Practice") - renter name if present, else the category name; the one exception is a confirmed
+booking's renter name, which staff practice keeps private rather than the page stripping it.
+Clicking a chip reveals the full category + hold/confirmed state and exact date/time. No phone
+numbers, emails, notes, or resource mailbox addresses ever appear.
 
 Intended for direct browsing or `<iframe>` embedding on the club's own site. Note: this page has no
 `Content-Security-Policy: frame-ancestors` restriction today, so any site can iframe it, not just the
@@ -170,7 +172,7 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 | `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
 | `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId)` | Hard-deletes a single event. |
 | `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state). Re-checks conflicts against the new time before writing (excluding the group's own events); all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched. |
-| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsRentalHold)` | Cancels every event in a group. `reopenAsRentalHold: true` converts each slot back to an unclaimed open Rental hold (publicly bookable again) instead of deleting it. |
+| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it. |
 | `PreviewSeriesConflictsAsync` | `Task<Dictionary<DateTime, List<SheetBooking>>> PreviewSeriesConflictsAsync(IEnumerable<string> sheetMailboxes, IReadOnlyCollection<DateTime> candidateDates, TimeSpan startTime, TimeSpan endTime)` | Informational only - reports conflicts per candidate date so staff can choose to skip that date. Never blocks anything itself. |
 | `CreateSeriesAsync` | `Task<List<SheetBooking>> CreateSeriesAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates)` | Creates one native weekly-recurring Graph event per sheet (sharing a `BookingGroupId`), then deletes the specific `excludedDates` occurrences staff chose to skip during review. Does not conflict-check - that's `PreviewSeriesConflictsAsync`'s job, expected to already have run. |
 | `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. |
@@ -196,7 +198,7 @@ all (neither against sheet bookings nor between club events).
 |---|---|---|
 | `SheetBooking` | `EventId`, `ICalUId`, `SheetMailbox`, `Start`, `End`, `Category` (`BookingCategory`), `State` (`BookingState`), `RenterName`, `RenterPhone`, `RenterEmail`, `Notes`, `BookedBy`, `BookingGroupId` (Guid), `SeriesMasterId` | `BookingGroupId` links every sheet's event belonging to one conceptual booking, even single-sheet ones. `SeriesMasterId` is set only on occurrences of a recurring series. |
 | `ClubEvent` | `EventId`, `ICalUId`, `Title`, `Category` (`ClubEventCategory`), `Start`, `End`, `IsAllDay`, `MarksSheetsUnavailable`, `Notes`, `BookedBy` | Not tied to any sheet. |
-| `BookingCategory` | `Rental`, `League`, `Event`, `Bonspiel`, `Maintenance`, `Other` | |
+| `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `Other` | Display labels ("Group Event", "Practice Ice") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
 | `BookingState` | `Hold`, `Confirmed` | |
 | `ClubEventCategory` | `Bonspiel`, `Activities`, `Closure`, `Other` | |
 | `BookingResult` | `IsSuccess`, `Booking?`, `Conflicts: List<SheetBooking>` | Result of a single-sheet create. |

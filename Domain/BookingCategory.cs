@@ -2,10 +2,11 @@ namespace FacilityScheduler.Domain;
 
 public enum BookingCategory
 {
-    Rental,
+    GroupEvent,
     League,
     Event,
     Bonspiel,
     Maintenance,
+    PracticeIce,
     Other
 }

@@ -43,7 +43,7 @@
             var isOn = _selectedCategories.Contains(cat);
             <span @onclick="() => ToggleCategory(cat)"
                   style="border:1px solid @CalendarStyles.CategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.CategoryColor(cat));background:@(isOn ? CalendarStyles.CategoryColor(cat) : "#fff");padding:2px 10px;border-radius:10px;font-weight:600;cursor:pointer">
-                @cat
+                @CalendarStyles.CategoryLabel(cat)
             </span>
         }
         <span @onclick="() => _showClubEvents = !_showClubEvents" style="display:flex;align-items:center;gap:6px;color:#1e2a33;font-weight:600;cursor:pointer">
@@ -133,7 +133,7 @@
     private DateTime WeekStart => _anchorDate.Date.AddDays(-(int)_anchorDate.DayOfWeek);
 
     private List<SheetBooking> FilteredBookings => _allBookings
-        .Where(b => _openIceOnly ? (b.Category == BookingCategory.Rental && b.State == BookingState.Hold) : _selectedCategories.Contains(b.Category))
+        .Where(b => _openIceOnly ? (b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold) : _selectedCategories.Contains(b.Category))
         .ToList();
 
     private List<ClubEvent> VisibleClubEvents => _showClubEvents ? _activeClubEvents : [];
@@ -304,7 +304,8 @@
         var canSave = _draft.Category.HasValue
             && _draft.SelectedSheets.Count > 0
             && !string.IsNullOrWhiteSpace(_draft.RenterName)
-            && (_draft.Category != BookingCategory.Rental || _draft.CreateAsConfirmed.HasValue);
+            && _draft.End > _draft.Start
+            && (_draft.Category != BookingCategory.GroupEvent || _draft.CreateAsConfirmed.HasValue);
 
         if (_isSaving || !canSave)
         {
@@ -400,14 +401,14 @@
         }
     }
 
-    private async Task ApplyCancelChoice(bool reopenAsRentalHold)
+    private async Task ApplyCancelChoice(bool reopenAsGroupEventHold)
     {
         if (_cancelGroup is null)
         {
             return;
         }
 
-        await BookingService.CancelGroupAsync(_cancelGroup, reopenAsRentalHold);
+        await BookingService.CancelGroupAsync(_cancelGroup, reopenAsGroupEventHold);
         _cancelGroup = null;
         await LoadAsync();
     }
@@ -540,7 +541,7 @@
     {
         var canSave = _clubEventDraft.Category.HasValue
             && !string.IsNullOrWhiteSpace(_clubEventDraft.Title)
-            && _clubEventDraft.EndDate.Date >= _clubEventDraft.StartDate.Date;
+            && (_clubEventDraft.IsAllDay ? _clubEventDraft.EndDate.Date >= _clubEventDraft.StartDate.Date : _clubEventDraft.End > _clubEventDraft.Start);
 
         if (_isSavingClubEvent || !canSave)
         {
@@ -590,7 +591,8 @@
         var canCreate = _seriesDraft.Category.HasValue
             && _seriesDraft.SelectedSheets.Count > 0
             && !string.IsNullOrWhiteSpace(_seriesDraft.RenterName)
-            && (_seriesDraft.Category != BookingCategory.Rental || _seriesDraft.CreateAsConfirmed.HasValue);
+            && _seriesDraft.EndMinutes > _seriesDraft.StartMinutes
+            && (_seriesDraft.Category != BookingCategory.GroupEvent || _seriesDraft.CreateAsConfirmed.HasValue);
 
         if (_isSavingSeries || !canCreate)
         {

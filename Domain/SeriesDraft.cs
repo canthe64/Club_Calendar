@@ -14,7 +14,7 @@ public class SeriesDraft
     public BookingCategory? Category { get; set; }
 
     /// <summary>Null until staff explicitly picks Hold or Confirmed - never silently defaults to
-    /// one or the other. Only meaningful while <see cref="Category"/> is Rental; forced to true
+    /// one or the other. Only meaningful while <see cref="Category"/> is GroupEvent; forced to true
     /// otherwise.</summary>
     public bool? CreateAsConfirmed { get; set; }
     public DateTime FirstDate { get; set; } = DateTime.UtcNow.Date.AddDays(7);
@@ -36,13 +36,13 @@ public class SeriesDraft
 
     public void SetCategory(BookingCategory category)
     {
-        var wasRental = Category == BookingCategory.Rental;
+        var wasGroupEvent = Category == BookingCategory.GroupEvent;
         Category = category;
-        if (category != BookingCategory.Rental)
+        if (category != BookingCategory.GroupEvent)
         {
             CreateAsConfirmed = true;
         }
-        else if (!wasRental)
+        else if (!wasGroupEvent)
         {
             CreateAsConfirmed = null;
         }

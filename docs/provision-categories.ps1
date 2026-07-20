@@ -24,10 +24,11 @@ $tokenResponse = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonl
 $headers = @{ Authorization = "Bearer $($tokenResponse.access_token)" }
 
 $sheetCategories = @(
-    @{ displayName = "Rental"; color = "preset4" },   # Green
-    @{ displayName = "League"; color = "preset7" },   # Blue
-    @{ displayName = "Event";  color = "preset9" },   # Cranberry
-    @{ displayName = "Other";  color = "preset8" }    # Purple
+    @{ displayName = "GroupEvent";  color = "preset4"  },  # Green
+    @{ displayName = "League";      color = "preset7"  },  # Blue
+    @{ displayName = "Event";       color = "preset9"  },  # Cranberry
+    @{ displayName = "PracticeIce"; color = "preset11" },  # Teal
+    @{ displayName = "Other";       color = "preset8"  }   # Purple
 )
 $clubEventCategories = @(
     @{ displayName = "Bonspiel";   color = "preset1"  },  # Orange

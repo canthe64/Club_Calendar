@@ -40,7 +40,7 @@
         if (!data.sheetSlots || data.sheetSlots.length === 0) {
             var empty = document.createElement('div');
             empty.style.cssText = 'color:#90a0ab;font-size:13px';
-            empty.textContent = 'No open rental times posted right now - contact the club for availability.';
+            empty.textContent = 'No open group event times posted right now - contact the club for availability.';
             container.appendChild(empty);
             return;
         }

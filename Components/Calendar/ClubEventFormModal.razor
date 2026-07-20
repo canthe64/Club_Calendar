@@ -119,14 +119,19 @@
     private bool _confirmingDelete;
     private bool _wasOpen;
 
+    // All-day: only the calendar date matters, and Start==End is a valid single-day event (the
+    // domain's inclusive End is only converted to Graph's exclusive end-date convention at the
+    // service layer, not here). Timed: Start/End carry real times, so an equal date with an
+    // end-time at or before the start-time must be rejected too, not just an out-of-order date.
     private bool CanSave => Draft.Category.HasValue
         && !string.IsNullOrWhiteSpace(Draft.Title)
-        && Draft.EndDate.Date >= Draft.StartDate.Date;
+        && (Draft.IsAllDay ? Draft.EndDate.Date >= Draft.StartDate.Date : Draft.End > Draft.Start);
 
     private string ValidationMessage =>
         !Draft.Category.HasValue ? "Choose a category." :
         string.IsNullOrWhiteSpace(Draft.Title) ? "Event title is required." :
-        "The end date must be on or after the start date.";
+        Draft.IsAllDay ? "The end date must be on or after the start date." :
+        "The end time must be after the start time.";
 
     protected override void OnParametersSet()
     {

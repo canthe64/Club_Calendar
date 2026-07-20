@@ -271,12 +271,12 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     }
 
     /// <summary>
-    /// Cancels every event in a booking group. <paramref name="reopenAsRentalHold"/> distinguishes
+    /// Cancels every event in a booking group. <paramref name="reopenAsGroupEventHold"/> distinguishes
     /// the two cancel paths surfaced to staff: reopen (the slot goes back to an unclaimed
-    /// "open for rental" hold, publicly bookable again) vs. close the ice (hard delete, slot no
+    /// "open for group event" hold, publicly bookable again) vs. close the ice (hard delete, slot no
     /// longer offered at all).
     /// </summary>
-    public async Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsRentalHold, CancellationToken ct = default)
+    public async Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, CancellationToken ct = default)
     {
         foreach (var member in members)
         {
@@ -285,14 +285,14 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 continue;
             }
 
-            if (reopenAsRentalHold)
+            if (reopenAsGroupEventHold)
             {
                 var reopened = new SheetBooking
                 {
                     SheetMailbox = member.SheetMailbox,
                     Start = member.Start,
                     End = member.End,
-                    Category = BookingCategory.Rental,
+                    Category = BookingCategory.GroupEvent,
                     State = BookingState.Hold,
                     BookingGroupId = member.BookingGroupId
                     // Renter-specific fields intentionally omitted - back to a plain open hold.
@@ -548,8 +548,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     private Event ToGraphEvent(SheetBooking booking, bool includeTime = true)
     {
         var subject = string.IsNullOrWhiteSpace(booking.RenterName)
-            ? booking.Category.ToString()
-            : $"{booking.Category} - {booking.RenterName}";
+            ? CalendarStyles.CategoryLabel(booking.Category)
+            : $"{CalendarStyles.CategoryLabel(booking.Category)} - {booking.RenterName}";
 
         var extendedProps = new List<SingleValueLegacyExtendedProperty>
         {

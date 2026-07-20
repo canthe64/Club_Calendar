@@ -1,46 +1,68 @@
 @using FacilityScheduler.Domain
 
-<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:6px;max-width:1100px;align-items:start">
-    @foreach (var day in WeekDays)
-    {
-        var dayClubEvents = ClubEvents.Where(ce => ce.Start.Date <= day.Date && day.Date <= ce.End.Date).ToList();
-        var dayBookings = Bookings
-            .Where(b => b.Start.Date == day.Date)
-            .GroupBy(DedupeKey)
-            .Select(g => g.First())
-            .ToList();
-        var dayItems = CombineForDay(dayClubEvents, dayBookings, day.Date);
-        <div style="display:flex;flex-direction:column;gap:4px;min-height:200px;border:1px solid #e7ecef;border-radius:6px;padding:6px;background:#fff">
-            <div @onclick="() => OnDayClick.InvokeAsync(day)" style="text-align:center;padding-bottom:4px;border-bottom:1px solid #f2f5f7;cursor:pointer">
-                <div style="font-weight:600;color:#1e2a33;font-size:11.5px">@day.ToString("ddd")</div>
-                <div style="color:#90a0ab;font-size:9.5px">@day.ToString("MMM d")</div>
-            </div>
-            @if (dayItems.Count == 0)
+<div style="max-width:1100px;border:1px solid #e7ecef;border-radius:8px;padding:10px;background:#fff">
+    <div style="display:flex;gap:3px;font-size:10px">
+        <div style="width:52px;flex-shrink:0">
+            <div style="height:@(HeaderRowHeightPx)px"></div>
+            @if (WeekAllDayRowHeightPx > 0)
             {
-                <div style="color:#c1ccd4;font-size:9.5px;text-align:center;padding:10px 0">no ice activity</div>
+                <div style="height:@(WeekAllDayRowHeightPx)px"></div>
             }
-            else
+            @foreach (var hour in CalendarStyles.HourRows)
             {
-                @foreach (var item in dayItems)
-                {
-                    @if (item.ClubEvent is { } ce)
-                    {
-                        <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
-                             style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border-radius:4px;padding:3px 6px;font-size:9.5px;font-weight:600;line-height:1.35;cursor:pointer">
-                            @ce.Title
-                        </div>
-                    }
-                    else if (item.Booking is { } b)
-                    {
-                        <div @onclick="() => OnBookingClick.InvokeAsync(b)"
-                             style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:4px;padding:3px 6px;font-size:9.5px;font-weight:600;line-height:1.35;cursor:pointer">
-                            @Title(b) @b.Start.ToString("h:mmtt")
-                        </div>
-                    }
-                }
+                <div style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;color:#90a0ab;font-size:9.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">@CalendarStyles.FormatHour(hour)</div>
+                <div style="height:@(CalendarStyles.RowGapPx)px"></div>
             }
         </div>
-    }
+        @foreach (var day in WeekDays)
+        {
+            var dayAllDayEvents = AllDayEventsForDay(day);
+            var laidOutItems = LayoutLanes(TimedItemsForDay(day));
+            <div style="flex:1;min-width:0">
+                <div @onclick="() => OnDayClick.InvokeAsync(day)" style="box-sizing:border-box;height:@(HeaderRowHeightPx)px;text-align:center;cursor:pointer;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
+                    <div style="font-weight:600;color:#1e2a33;font-size:11.5px">@day.ToString("ddd")</div>
+                    <div style="color:#90a0ab;font-size:9.5px">@day.ToString("MMM d")</div>
+                </div>
+                @if (WeekAllDayRowHeightPx > 0)
+                {
+                    <div style="display:flex;flex-direction:column;gap:2px;height:@(WeekAllDayRowHeightPx)px;padding:2px 0;box-sizing:border-box">
+                        @foreach (var ce in dayAllDayEvents)
+                        {
+                            <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
+                                 style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                                @(ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title)
+                            </div>
+                        }
+                    </div>
+                }
+                <div @onclick="() => OnDayClick.InvokeAsync(day)" style="position:relative;cursor:pointer">
+                    @foreach (var hour in CalendarStyles.HourRows)
+                    {
+                        <div style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;margin-bottom:@(CalendarStyles.RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3"></div>
+                    }
+                    @foreach (var laid in laidOutItems)
+                    {
+                        var widthPct = 100.0 / laid.LaneCount;
+                        var leftPct = laid.Lane * widthPct;
+                        @if (laid.Item.ClubEvent is { } ce)
+                        {
+                            <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
+                                 style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:9px;font-weight:600">
+                                @($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {ce.Title}")
+                            </div>
+                        }
+                        else if (laid.Item.Booking is { } b)
+                        {
+                            <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
+                                 style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(b);border:@CalendarStyles.BorderStyle(b);color:@CalendarStyles.TextColorStyle(b);padding:2px 5px;overflow:hidden;cursor:pointer">
+                                <div style="font-size:9px;font-weight:600">@($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}")</div>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+    </div>
 </div>
 
 @code {
@@ -51,9 +73,29 @@
     [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
 
-    private IEnumerable<DateTime> WeekDays => Enumerable.Range(0, 7).Select(i => WeekStart.Date.AddDays(i));
+    private const double AllDayChipHeightPx = 18;
+    private const double AllDayChipGapPx = 2;
+    private const double HeaderRowHeightPx = 32;
 
-    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+    private List<DateTime> WeekDays => [.. Enumerable.Range(0, 7).Select(i => WeekStart.Date.AddDays(i))];
+
+    private List<ClubEvent> AllDayEventsForDay(DateTime day) =>
+        ClubEvents.Where(ce => ce.IsAllDay && ce.Start.Date <= day.Date && day.Date <= ce.End.Date)
+            .OrderBy(ce => ce.Title)
+            .ToList();
+
+    // Every day column's hourly grid must start at the same vertical offset, so the reserved
+    // all-day row height is sized off the week's busiest day, not each day's own count - a day
+    // with fewer (or zero) all-day events still reserves the same space, keeping the hour axis
+    // (shared in the left gutter) aligned under every column.
+    private double WeekAllDayRowHeightPx
+    {
+        get
+        {
+            var maxCount = WeekDays.Select(d => AllDayEventsForDay(d).Count).DefaultIfEmpty(0).Max();
+            return maxCount == 0 ? 0 : maxCount * AllDayChipHeightPx + Math.Max(0, maxCount - 1) * AllDayChipGapPx + 4;
+        }
+    }
 
     // BookingGroupId doesn't reliably read back for untouched occurrences of a recurring series
     // (only set on the series master, not proven to inherit down to occurrences) - they default to
@@ -64,15 +106,90 @@
     private static string DedupeKey(SheetBooking b) =>
         b.BookingGroupId != Guid.Empty ? b.BookingGroupId.ToString() : $"{b.SheetMailbox}|{b.EventId}";
 
-    // Merges a day's club events and bookings into one chronologically-ordered list. All-day club
-    // events sort as if occurring at midnight (first); timed club events and bookings interleave by
-    // their actual Start. Mirrors MonthGrid's own CombineForDay - not extracted to a shared helper
-    // since both grids already independently mirror DedupeKey/Title the same way.
-    private static List<(ClubEvent? ClubEvent, SheetBooking? Booking)> CombineForDay(
-        List<ClubEvent> clubEvents, List<SheetBooking> bookings, DateTime dayDate)
+    private static string BookingLabel(SheetBooking b, int sheetCount)
     {
-        var events = clubEvents.Select(ce => (SortKey: ce.IsAllDay ? dayDate : ce.Start, ClubEvent: (ClubEvent?)ce, Booking: (SheetBooking?)null));
-        var books = bookings.Select(b => (SortKey: b.Start, ClubEvent: (ClubEvent?)null, Booking: (SheetBooking?)b));
-        return events.Concat(books).OrderBy(i => i.SortKey).Select(i => (i.ClubEvent, i.Booking)).ToList();
+        var title = string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
+        return sheetCount > 1 ? $"{title} · {sheetCount} sheets" : title;
+    }
+
+    private sealed record DayItem(DateTime Start, DateTime End, ClubEvent? ClubEvent, SheetBooking? Booking, int SheetCount);
+    private sealed record LaidOutItem(DayItem Item, int Lane, int LaneCount);
+
+    // Timed club events (whole-club, not sheet-specific) and sheet bookings (consolidated across
+    // sheets sharing one BookingGroupId, per the user's "collapse identical multi-sheet bookings"
+    // ask) are peers here - both just "things happening that day" competing for the same hourly
+    // timeline and lane space. All-day events are handled separately above (no specific hour to
+    // place them at).
+    private List<DayItem> TimedItemsForDay(DateTime day)
+    {
+        var timedClubEvents = ClubEvents
+            .Where(ce => !ce.IsAllDay && ce.Start.Date <= day.Date && day.Date <= ce.End.Date)
+            .Select(ce => new DayItem(ce.Start, ce.End, ce, null, 0));
+
+        var consolidatedBookings = Bookings
+            .Where(b => b.Start.Date == day.Date)
+            .GroupBy(DedupeKey)
+            .Select(g => new DayItem(g.First().Start, g.First().End, null, g.First(), g.Count()));
+
+        return timedClubEvents.Concat(consolidatedBookings).OrderBy(i => i.Start).ToList();
+    }
+
+    // Classic calendar-view lane layout: walk items in start order, grouping any that time-overlap
+    // into a cluster, then greedily assign each cluster's items to the first lane whose previous
+    // occupant has already ended - so concurrent items render side-by-side instead of overlapping,
+    // and the lane count (hence each item's width) is scoped to its own cluster rather than the
+    // whole day's busiest moment.
+    private static List<LaidOutItem> LayoutLanes(List<DayItem> sortedItems)
+    {
+        var result = new List<LaidOutItem>();
+        var cluster = new List<DayItem>();
+        var clusterEnd = DateTime.MinValue;
+
+        void FlushCluster()
+        {
+            if (cluster.Count == 0)
+            {
+                return;
+            }
+
+            var laneEnds = new List<DateTime>();
+            foreach (var item in cluster)
+            {
+                var lane = laneEnds.FindIndex(end => end <= item.Start);
+                if (lane == -1)
+                {
+                    laneEnds.Add(item.End);
+                    lane = laneEnds.Count - 1;
+                }
+                else
+                {
+                    laneEnds[lane] = item.End;
+                }
+
+                result.Add(new LaidOutItem(item, lane, 0)); // lane count backfilled below
+            }
+
+            var laneCount = laneEnds.Count;
+            for (var i = result.Count - cluster.Count; i < result.Count; i++)
+            {
+                result[i] = result[i] with { LaneCount = laneCount };
+            }
+
+            cluster.Clear();
+        }
+
+        foreach (var item in sortedItems)
+        {
+            if (cluster.Count > 0 && item.Start >= clusterEnd)
+            {
+                FlushCluster();
+            }
+
+            cluster.Add(item);
+            clusterEnd = cluster.Count == 1 ? item.End : (item.End > clusterEnd ? item.End : clusterEnd);
+        }
+
+        FlushCluster();
+        return result;
     }
 }

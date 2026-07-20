@@ -27,15 +27,15 @@
                 @if (item.ClubEvent is { } ce)
                 {
                     <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">
-                        @ce.Title
+                         style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">
+                        @ClubEventTitle(ce)
                     </div>
                 }
                 else if (item.Booking is { } b)
                 {
                     <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
                          style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden">
-                        @Title(b)
+                        @BookingTitle(b)
                     </div>
                 }
             }
@@ -82,7 +82,12 @@
         }
     }
 
-    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
+
+    private static string BookingTitle(SheetBooking b) => $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {Title(b)}";
+
+    // All-day events have no specific hour to show; timed ones get the same start-time prefix as bookings.
+    private static string ClubEventTitle(ClubEvent ce) => ce.IsAllDay ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
 
     // BookingGroupId doesn't reliably read back for untouched occurrences of a recurring series
     // (only set on the series master, not proven to inherit down to occurrences) - they default to

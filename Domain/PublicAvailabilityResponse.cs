@@ -10,7 +10,7 @@ public record PublicAvailabilityResponse(
     List<PublicSheetSlot> SheetSlots,
     List<PublicClubEventLabel> ClubEvents);
 
-/// <summary>An open-for-rental window on one sheet. SheetLabel is a public-safe display name
+/// <summary>An open-for-group-event window on one sheet. SheetLabel is a public-safe display name
 /// ("Sheet 1") - never the underlying resource mailbox address.</summary>
 public record PublicSheetSlot(string SheetLabel, DateTime Start, DateTime End);
 
@@ -20,12 +20,12 @@ public record PublicClubEventLabel(string Title, ClubEventCategory Category, Dat
 
 /// <summary>
 /// One sheet booking as shown on the public month calendar. Unlike PublicSheetSlot (which is
-/// Rental+Hold "available for rental" slots only - a subordinate feature), this covers every
-/// category/state, since the public calendar's primary purpose is letting members see what's going
-/// on club-wide while unauthenticated. Title mirrors the same "RenterName, or Category if blank"
-/// logic the internal calendar already uses (e.g. a league's name) - the one deliberate exception is
-/// a confirmed rental's renter name, which is handled by staff practice rather than being stripped
-/// here, per an explicit decision (2026-07-15).
+/// GroupEvent+Hold "available for group event" slots only - a subordinate feature), this covers
+/// every category/state, since the public calendar's primary purpose is letting members see what's
+/// going on club-wide while unauthenticated. Title mirrors the same "RenterName, or Category if
+/// blank" logic the internal calendar already uses (e.g. a league's name) - the one deliberate
+/// exception is a confirmed group event's renter name, which is handled by staff practice rather
+/// than being stripped here, per an explicit decision (2026-07-15).
 /// </summary>
 public record PublicMonthBooking(string Title, string CategoryLabel, DateTime Start, DateTime End, bool IsConfirmed);
 

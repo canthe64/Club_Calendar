@@ -17,19 +17,29 @@ up as "Booked by" on a booking.
 ## 2. The Calendar Page
 
 The main working page (`/calendar`) has three views, selected top-right: **Month**, **Week**, and
-**Day**. Use the **‹**, **Today**, and **›** controls to navigate; clicking a day in Month or Week
-view jumps to that day's Day view.
+**Day**. Use the **‹**, **Today**, and **›** controls to navigate; clicking a day in Month view, or
+an empty area of a day column in Week view, jumps to that day's Day view.
+
+**Week and Day are both hour-by-hour grids** covering the full 24-hour day, sharing the same time
+axis down the left edge — Day view has one column per sheet, Week view has one column per day. If a
+booking spans multiple sheets at once, Week view shows it as a single item (e.g. "League Practice ·
+5 sheets") rather than repeating it in every sheet's row. Every cell's title is prefixed with its
+start time (e.g. "7PM - League Practice"), including in Month view.
+
+Club Events (§5) render inline in every view — a pinned row at the top for all-day events, or a
+full-width band at the right hour for timed ones — with a **dotted border** distinguishing them from
+sheet bookings (dashed = Hold, solid = Confirmed).
 
 ### The SHOW row
 
 Below the toolbar, a row of controls filters what's currently displayed — this only affects what you
 see, not the underlying data:
 
-- **Category chips** (Rental, League, Bonspiel, Maintenance, Other) — click to toggle a category on
-  or off.
+- **Category chips** (Group Event, League, Bonspiel, Maintenance, Practice Ice, Other) — click to
+  toggle a category on or off.
 - **Show club events** — toggles whether Club Events (§5) appear on the calendar at all.
-- **Open ice only** — when on, shows only open (not-yet-rented) Rental holds, hiding everything else
-  regardless of the category chips above.
+- **Open ice only** — when on, shows only open (not-yet-booked) Group Event holds, hiding everything
+  else regardless of the category chips above.
 
 ---
 
@@ -47,12 +57,13 @@ You can also open the New Booking form directly by clicking an empty slot in Day
 - **Category** — required, no default. Pick one of the category chips before you can save.
 - **Sheets** — tap sheet chips to toggle which sheet(s) this booking covers, or click **All Sheets**
   to select every sheet at once. A booking can span multiple sheets as one conceptual unit.
-- **Date**, **From**, **To** — time fields are in 30-minute increments, extending through midnight.
-- **Booking status** (Rental category only) — **Hold for future rental** or **Confirmed booking**.
-  No default; you must pick one. Every other category is always a confirmed (hard) booking — this
-  toggle doesn't appear for them.
+- **Date**, **From**, **To** — time fields are in 30-minute increments, covering the full 24-hour
+  day. The end time must be after the start time.
+- **Booking status** (Group Event category only) — **Hold for future group event** or **Confirmed
+  booking**. No default; you must pick one. Every other category is always a confirmed (hard)
+  booking — this toggle doesn't appear for them.
 - **Event Title** — required for every category.
-- **Phone / Email** (Rental only, optional) and **Notes** (optional, any category).
+- **Phone / Email** (Group Event only, optional) and **Notes** (optional, any category).
 
 Click **Save**. If the requested sheets/time conflict with an existing booking, or with a Club Event
 flagged as closing all sheets, nothing is saved — a red banner lists exactly what conflicts, and you
@@ -91,8 +102,8 @@ buttons) the option to cancel the entire series instead.
   multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
   it won't keep showing the old renter's details.
 - **Cancel Booking** offers up to three choices:
-  - **Cancel & reopen for rental** (Rental bookings only) — the slot goes back to an open, unclaimed
-    Hold, publicly bookable again.
+  - **Cancel & reopen for group event** (Group Event bookings only) — the slot goes back to an open,
+    unclaimed Hold, publicly bookable again.
   - **Cancel booking** — removed entirely, no longer offered.
   - **Keep the booking** — closes the dialog, no change.
 - **Cancel Series** deletes every occurrence of the recurring series on every sheet involved. You'll

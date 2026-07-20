@@ -5,7 +5,7 @@
 @if (IsOpen)
 {
     <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
-        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:460px;max-height:88vh;overflow:auto">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:620px;max-width:94vw;max-height:88vh;overflow:auto">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
                 <span style="font-size:15px;font-weight:600;color:#1e2a33">Create Recurring Booking</span>
                 <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:14px;cursor:pointer;padding:2px 6px">&#10005;</span>
@@ -22,7 +22,7 @@
                                 var isSelected = Draft.Category == cat;
                                 <span @onclick="() => Draft.SetCategory(cat)"
                                       style="background:@(isSelected ? CalendarStyles.CategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.CategoryColor(cat));border:1px solid @CalendarStyles.CategoryColor(cat);padding:3px 12px;border-radius:12px;font-weight:600;cursor:pointer">
-                                    @cat
+                                    @CalendarStyles.CategoryLabel(cat)
                                 </span>
                             }
                         </div>
@@ -84,14 +84,14 @@
                         </div>
                     </div>
 
-                    @if (Draft.Category == BookingCategory.Rental)
+                    @if (Draft.Category == BookingCategory.GroupEvent)
                     {
                         <div>
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Booking status</div>
                             <div style="display:flex;gap:6px">
                                 <span @onclick="() => Draft.CreateAsConfirmed = false"
                                       style="flex:1;text-align:center;background:@(Draft.CreateAsConfirmed == false ? "#2d5f8a" : "#fff");color:@(Draft.CreateAsConfirmed == false ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;border-radius:6px;font-weight:600;cursor:pointer">
-                                    Hold for future rental
+                                    Hold for future group event
                                 </span>
                                 <span @onclick="() => Draft.CreateAsConfirmed = true"
                                       style="flex:1;text-align:center;background:@(Draft.CreateAsConfirmed == true ? "#2d5f8a" : "#fff");color:@(Draft.CreateAsConfirmed == true ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;border-radius:6px;font-weight:600;cursor:pointer">
@@ -180,8 +180,9 @@
     private bool HasValidSelection => Draft.Category.HasValue
         && Draft.SelectedSheets.Count > 0
         && Draft.LastDate.Date >= Draft.FirstDate.Date
+        && Draft.EndMinutes > Draft.StartMinutes
         && !string.IsNullOrWhiteSpace(Draft.RenterName)
-        && (Draft.Category != BookingCategory.Rental || Draft.CreateAsConfirmed.HasValue);
+        && (Draft.Category != BookingCategory.GroupEvent || Draft.CreateAsConfirmed.HasValue);
 
     private bool CanPreview => HasValidSelection && !IsLoadingPreview;
 
@@ -189,8 +190,9 @@
         !Draft.Category.HasValue ? "Choose a category." :
         Draft.SelectedSheets.Count == 0 ? "Select at least one sheet." :
         Draft.LastDate.Date < Draft.FirstDate.Date ? "The last date must be on or after the first date." :
+        Draft.EndMinutes <= Draft.StartMinutes ? "The end time must be after the start time." :
         string.IsNullOrWhiteSpace(Draft.RenterName) ? "Event title is required." :
-        "Choose Hold for future rental or Confirmed booking.";
+        "Choose Hold for future group event or Confirmed booking.";
 
     private int ActiveConflictCount => Draft.ComputeCandidateDates()
         .Where(d => !Draft.SkippedDates.Contains(d))

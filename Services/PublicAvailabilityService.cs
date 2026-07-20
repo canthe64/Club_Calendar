@@ -6,7 +6,7 @@ namespace FacilityScheduler.Services;
 /// <summary>
 /// Computes the public, anonymous-safe availability view (architecture doc §5.4) - a deliberately
 /// separate, hand-built minimization mapping, never a reuse of the internal booking/service-layer
-/// types with anonymous access bolted on. "Available" here means an existing Rental+Hold booking
+/// types with anonymous access bolted on. "Available" here means an existing GroupEvent+Hold booking
 /// (the same "AVAILABLE FOR RENTAL" slots staff already create today), not raw free/busy - simpler
 /// than computing complementary free time, and more correct: unbooked League/Bonspiel/practice time
 /// isn't necessarily something staff want the public renting.
@@ -44,7 +44,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var closures = clubEvents.Where(ce => ce.MarksSheetsUnavailable).ToList();
 
         var openSlots = bookings
-            .Where(b => b.Category == BookingCategory.Rental && b.State == BookingState.Hold)
+            .Where(b => b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold)
             .Where(b => !closures.Any(closure => Overlaps(b, closure)))
             .Select(b => new PublicSheetSlot(SheetLabel(b.SheetMailbox), b.Start, b.End))
             .OrderBy(s => s.Start)
@@ -59,8 +59,8 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     }
 
     /// <summary>
-    /// The public month calendar's data - unlike GetAvailabilityAsync (Rental+Hold "available for
-    /// rental" slots only, a subordinate feature), this covers every category and state, reduced to
+    /// The public month calendar's data - unlike GetAvailabilityAsync (GroupEvent+Hold "available for
+    /// group event" slots only, a subordinate feature), this covers every category and state, reduced to
     /// just category+time+confirmed-state. The public calendar's primary purpose is letting members
     /// see what's going on club-wide while unauthenticated, not just where they can rent ice.
     /// Deliberately does NOT dedupe by BookingGroupId here - a multi-week recurring series shares one
