@@ -163,4 +163,69 @@ public static class CalendarStyles
         var hours = Math.Max(0.5, e - s);
         return hours * PxPerHour - RowGapPx;
     }
+
+    /// <summary>
+    /// Classic calendar-view lane layout, generic so both the staff Week grid and the public Week
+    /// view use the exact same algorithm instead of each maintaining their own copy: walk items in
+    /// start order, grouping any that time-overlap into a cluster, then greedily assign each
+    /// cluster's items to the first lane whose previous occupant has already ended - concurrent
+    /// items render side-by-side instead of overlapping, with each cluster's own lane count (not
+    /// the whole day's busiest moment) determining every item's width within it.
+    /// </summary>
+    public static List<(T Item, int Lane, int LaneCount)> LayoutLanes<T>(
+        IEnumerable<T> items, Func<T, DateTime> start, Func<T, DateTime> end)
+    {
+        var sorted = items.OrderBy(start).ToList();
+        var result = new List<(T Item, int Lane, int LaneCount)>();
+        var cluster = new List<T>();
+        var clusterEnd = DateTime.MinValue;
+
+        void FlushCluster()
+        {
+            if (cluster.Count == 0)
+            {
+                return;
+            }
+
+            var laneEnds = new List<DateTime>();
+            var startIndex = result.Count;
+            foreach (var item in cluster)
+            {
+                var lane = laneEnds.FindIndex(e => e <= start(item));
+                if (lane == -1)
+                {
+                    laneEnds.Add(end(item));
+                    lane = laneEnds.Count - 1;
+                }
+                else
+                {
+                    laneEnds[lane] = end(item);
+                }
+
+                result.Add((item, lane, 0)); // lane count backfilled below
+            }
+
+            var laneCount = laneEnds.Count;
+            for (var i = startIndex; i < result.Count; i++)
+            {
+                result[i] = (result[i].Item, result[i].Lane, laneCount);
+            }
+
+            cluster.Clear();
+        }
+
+        foreach (var item in sorted)
+        {
+            if (cluster.Count > 0 && start(item) >= clusterEnd)
+            {
+                FlushCluster();
+            }
+
+            cluster.Add(item);
+            clusterEnd = cluster.Count == 1 ? end(item) : (end(item) > clusterEnd ? end(item) : clusterEnd);
+        }
+
+        FlushCluster();
+        return result;
+    }
 }

@@ -7,7 +7,7 @@ namespace FacilityScheduler.Services;
 /// Computes the public, anonymous-safe availability view (architecture doc §5.4) - a deliberately
 /// separate, hand-built minimization mapping, never a reuse of the internal booking/service-layer
 /// types with anonymous access bolted on. "Available" here means an existing GroupEvent+Hold booking
-/// (the same "AVAILABLE FOR RENTAL" slots staff already create today), not raw free/busy - simpler
+/// (the same open group-event slots staff already create today), not raw free/busy - simpler
 /// than computing complementary free time, and more correct: unbooked League/Bonspiel/practice time
 /// isn't necessarily something staff want the public renting.
 /// </summary>
@@ -68,19 +68,27 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     /// the way the internal MonthGrid does it) would collapse different dates' occurrences into one.
     /// That dedup happens per-day in the page itself, same as the internal view.
     /// </summary>
-    public async Task<PublicMonthView> GetMonthViewAsync(DateTime monthAnchor, CancellationToken ct = default)
-    {
-        var gridStart = MonthGridStart(monthAnchor);
-        var gridEnd = MonthGridEnd(monthAnchor).AddDays(1);
-        var cacheKey = $"public-month:{monthAnchor:yyyyMM}";
+    public Task<PublicMonthView> GetMonthViewAsync(DateTime monthAnchor, CancellationToken ct = default) =>
+        GetRangeViewAsync(MonthGridStart(monthAnchor), MonthGridEnd(monthAnchor).AddDays(1), $"public-month:{monthAnchor:yyyyMM}", ct);
 
+    /// <summary>The public Week view's data - same shape as GetMonthViewAsync, just scoped to a
+    /// precise 7-day window instead of the month's whole displayed grid.</summary>
+    public Task<PublicMonthView> GetWeekViewAsync(DateTime weekStart, CancellationToken ct = default) =>
+        GetRangeViewAsync(weekStart.Date, weekStart.Date.AddDays(7), $"public-week:{weekStart:yyyyMMdd}", ct);
+
+    /// <summary>The public Day view's data - same shape again, scoped to a single day.</summary>
+    public Task<PublicMonthView> GetDayViewAsync(DateTime day, CancellationToken ct = default) =>
+        GetRangeViewAsync(day.Date, day.Date.AddDays(1), $"public-day:{day:yyyyMMdd}", ct);
+
+    private async Task<PublicMonthView> GetRangeViewAsync(DateTime start, DateTime end, string cacheKey, CancellationToken ct)
+    {
         if (cache.TryGetValue(cacheKey, out PublicMonthView? cached) && cached is not null)
         {
             return cached;
         }
 
-        var bookings = await bookingService.GetBookingsForAllSheetsAsync(gridStart, gridEnd, ct);
-        var clubEvents = await clubEventService.GetEventsAsync(gridStart, gridEnd, ct);
+        var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
+        var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
 
         var bookingLabels = bookings
             .Select(b => new PublicMonthBooking(

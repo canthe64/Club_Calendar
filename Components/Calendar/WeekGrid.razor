@@ -17,7 +17,7 @@
         @foreach (var day in WeekDays)
         {
             var dayAllDayEvents = AllDayEventsForDay(day);
-            var laidOutItems = LayoutLanes(TimedItemsForDay(day));
+            var laidOutItems = CalendarStyles.LayoutLanes(TimedItemsForDay(day), i => i.Start, i => i.End);
             <div style="flex:1;min-width:0">
                 <div @onclick="() => OnDayClick.InvokeAsync(day)" style="box-sizing:border-box;height:@(HeaderRowHeightPx)px;text-align:center;cursor:pointer;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
                     <div style="font-weight:600;color:#1e2a33;font-size:11.5px">@day.ToString("ddd")</div>
@@ -113,13 +113,12 @@
     }
 
     private sealed record DayItem(DateTime Start, DateTime End, ClubEvent? ClubEvent, SheetBooking? Booking, int SheetCount);
-    private sealed record LaidOutItem(DayItem Item, int Lane, int LaneCount);
 
     // Timed club events (whole-club, not sheet-specific) and sheet bookings (consolidated across
     // sheets sharing one BookingGroupId, per the user's "collapse identical multi-sheet bookings"
     // ask) are peers here - both just "things happening that day" competing for the same hourly
-    // timeline and lane space. All-day events are handled separately above (no specific hour to
-    // place them at).
+    // timeline and lane space (CalendarStyles.LayoutLanes). All-day events are handled separately
+    // above (no specific hour to place them at).
     private List<DayItem> TimedItemsForDay(DateTime day)
     {
         var timedClubEvents = ClubEvents
@@ -132,64 +131,5 @@
             .Select(g => new DayItem(g.First().Start, g.First().End, null, g.First(), g.Count()));
 
         return timedClubEvents.Concat(consolidatedBookings).OrderBy(i => i.Start).ToList();
-    }
-
-    // Classic calendar-view lane layout: walk items in start order, grouping any that time-overlap
-    // into a cluster, then greedily assign each cluster's items to the first lane whose previous
-    // occupant has already ended - so concurrent items render side-by-side instead of overlapping,
-    // and the lane count (hence each item's width) is scoped to its own cluster rather than the
-    // whole day's busiest moment.
-    private static List<LaidOutItem> LayoutLanes(List<DayItem> sortedItems)
-    {
-        var result = new List<LaidOutItem>();
-        var cluster = new List<DayItem>();
-        var clusterEnd = DateTime.MinValue;
-
-        void FlushCluster()
-        {
-            if (cluster.Count == 0)
-            {
-                return;
-            }
-
-            var laneEnds = new List<DateTime>();
-            foreach (var item in cluster)
-            {
-                var lane = laneEnds.FindIndex(end => end <= item.Start);
-                if (lane == -1)
-                {
-                    laneEnds.Add(item.End);
-                    lane = laneEnds.Count - 1;
-                }
-                else
-                {
-                    laneEnds[lane] = item.End;
-                }
-
-                result.Add(new LaidOutItem(item, lane, 0)); // lane count backfilled below
-            }
-
-            var laneCount = laneEnds.Count;
-            for (var i = result.Count - cluster.Count; i < result.Count; i++)
-            {
-                result[i] = result[i] with { LaneCount = laneCount };
-            }
-
-            cluster.Clear();
-        }
-
-        foreach (var item in sortedItems)
-        {
-            if (cluster.Count > 0 && item.Start >= clusterEnd)
-            {
-                FlushCluster();
-            }
-
-            cluster.Add(item);
-            clusterEnd = cluster.Count == 1 ? item.End : (item.End > clusterEnd ? item.End : clusterEnd);
-        }
-
-        FlushCluster();
-        return result;
     }
 }

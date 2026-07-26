@@ -40,11 +40,16 @@ Event holds mean "open for the public to book."
 
 ## Full calendar page (embeddable via iframe)
 
-There's also a complete, anonymous month-calendar page at `https://YOUR-APP-HOSTNAME/public/calendar`
-- Prev/Next/Today navigation, every category shown (League, Bonspiel, Maintenance, Practice Ice,
-  Other, Group Event - not just open slots), plus club events (with a dotted border distinguishing
-  them from sheet bookings, same as the staff calendar). This is the *primary* public view; the
-  list-style widget above is a subordinate, availability-focused feature.
+There's also a complete, anonymous calendar page at `https://YOUR-APP-HOSTNAME/public/calendar` -
+Month, Week, and Day views (a toggle in the header switches between them, same as the staff
+calendar), Prev/Next/Today navigation, every category shown (League, Bonspiel, Maintenance,
+Practice Ice, Other, Group Event - not just open slots), plus club events (with a dotted border
+distinguishing them from sheet bookings, same as the staff calendar). This is the *primary* public
+view; the list-style widget above is a subordinate, availability-focused feature.
+
+- `?view=month` (default), `?view=week`, or `?view=day` selects the view.
+- `?month=yyyy-MM` sets the displayed month (Month view); `?date=yyyy-MM-dd` sets the anchor date
+  (Week/Day views - Week shows the 7-day week containing that date).
 
 To embed it directly in a page instead of linking to it, use a plain iframe:
 
@@ -52,11 +57,16 @@ To embed it directly in a page instead of linking to it, use a plain iframe:
 <iframe src="https://YOUR-APP-HOSTNAME/public/calendar" style="width:100%;height:800px;border:0"></iframe>
 ```
 
+Add `?view=week` or `?view=day` to the `src` if you'd rather the embed open directly into one of
+those instead of Month.
+
 **What it shows:** each entry's start time and title (the same title staff see internally - e.g. a
 league's name, or a renter's name if one happens to be in the title field), e.g. "7PM - Monday Night
 League", and its exact date/time when tapped. The one deliberate exception: a *confirmed booking's*
 renter name is not stripped out programmatically - keeping that private is handled by staff practice
-(i.e., what staff choose to type in that field), not by this page.
+(i.e., what staff choose to type in that field), not by this page. Changing the date range or
+switching views reloads the page (there's no client-side app here) - a brief "Loading…" overlay
+appears immediately so that reload isn't silent.
 
 **Security note - possible future hardening:** this page currently has no restriction on who can
 embed it in an iframe (no `Content-Security-Policy: frame-ancestors` set). In practice this means

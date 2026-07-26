@@ -95,30 +95,47 @@ is no `400` response path on this endpoint today.
 
 ### `GET /public/calendar`
 
-Returns a complete, self-contained HTML page (not JSON) - a browsable month calendar for anonymous
-visitors. Deliberately hand-built HTML with inline CSS/JS rather than a Blazor page, for the reason
-in [Overview](#overview) - no Blazor circuit, no client runtime to reject.
+Returns a complete, self-contained HTML page (not JSON) - a browsable calendar for anonymous
+visitors, with Month, Week, and Day views. Deliberately hand-built HTML with inline CSS/JS rather
+than a Blazor page, for the reason in [Overview](#overview) - no Blazor circuit, no client runtime
+to reject. A view or date-range change is a full page reload (server-rendered, no client-side
+routing) - a "Loading…" overlay appears immediately on any nav-link click so that reload isn't
+silent while the server computes the next view.
 
 - **Auth:** none (anonymous).
 - **CORS:** not applicable (same-origin page navigation/iframe embed, not a cross-origin fetch).
 - **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
-- **Cache:** server-side, 60 seconds per requested month.
+- **Cache:** server-side, 60 seconds per requested range (a distinct cache key per month/week/day
+  ever viewed within the clamped window below - each entry still expires after 60s regardless).
 
 **Query parameters**
 
 | Parameter | Type | Required | Default | Notes |
 |---|---|---|---|---|
-| `month` | string, `yyyy-MM` | No | current month | Clamped server-side to a window from one year ago through two years ahead. An unparseable value falls back to the current month rather than erroring. |
+| `view` | `month` \| `week` \| `day` | No | `month` | Selects which grid renders. Omitting it (or any unrecognized value) falls back to Month, so existing links/embeds using only `?month=` keep working unchanged. |
+| `month` | string, `yyyy-MM` | No (Month view only) | current month | Clamped server-side to a window from one year ago through two years ahead. An unparseable value falls back to the current month rather than erroring. |
+| `date` | string, `yyyy-MM-dd` | No (Week/Day views only) | today | Same clamping as `month`. For Week, the grid shows the 7-day week containing this date (starting Sunday); for Day, this exact date. |
 
 **Response `200 OK`** — `text/html; charset=utf-8`
 
-A full HTML document: a header, a 7-column month grid with Prev/Today/Next navigation links (each a
-plain `<a href="/public/calendar?month=...">`, no JS routing), color-coded entry chips (confirmed
-booking, hold, club event - club event chips get a dotted border, matching the staff calendar's
-visual language for distinguishing them from sheet bookings), and a click-to-reveal detail overlay
-built with vanilla JS. Every day shows up to 3 entries with a "+N more" expander for busier days.
+**Month view:** a 7-column month grid with color-coded entry chips (confirmed booking, hold, club
+event - club event chips get a dotted border, matching the staff calendar's visual language for
+distinguishing them from sheet bookings). Every day shows up to 3 entries with a "+N more" expander
+for busier days.
 
-Each entry chip's visible text is its start time followed by its title (e.g. "7PM - League
+**Week view** (7-day) **and Day view** (single day): hourly grids sharing the same hour-axis math
+and lane-layout algorithm as the staff Week/Day grids (`CalendarStyles.LayoutLanes`) - genuinely
+concurrent items render side-by-side instead of overlapping. All-day club events pin to a row at
+the top of their column; timed club events and bookings position at their actual hour. A
+multi-sheet booking that produced identical entries (same title/time/category/state) collapses to
+one displayed item via record equality, the same de-facto dedup Month view already relied on -
+these DTOs never carry sheet/group identity to dedupe by more precisely.
+
+A Month/Week/Day toggle plus Prev/Today/Next navigation appears in the header on every view;
+switching views preserves your place (e.g. Week → Month lands on the month containing that week's
+first day).
+
+Every entry chip's visible text is its start time followed by its title (e.g. "7PM - League
 Practice") - renter name if present, else the category name; the one exception is a confirmed
 booking's renter name, which staff practice keeps private rather than the page stripping it.
 Clicking a chip reveals the full category + hold/confirmed state and exact date/time. No phone

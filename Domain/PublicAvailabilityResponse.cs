@@ -19,15 +19,17 @@ public record PublicSheetSlot(string SheetLabel, DateTime Start, DateTime End);
 public record PublicClubEventLabel(string Title, ClubEventCategory Category, DateTime Start, DateTime End, bool IsAllDay, bool MarksSheetsUnavailable);
 
 /// <summary>
-/// One sheet booking as shown on the public month calendar. Unlike PublicSheetSlot (which is
-/// GroupEvent+Hold "available for group event" slots only - a subordinate feature), this covers
-/// every category/state, since the public calendar's primary purpose is letting members see what's
-/// going on club-wide while unauthenticated. Title mirrors the same "RenterName, or Category if
-/// blank" logic the internal calendar already uses (e.g. a league's name) - the one deliberate
+/// One sheet booking as shown on the public calendar (Month/Week/Day). Unlike PublicSheetSlot
+/// (which is GroupEvent+Hold "available for group event" slots only - a subordinate feature), this
+/// covers every category/state, since the public calendar's primary purpose is letting members see
+/// what's going on club-wide while unauthenticated. Title mirrors the same "RenterName, or Category
+/// if blank" logic the internal calendar already uses (e.g. a league's name) - the one deliberate
 /// exception is a confirmed group event's renter name, which is handled by staff practice rather
 /// than being stripped here, per an explicit decision (2026-07-15).
 /// </summary>
 public record PublicMonthBooking(string Title, string CategoryLabel, DateTime Start, DateTime End, bool IsConfirmed);
 
-/// <summary>The public month calendar's data for one visible month grid.</summary>
+/// <summary>The public calendar's data for a given date range - despite the name (kept from when
+/// the public calendar had only a Month view), this same shape now backs Week and Day too
+/// (PublicAvailabilityService.GetWeekViewAsync/GetDayViewAsync); only the range queried differs.</summary>
 public record PublicMonthView(List<PublicMonthBooking> Bookings, List<PublicClubEventLabel> ClubEvents);
