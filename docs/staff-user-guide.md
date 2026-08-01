@@ -38,8 +38,6 @@ see, not the underlying data:
 - **Category chips** (Group Event, League, Bonspiel, Maintenance, Practice Ice, Other) — click to
   toggle a category on or off.
 - **Show club events** — toggles whether Club Events (§5) appear on the calendar at all.
-- **Open ice only** — when on, shows only open (not-yet-booked) Group Event holds, hiding everything
-  else regardless of the category chips above.
 
 ---
 

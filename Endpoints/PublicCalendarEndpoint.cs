@@ -129,7 +129,10 @@ public static class PublicCalendarEndpoint
             <title>Club Calendar</title>
             </head>
             <body style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;margin:0;color:#1e2a33">
-            <header style="background:#1e2a33;color:#fff;padding:10px 24px;font-weight:600;font-size:14px">Facility Scheduler</header>
+            <header style="background:#1e2a33;color:#fff;padding:10px 24px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:16px">
+                <span>Facility Scheduler</span>
+                <a href="/public/search" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none;margin-left:auto">Search available ice &#8250;</a>
+            </header>
             <div style="padding:16px 24px;max-width:1150px">
             """);
     }

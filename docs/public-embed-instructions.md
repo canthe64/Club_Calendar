@@ -75,6 +75,15 @@ over restricting to a specific domain), but worth revisiting - especially once o
 using the app and its public surface gets more scrutiny - by adding a `frame-ancestors` directive
 scoped to the club's actual website domain.
 
+## Availability search page
+
+`https://YOUR-APP-HOSTNAME/public/search` lets a visitor search for a date/time window with at
+least N sheets open for a group event, instead of scanning the calendar by hand - a date range
+(capped at 60 days) plus a minimum-sheets dropdown, returning a list of matching windows that each
+link to that day on the calendar. Linked from the calendar page's header, and vice versa. Same
+"never promise ice that isn't actually open" guarantee as the widget above - a window is only
+reported if nothing else is booked on that sheet during it.
+
 ## If something looks wrong
 
 - If the widget shows "Availability is temporarily unavailable," check that the app is running and

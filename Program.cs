@@ -114,5 +114,6 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
+app.MapPublicSearchEndpoint();
 
 app.Run();

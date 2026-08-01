@@ -46,11 +46,8 @@
                 @CalendarStyles.CategoryLabel(cat)
             </span>
         }
-        <span @onclick="() => _showClubEvents = !_showClubEvents" style="display:flex;align-items:center;gap:6px;color:#1e2a33;font-weight:600;cursor:pointer">
+        <span @onclick="() => _showClubEvents = !_showClubEvents" style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#1e2a33;font-weight:600;cursor:pointer">
             <input type="checkbox" checked="@_showClubEvents" style="pointer-events:none" /> Show club events
-        </span>
-        <span @onclick="() => _openIceOnly = !_openIceOnly" style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#1e2a33;font-weight:600;cursor:pointer">
-            <input type="checkbox" checked="@_openIceOnly" style="pointer-events:none" /> Open ice only
         </span>
     </div>
 
@@ -106,7 +103,6 @@
     private bool _loading = true;
 
     private readonly HashSet<BookingCategory> _selectedCategories = [.. CalendarStyles.SheetCategories];
-    private bool _openIceOnly;
     private bool _showClubEvents = true;
 
     private bool _formOpen;
@@ -133,7 +129,7 @@
     private DateTime WeekStart => _anchorDate.Date.AddDays(-(int)_anchorDate.DayOfWeek);
 
     private List<SheetBooking> FilteredBookings => _allBookings
-        .Where(b => _openIceOnly ? (b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold) : _selectedCategories.Contains(b.Category))
+        .Where(b => _selectedCategories.Contains(b.Category))
         .ToList();
 
     private List<ClubEvent> VisibleClubEvents => _showClubEvents ? _activeClubEvents : [];

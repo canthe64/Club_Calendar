@@ -2,7 +2,7 @@
 
 ## Overview
 
-This app exposes exactly **two** HTTP API endpoints, and both are public/anonymous. There is no
+This app exposes exactly **three** HTTP API endpoints, and all are public/anonymous. There is no
 staff-facing REST/JSON API. Staff functionality (creating and managing bookings, club events) is
 built entirely as Blazor Server components rendered over an authenticated SignalR circuit - staff
 never call an HTTP API directly, and no such API exists to call (architecture doc §5.4, §6.2).
@@ -15,7 +15,7 @@ the Blazor component tree, never a page inside it (`Program.cs:106-112`).
 
 This document covers:
 
-1. **[Public API](#public-api)** - the two real, callable HTTP endpoints. Anyone can call these
+1. **[Public API](#public-api)** - the three real, callable HTTP endpoints. Anyone can call these
    without signing in.
 2. **[Staff-facing surface](#staff-facing-surface)** - why there's no staff API, and how staff
    actions actually reach the server.
@@ -86,7 +86,14 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
 
 A slot that overlaps a `marksSheetsUnavailable` club event is excluded from `sheetSlots` even if a
 Group Event hold technically still exists on Graph, so the public feed never promises ice that's
-actually closed.
+actually closed. A hold's own advertised start/end is also never trusted blindly: any portion that
+overlaps *another* booking on the same sheet (of any category/state) is subtracted out before being
+reported, splitting the hold into 0, 1, or 2 remaining open sub-ranges as needed. The app's own
+write-path conflict check should prevent that overlap from ever being created through the app, but
+data written outside it (direct Graph/Outlook writes, seeded test data) isn't protected by that
+invariant, and the public feed must never promise ice that's actually occupied regardless of how
+the conflicting data got there - live-found 2026-07-28 via a hold that fully covered a separately
+booked, confirmed League game on the same sheet.
 
 **Errors:** a malformed `days` value (non-integer) is ignored and the default (`30`) is used - there
 is no `400` response path on this endpoint today.
@@ -148,17 +155,53 @@ club's own - a known, deliberately deferred hardening item (see
 
 ---
 
+### `GET /public/search`
+
+Returns a complete, self-contained HTML page (not JSON) - a form plus results, letting an anonymous
+visitor search for a date/time window with at least N sheets simultaneously open for a group event.
+Delivers the "≥N sheets available" view the architecture doc originally scoped as R6 and marked
+backlogged during the initial build; built as its own page rather than folded into `/public/calendar`.
+Same hand-built-HTML approach and rationale as the other two endpoints.
+
+- **Auth:** none (anonymous).
+- **CORS:** not applicable (page navigation, not a cross-origin fetch).
+- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Cache:** server-side, 60 seconds per `(start, end, sheets)` combination.
+
+**Query parameters**
+
+| Parameter | Type | Required | Default | Notes |
+|---|---|---|---|---|
+| `start` | string, `yyyy-MM-dd` | No | today | Clamped to a window from one year ago through two years ahead, same rationale as `/public/calendar`'s `?date=`. |
+| `end` | string, `yyyy-MM-dd` | No | `start` + 7 days | Clamped to at most 60 days after `start` (the search's own span cap - a search this wide across every sheet is a meaningfully larger Graph fan-out than a single month/week/day view) and to the same outer ±1yr/+2yr window. |
+| `sheets` | integer | No | `1` | Minimum number of sheets that must be simultaneously open. Clamped to `[1, N]` where N is the tenant's actual configured sheet count (`FacilityConfiguration.SheetMailboxes.Length`) - never hardcoded, per the app's configuration-driven design (architecture doc §4.6, D17). |
+
+**Response `200 OK`** — `text/html; charset=utf-8`
+
+A form (From date, To date, minimum-sheets dropdown) followed by a list of matching windows, each
+rendered as a start-time-prefixed date/time range (e.g. "Monday, Aug 3 · 10:00AM-11:00AM") linking
+to that day's `/public/calendar?view=day` for full detail. Computed via a two-pass interval
+algorithm: each sheet's own open (Group Event + Hold) slots are first merged into that sheet's
+maximal contiguous blocks, then a sweep across every sheet's blocks counts how many are open at each
+point in time; contiguous stretches meeting the requested minimum are reported as one window. Uses
+the same per-sheet-overlap-subtraction and closure-exclusion rules as `/api/public/availability`
+(`PublicAvailabilityService.GetOpenSlotsAsync`) - a window is never reported as available if another
+booking or a `marksSheetsUnavailable` club event actually occupies part of it. Cross-linked with
+`/public/calendar` (a link each way in the header).
+
+---
+
 ## Staff-facing surface
 
 There is no staff API to call. Staff sign in via Entra ID (`Program.cs:56-62`) and interact entirely
-through Blazor Server pages - every page except the two public endpoints above requires
+through Blazor Server pages - every page except the three public endpoints above requires
 authentication by default (`FallbackPolicy = RequireAuthenticatedUser()`, `Program.cs:64-71`).
 Guest-vs-member-vs-any-authenticated-user access is controlled entirely by the Entra Enterprise
 Application's "Assignment required?" setting, not by any code in this app (see the deployment guide's
 §1.2 for how to restrict it).
 
 Because everything runs over one shared, authenticated SignalR circuit, there's no meaningful sense
-in which a staff "request" has its own URL, verb, or independent auth check the way the two public
+in which a staff "request" has its own URL, verb, or independent auth check the way the three public
 endpoints do - a page load establishes the circuit, and every subsequent staff action (create a
 booking, cancel a series, etc.) is a method call within that same already-authenticated circuit, not
 a new HTTP request.

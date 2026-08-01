@@ -33,3 +33,9 @@ public record PublicMonthBooking(string Title, string CategoryLabel, DateTime St
 /// the public calendar had only a Month view), this same shape now backs Week and Day too
 /// (PublicAvailabilityService.GetWeekViewAsync/GetDayViewAsync); only the range queried differs.</summary>
 public record PublicMonthView(List<PublicMonthBooking> Bookings, List<PublicClubEventLabel> ClubEvents);
+
+/// <summary>A date/time window where at least the searched-for number of sheets have an open
+/// (GroupEvent+Hold) slot simultaneously - the /public/search result shape. Deliberately doesn't
+/// name which sheets, only the window - the search only ever promises "at least N", not specific
+/// sheet identities.</summary>
+public record PublicAvailabilityWindow(DateTime Start, DateTime End);
