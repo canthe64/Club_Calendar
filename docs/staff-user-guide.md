@@ -98,14 +98,24 @@ buttons) the option to cancel the entire series instead.
 
 - **Edit booking…** reopens the same form, pre-filled. If you deselect a sheet that was previously part of a
   multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
-  it won't keep showing the old renter's details.
-- **Cancel Booking** offers up to three choices:
-  - **Cancel & reopen for group event** (Group Event bookings only) — the slot goes back to an open,
-    unclaimed Hold, publicly bookable again.
+  it won't keep showing the old renter's details. You can also *add* a sheet that wasn't part of the
+  original booking; it's created fresh under the same booking.
+- **Cancel Booking** offers up to three choices (the reopen choice only appears for a **Confirmed**
+  booking — cancelling something that's already an open Hold just offers to remove it, since there's
+  nothing to "reopen"):
+  - **Cancel & reopen for group event** (Confirmed Group Event bookings only) — the slot goes back to
+    an open, unclaimed Hold, publicly bookable again. If this reopens right next to another open
+    Group Event slot on the same sheet, they merge into one continuous open block rather than showing
+    as separate chips.
   - **Cancel booking** — removed entirely, no longer offered.
   - **Keep the booking** — closes the dialog, no change.
 - **Cancel Series** deletes every occurrence of the recurring series on every sheet involved. You'll
   be asked to confirm; this can't be undone.
+
+**A chip titled "Available for Group Events"** is an open Hold the app created automatically, not
+something staff typed in — either the leftover of a slot after a Breely booking claimed part of a
+larger hold, or a hold reopened after cancelling a booking. It behaves exactly like any other open
+Group Event Hold; there's nothing special to do with it beyond booking or cancelling it as normal.
 
 ---
 
@@ -156,20 +166,34 @@ choose per date whether to skip it or include it anyway.
 
 ---
 
-## 7. Settings — Activity Log
+## 7. Settings
 
-The **Settings** page (top nav bar) shows a record of what's actually happened in the app, and lets
-you control how much detail it captures.
+The **Settings** page (top nav bar) controls booking behavior and shows a record of what's actually
+happened in the app.
+
+### Minimum group event booking interval
+
+When a Breely booking claims part of an open Group Event hold, whatever time is left over before
+and/or after it is normally offered as its own bookable slot (titled "Available for Group Events,"
+§3.2) — unless it's shorter than this many minutes, in which case that leftover time is dropped
+instead of offered as an unusably short sliver. Defaults to 60 minutes. Change the number and click
+**Save** — it takes effect immediately, no restart needed.
+
+### Activity Log
+
+The rest of the page shows a record of what's actually happened in the app, and lets you control how
+much detail it captures.
 
 **Logging Level** — two options:
 
 - **Standard** (the default) — records only definitive actions: a booking, series, or Club Event
   created, edited, or canceled, who did it, and which sheet/event it affects. This is what you'll
   normally leave it on.
-- **Debug** — adds staff sign-in events and full detail on every notification received from the
-  Breely booking website. Turn this on only while actively troubleshooting something (e.g. "did a
-  Breely booking come through correctly?") — it's noisier, and there's no reason to leave it on day
-  to day. Switch it back to Standard once you're done.
+- **Debug** — adds staff sign-in events, full detail on every notification received from the
+  Breely booking website, and a line whenever the app itself starts up or shuts down. Turn this on
+  only while actively troubleshooting something (e.g. "did a Breely booking come through
+  correctly?") — it's noisier, and there's no reason to leave it on day to day. Switch it back to
+  Standard once you're done.
 
 Pick a level and click **Save** — it takes effect immediately, no restart needed.
 

@@ -100,7 +100,7 @@ The diagnostic capture listener (`/api/webhook-capture/{token}`, `Webhook:Captur
 
 ### 2.3 Setting up the activity/debug log (Settings page)
 
-`AppLog:LogDirectory` (architecture doc §4.9) controls where the app's rotating log files and the persisted logging-level marker live. **Left unset, it falls back to `App_Data/logs` under the deployed app folder** — fine for local dev, but wrong for Azure App Service: that folder is part of the deployed content and gets replaced on every redeploy/zip-deploy, silently losing log history with no error.
+`AppLog:LogDirectory` (architecture doc §4.9) controls where the app's rotating log files and the persisted logging-level marker live. **Left unset, it falls back to `App_Data/logs` under the deployed app folder** — fine for local dev, but wrong for Azure App Service: that folder is part of the deployed content and gets replaced on every redeploy/zip-deploy, silently losing log history with no error. As of 2026-08-03 this same directory also holds a small `booking-policy.txt` marker for the Settings page's "Minimum group event booking interval" field — nothing to configure separately, just don't delete unrecognized small text files from this folder.
 
 1. Pick a path outside the app's own deployment folder:
    - **Azure App Service:** use the persistent storage share every instance already has, e.g. `%HOME%\LogFiles\facility-scheduler` (on Windows App Service; adjust for Linux App Service's equivalent persistent path under `/home`). This survives redeploys because it isn't part of the deployed content — only `wwwroot`/the app folder is replaced.
@@ -318,7 +318,7 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 - [ ] A non-assigned account is correctly blocked from signing in, if §1.2's Enterprise Application assignment restriction was configured.
 - [ ] `/public/calendar` loads without signing in, in a private/incognito browser window.
 - [ ] `/api/public/availability` returns JSON without signing in.
-- [ ] If `Webhook:BreelySharedSecret` is configured, a test call to `/api/webhooks/breely` without the `X-Webhook-Secret` header returns `401`, and a real test booking through Breely (§2.2) shows up on the correct sheet's calendar.
+- [ ] If `Webhook:BreelySharedSecret` is configured, a test call to `/api/webhooks/breely` without the `X-Webhook-Secret` header returns `401`, and a real test booking through Breely (§2.2) shows up on the correct sheet's calendar. If the test booking spans multiple sheets, confirm every sheet gets claimed (not just one) and that they show up grouped together when clicked (architecture doc §4.8).
 - [ ] `AppLog:LogDirectory` is set to a path outside the deployed app folder (§2.3) — not left at the `App_Data/logs` fallback. Sign in, open `/settings`, take any booking action, and confirm a new line appears in the log viewer after clicking Refresh.
 - [ ] Mailbox audit logging is confirmed enabled on the resource mailboxes (per the provisioning checklist, architecture doc §7) — this is a tenant-side setting, not something the app itself can verify.
 - [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.

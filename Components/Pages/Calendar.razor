@@ -367,6 +367,7 @@
                 };
 
                 var membersToUpdate = _draft.EditingGroup.Where(m => _draft.SelectedSheets.Contains(m.SheetMailbox)).ToList();
+                var newSheets = _draft.SelectedSheets.Except(_draft.EditingGroup.Select(m => m.SheetMailbox)).ToList();
 
                 // Deselecting a sheet leaves it untouched (still part of whatever it was before -
                 // e.g. an open rental hold). If that leaves it behind, it needs to split off into
@@ -379,7 +380,7 @@
                 var needsFreshGroupId = isPartialEdit || membersToUpdate.Any(m => m.BookingGroupId == Guid.Empty);
                 var splitGroupId = needsFreshGroupId ? Guid.NewGuid() : (Guid?)null;
 
-                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, bookedBy, splitGroupId);
+                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, bookedBy, newSheets, splitGroupId);
                 if (result.IsSuccess)
                 {
                     CloseForm();

@@ -273,25 +273,33 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
     /// <summary>
     /// Updates every event in a booking group - category, time, renter/contact/notes, and
-    /// state (hold vs. confirmed) all come from <paramref name="updatedFields"/>. Does not
-    /// add/remove sheets from the group. Re-checks conflicts against the new time on each member's
-    /// sheet before writing anything (all-or-nothing, same philosophy as CreateAcrossSheetsAsync) -
-    /// each member's own current event is excluded from its own conflict check, so an edit that
-    /// doesn't move the time never conflicts with itself. <paramref name="newBookingGroupId"/>, when
-    /// given, reassigns all updated members to a new group - used when a caller only edited a subset
-    /// of the original group's sheets, so the edited subset splits off rather than staying linked to
-    /// sheets that were deliberately left untouched.
+    /// state (hold vs. confirmed) all come from <paramref name="updatedFields"/>. Re-checks
+    /// conflicts against the new time on each member's sheet before writing anything (all-or-nothing,
+    /// same philosophy as CreateAcrossSheetsAsync) - each member's own current event is excluded from
+    /// its own conflict check, so an edit that doesn't move the time never conflicts with itself.
+    /// <paramref name="newBookingGroupId"/>, when given, reassigns all updated members to a new group
+    /// - used when a caller only edited a subset of the original group's sheets, so the edited subset
+    /// splits off rather than staying linked to sheets that were deliberately left untouched.
+    /// <paramref name="newSheetMailboxes"/> adds brand-new sheets to the group in the same operation -
+    /// a sheet with no existing member has no event to PATCH, so without this it was silently dropped
+    /// (live-found 2026-08-03: adding a sheet to an existing multi-sheet hold appeared to save
+    /// successfully but never actually created anything on the new sheet). Conflict-checked and
+    /// locked alongside the existing members, same all-or-nothing guarantee.
     /// </summary>
     public async Task<GroupBookingResult> UpdateGroupAsync(
-        IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, Guid? newBookingGroupId = null, CancellationToken ct = default)
+        IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser,
+        IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null, CancellationToken ct = default)
     {
         var memberList = members.Where(m => m.EventId is not null).ToList();
-        if (memberList.Count == 0)
+        var existingSheets = memberList.Select(m => m.SheetMailbox).ToHashSet();
+        var newSheets = (newSheetMailboxes ?? []).Distinct().Where(s => !existingSheets.Contains(s)).ToList();
+
+        if (memberList.Count == 0 && newSheets.Count == 0)
         {
             return GroupBookingResult.Success([]);
         }
 
-        var orderedSheets = memberList.Select(m => m.SheetMailbox).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
+        var orderedSheets = existingSheets.Concat(newSheets).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
         var sems = orderedSheets.Select(s => SheetLocks.GetOrAdd(s, _ => new SemaphoreSlim(1, 1))).ToList();
 
         foreach (var sem in sems)
@@ -307,6 +315,11 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             {
                 var overlapping = await GetEventsInRangeAsync(member.SheetMailbox, updatedFields.Start, updatedFields.End, ct);
                 conflicts.AddRange(overlapping.Where(e => e.Id is not null && !ownEventIds.Contains(e.Id)).Select(e => FromGraphEvent(member.SheetMailbox, e)));
+            }
+            foreach (var sheet in newSheets)
+            {
+                var overlapping = await GetEventsInRangeAsync(sheet, updatedFields.Start, updatedFields.End, ct);
+                conflicts.AddRange(overlapping.Select(e => FromGraphEvent(sheet, e)));
             }
 
             if (conflicts.Count > 0)
@@ -345,6 +358,35 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 updated.Add(merged);
             }
 
+            // New sheets join whatever group id the rest of this edit settles on - explicitly given
+            // (a split happened) or, failing that, whatever the retained members already share.
+            // Guid.NewGuid() only applies if there were no existing members at all (every sheet in
+            // this "edit" is brand new).
+            var targetGroupId = newBookingGroupId ?? memberList.FirstOrDefault()?.BookingGroupId ?? Guid.NewGuid();
+            foreach (var sheet in newSheets)
+            {
+                var created = new SheetBooking
+                {
+                    SheetMailbox = sheet,
+                    Start = updatedFields.Start,
+                    End = updatedFields.End,
+                    Category = updatedFields.Category,
+                    State = updatedFields.State,
+                    RenterName = updatedFields.RenterName,
+                    RenterPhone = updatedFields.RenterPhone,
+                    RenterEmail = updatedFields.RenterEmail,
+                    Notes = updatedFields.Notes,
+                    BookedBy = updatedFields.BookedBy,
+                    BookingGroupId = targetGroupId
+                };
+
+                var graphEvent = ToGraphEvent(created);
+                var result = await graphClient.Users[sheet].Events.PostAsync(graphEvent, cancellationToken: ct);
+                created.EventId = result?.Id;
+                created.ICalUId = result?.ICalUId;
+                updated.Add(created);
+            }
+
             InvalidateViewCache();
             await log.LogActionAsync("BookingUpdated", actingUser, string.Join(",", updated.Select(u => u.EventId)), string.Join(",", orderedSheets),
                 $"{updatedFields.Category} {updatedFields.State}, {updatedFields.Start:g}-{updatedFields.End:g}" + (string.IsNullOrWhiteSpace(updatedFields.RenterName) ? "" : $", {updatedFields.RenterName}"), ct);
@@ -371,46 +413,82 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         var affected = new List<SheetBooking>();
         var alreadyGone = new List<SheetBooking>();
 
-        foreach (var member in memberList)
+        // Locked per sheet (sorted order, same deadlock-avoidance reasoning as CreateAcrossSheetsAsync)
+        // because reopening now reads other holds on the sheet before deciding what to write
+        // (AbsorbAdjacentHoldsAsync) - a genuine read-then-write race against a concurrent Breely
+        // claim on the same sheet, not just a courtesy lock.
+        var orderedSheets = memberList.Select(m => m.SheetMailbox).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
+        var sems = orderedSheets.Select(s => SheetLocks.GetOrAdd(s, _ => new SemaphoreSlim(1, 1))).ToList();
+        foreach (var sem in sems)
         {
-            if (member.EventId is null)
-            {
-                continue;
-            }
+            await sem.WaitAsync(ct);
+        }
 
-            try
+        try
+        {
+            foreach (var member in memberList)
             {
-                if (reopenAsGroupEventHold)
+                if (member.EventId is null)
                 {
-                    var reopened = new SheetBooking
+                    continue;
+                }
+
+                try
+                {
+                    if (reopenAsGroupEventHold)
                     {
-                        SheetMailbox = member.SheetMailbox,
-                        Start = member.Start,
-                        End = member.End,
-                        Category = BookingCategory.GroupEvent,
-                        State = BookingState.Hold,
-                        BookingGroupId = member.BookingGroupId
-                        // Renter-specific fields intentionally omitted - back to a plain open hold.
-                    };
+                        var (mergedStart, mergedEnd) = await AbsorbAdjacentHoldsAsync(member.SheetMailbox, member.Start, member.End, member.EventId, ct);
+                        var merged = mergedStart != member.Start || mergedEnd != member.End;
 
-                    var graphEvent = ToGraphEvent(reopened, includeTime: false);
-                    await graphClient.Users[member.SheetMailbox].Events[member.EventId].PatchAsync(graphEvent, cancellationToken: ct);
+                        var reopened = new SheetBooking
+                        {
+                            SheetMailbox = member.SheetMailbox,
+                            Start = mergedStart,
+                            End = mergedEnd,
+                            Category = BookingCategory.GroupEvent,
+                            State = BookingState.Hold,
+                            BookingGroupId = merged ? Guid.NewGuid() : member.BookingGroupId
+                            // Renter-specific fields intentionally omitted - back to a plain open hold.
+                        };
+
+                        if (merged && member.SeriesMasterId is not null)
+                        {
+                            // Can't widen a recurring occurrence's time via PATCH - Graph rejects a
+                            // Start/End change on an occurrence that would cross into an adjacent
+                            // occurrence, same restriction TrimHoldAsync already works around. Delete
+                            // this occurrence and create a standalone merged hold instead.
+                            await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
+                            await graphClient.Users[member.SheetMailbox].Events.PostAsync(ToGraphEvent(reopened, titleOverride: AvailableForGroupEventsTitle), cancellationToken: ct);
+                        }
+                        else
+                        {
+                            var graphEvent = ToGraphEvent(reopened, includeTime: merged, titleOverride: AvailableForGroupEventsTitle);
+                            await graphClient.Users[member.SheetMailbox].Events[member.EventId].PatchAsync(graphEvent, cancellationToken: ct);
+                        }
+                    }
+                    else
+                    {
+                        await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
+                    }
+
+                    affected.Add(member);
                 }
-                else
+                catch (ODataError ex) when (ex.ResponseStatusCode == 404)
                 {
-                    await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
+                    // Already gone - e.g. the Breely webhook claimed/trimmed this exact hold out from
+                    // under a stale staff browser tab between page load and clicking Cancel (live-hit
+                    // 2026-08-03, same class of "already gone" 404 CancelSeriesAsync below has always
+                    // tolerated). Treat as already-cancelled for this member and keep processing the
+                    // rest of the group, rather than letting a 404 here crash the Blazor circuit.
+                    alreadyGone.Add(member);
                 }
-
-                affected.Add(member);
             }
-            catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+        }
+        finally
+        {
+            foreach (var sem in sems)
             {
-                // Already gone - e.g. the Breely webhook claimed/trimmed this exact hold out from
-                // under a stale staff browser tab between page load and clicking Cancel (live-hit
-                // 2026-08-03, same class of "already gone" 404 CancelSeriesAsync below has always
-                // tolerated). Treat as already-cancelled for this member and keep processing the
-                // rest of the group, rather than letting a 404 here crash the Blazor circuit.
-                alreadyGone.Add(member);
+                sem.Release();
             }
         }
 
@@ -431,6 +509,58 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 string.Join(",", alreadyGone.Select(m => m.SheetMailbox).Distinct()),
                 "All members were already gone by the time this ran.", ct);
         }
+    }
+
+    /// <summary>
+    /// Finds any open Group Event hold(s) on the same sheet immediately touching [start, end) -
+    /// i.e. another hold whose End equals start, or whose Start equals end - and folds them into one
+    /// contiguous span, deleting the absorbed hold(s). Called before reopening a canceled booking as
+    /// a hold (CancelGroupAsync), so a booking that was claimed out of the middle of a larger hold
+    /// (architecture doc §4.8's TrimHoldAsync) reunites into a single hold on cancel instead of
+    /// leaving 2-3 separate back-to-back chips for what's really one open block of ice (live-found
+    /// 2026-08-03: staff manually cleaning up test bookings ended up with exactly that clutter).
+    /// Keeps extending outward on both sides until no more touching hold is found, so this also
+    /// handles a chain longer than one neighbor per side.
+    /// </summary>
+    private async Task<(DateTime Start, DateTime End)> AbsorbAdjacentHoldsAsync(string sheet, DateTime start, DateTime end, string excludeEventId, CancellationToken ct)
+    {
+        var candidates = (await GetEventsInRangeAsync(sheet, start.AddHours(-24), end.AddHours(24), ct))
+            .Select(e => FromGraphEvent(sheet, e))
+            .Where(b => b.EventId != excludeEventId && b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold)
+            .ToList();
+
+        var mergedStart = start;
+        var mergedEnd = end;
+        var absorbedIds = new HashSet<string>();
+
+        var extended = true;
+        while (extended)
+        {
+            extended = false;
+
+            var before = candidates.FirstOrDefault(b => b.EventId is not null && !absorbedIds.Contains(b.EventId) && b.End == mergedStart);
+            if (before is not null)
+            {
+                mergedStart = before.Start;
+                absorbedIds.Add(before.EventId!);
+                extended = true;
+            }
+
+            var after = candidates.FirstOrDefault(b => b.EventId is not null && !absorbedIds.Contains(b.EventId) && b.Start == mergedEnd);
+            if (after is not null)
+            {
+                mergedEnd = after.End;
+                absorbedIds.Add(after.EventId!);
+                extended = true;
+            }
+        }
+
+        foreach (var eventId in absorbedIds)
+        {
+            await graphClient.Users[sheet].Events[eventId].DeleteAsync(cancellationToken: ct);
+        }
+
+        return (mergedStart, mergedEnd);
     }
 
     /// <summary>
@@ -655,8 +785,12 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     /// for any remainder instead, since Graph rejects a time-bearing PATCH on a recurring
     /// occurrence even when the time is technically unchanged. Returns null if no sheet's hold(s)
     /// fully cover the window; the caller decides how to handle that (see ForceCreateConfirmedAsync).
+    /// <paramref name="groupId"/> is set explicitly by the caller (BreelyBookingProcessor) rather
+    /// than minted here, so multiple sheets claimed from the same Breely submission - or a sheet
+    /// reclaimed on reschedule - can share (or keep) one BookingGroupId instead of each claim getting
+    /// its own random one.
     /// </summary>
-    public async Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, CancellationToken ct = default)
+    public async Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, Guid groupId, CancellationToken ct = default)
     {
         foreach (var sheet in facility.SheetMailboxes)
         {
@@ -691,7 +825,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                     Notes = template.Notes,
                     BookedBy = template.BookedBy,
                     ExternalBookingId = template.ExternalBookingId,
-                    BookingGroupId = Guid.NewGuid()
+                    BookingGroupId = groupId
                 };
 
                 var graphEvent = ToGraphEvent(booking);

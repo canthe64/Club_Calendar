@@ -61,24 +61,23 @@ public static class BreelyBookingWebhookEndpoint
                 return Results.Ok();
             }
 
-            var evt = payload?.Event;
-            if (evt is null)
+            if (payload is null)
             {
-                logger.LogWarning("Breely webhook: request had no top-level \"event\" object.");
+                logger.LogWarning("Breely webhook: request body did not deserialize to a payload object.");
                 return Results.Ok();
             }
 
             try
             {
-                await processor.ProcessAsync(evt, ct);
+                // Resolves the top-level "event" plus any siblings in "submission.events" itself -
+                // see BreelyBookingProcessor's class doc for why this app can't just look at "event"
+                // alone. Per-event failures inside are already individually caught there, so nothing
+                // here can surface as a non-2xx to the sender either.
+                await processor.ProcessAsync(payload, ct);
             }
             catch (Exception ex)
             {
-                // Never let a processing failure surface as a non-2xx to the sender - this is a
-                // fire-and-forget notification with no retry semantics we control either way, and a
-                // non-2xx here wouldn't cause Breely to do anything useful, only obscure the real
-                // signal (which lives in this log entry, not the HTTP response).
-                logger.LogError(ex, "Breely webhook: failed to process event {Id}", evt.Id);
+                logger.LogError(ex, "Breely webhook: failed to process payload.");
             }
 
             return Results.Ok();

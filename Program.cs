@@ -158,4 +158,13 @@ app.MapWebhookCaptureEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
 app.MapSettingsLogsEndpoint();
 
+// Debug-tier only - lets a Settings-page reader see "the app restarted at X" without needing Azure
+// portal access to the platform's own Activity Log. ApplicationStopping fires on a graceful
+// shutdown (recycle, deploy swap, manual stop) with a short grace period to finish this write; it
+// won't fire on a hard crash/OOM kill, so a missing "AppStopping" line doesn't rule that out.
+var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
+var lifetimeAppLog = app.Services.GetRequiredService<FacilityScheduler.Services.AppLogService>();
+lifetime.ApplicationStarted.Register(() => lifetimeAppLog.LogDebugAsync("AppStarted", "system").GetAwaiter().GetResult());
+lifetime.ApplicationStopping.Register(() => lifetimeAppLog.LogDebugAsync("AppStopping", "system").GetAwaiter().GetResult());
+
 app.Run();

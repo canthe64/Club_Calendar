@@ -227,8 +227,8 @@ is a best-effort, one-way reflection kept current for staff's benefit, not relie
 - **Rate limit:** its own `booking-webhook` limiter, 30 req/min, no queue - deliberately separate
   from `public-api` so a flood aimed at one can't starve the other.
 
-**Request body** — `application/json`, `{ "event": { ... } }`. Only a subset of Breely's real
-(much larger) payload is read:
+**Request body** — `application/json`, `{ "event": { ... }, "submission": { "events": [ ... ] } }`.
+Only a subset of Breely's real (much larger) payload is read:
 
 | Field | Type | Notes |
 |---|---|---|
@@ -239,20 +239,24 @@ is a best-effort, one-way reflection kept current for staff's benefit, not relie
 | `event.canceled` | boolean | `true` releases the matching booking back to an open Group Event hold. |
 | `event.client_full_name` / `client_email` / `client_phone` | string | Stored on the booking as renter contact info. |
 | `event.event_type` / `admin_url` | string | Stored in the booking's notes for staff reference back to Breely's own admin view. |
+| `submission.events[]` | array | Same shape as `event` above, one entry per sheet in the *original* multi-sheet reservation this notification belongs to (architecture doc §4.8). Present on every call, including later reschedule/cancellation calls for a single sibling - on those, it's a **stale snapshot from the original creation call**, not updated data; the top-level `event` object always wins for its own id. Added 2026-08-03 after a real 3-sheet booking only claimed 1 sheet - this array is the only place the sibling ids are discoverable at all. |
 
 Everything else in the real payload (CRM/marketing fields, signed-PDF blobs, raw form-answer
 dumps) is silently ignored - `System.Text.Json` drops unmapped properties.
+
+**Multi-sheet handling.** The endpoint resolves every id named by either `event` or
+`submission.events[]` (deduplicated, `event`'s own data winning for its own id) and processes each
+independently - each may create, reschedule, or cancel a booking depending on its own `canceled`
+flag and whether it's already been claimed before. All sheets resolved from one call that don't
+already belong to an existing group share one freshly-minted `BookingGroupId`; a sibling that's
+already been claimed (a reschedule, or a straggler picked up on a later call) reuses its existing
+group id instead. One event failing doesn't stop the others from being processed.
 
 **Response:** always `200 OK` once past the secret check, including on malformed JSON, an
 unrecognized shape, or an internal processing exception - a deliberate "dumb webhook" design
 (§4.8): the booking already happened in the real world, so this endpoint never rejects or signals
 failure back to the sender. Failures are surfaced via server logs and, for an unmatched booking,
 a non-blocking `⚠ Web booking needs review` Club Event marker for staff to reassign manually.
-
-**Known limitations (see architecture doc §8):** the Graph query used to detect a repeat
-notification for the same booking (`FindByExternalIdAsync`) is unverified against real production
-traffic as of this writing; the cancellation path has not yet been exercised against a real Breely
-cancellation, only synthetic samples.
 
 ---
 
@@ -329,16 +333,17 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 | `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. |
 | `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
 | `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId, string actingUser)` | Hard-deletes a single event. Tolerates a `404` from Graph as "already gone" (e.g. the Breely webhook already claimed/trimmed it) rather than throwing (architecture doc D37) - logged at Debug tier as a no-op in that case, `BookingCancelled` at Standard tier otherwise. |
-| `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state). Re-checks conflicts against the new time before writing (excluding the group's own events); all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched. |
-| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it. Same per-member 404-tolerance as `CancelAsync` (D37) - one member already being gone doesn't abort the rest of the group. |
+| `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state), and creates fresh events for any sheet in `newSheetMailboxes` that isn't already a member (added 2026-08-03 - a sheet added mid-edit previously had no existing event to update and was silently dropped). Re-checks conflicts against the new time before writing, for both existing and new sheets; all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched; new sheets join whichever group id the rest of the edit settles on. |
+| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it - and, as of 2026-08-03, first absorbs any Group Event hold on the same sheet immediately touching the reopened slot into one contiguous hold (`AbsorbAdjacentHoldsAsync`), rather than leaving separate back-to-back chips. Now locks per sheet (it didn't before), since that absorption reads other holds before writing. Same per-member 404-tolerance as `CancelAsync` (D37) - one member already being gone doesn't abort the rest of the group. |
 | `PreviewSeriesConflictsAsync` | `Task<Dictionary<DateTime, List<SheetBooking>>> PreviewSeriesConflictsAsync(IEnumerable<string> sheetMailboxes, IReadOnlyCollection<DateTime> candidateDates, TimeSpan startTime, TimeSpan endTime)` | Informational only - reports conflicts per candidate date so staff can choose to skip that date. Never blocks anything itself. |
 | `CreateSeriesAsync` | `Task<List<SheetBooking>> CreateSeriesAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates, string actingUser)` | Creates one native weekly-recurring Graph event per sheet (sharing a `BookingGroupId`), then deletes the specific `excludedDates` occurrences staff chose to skip during review. Does not conflict-check - that's `PreviewSeriesConflictsAsync`'s job, expected to already have run. |
 | `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members, string actingUser)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. Already tolerated a missing series master (`404`) before Phase 10 - the pattern `CancelAsync`/`CancelGroupAsync` above now also follow. |
 | `GetBookingsAsync` | `Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end)` | Reads one sheet's bookings in a window. Always live (never cached) - used by every conflict check. |
 | `GetBookingsForAllSheetsAsync` | `Task<List<SheetBooking>> GetBookingsForAllSheetsAsync(DateTime start, DateTime end)` | Reads every configured sheet's bookings in a window, in parallel. View-rendering read path only (Calendar page, public availability) - cached for 30 seconds, invalidated on every write. |
 | `FindByExternalIdAsync` | `Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct)` | Added for the Breely webhook (architecture doc §4.8). Validates the id against a strict allow-list charset, then queries every configured sheet via a Graph `$filter` on the `ExternalBookingId` extended property. Returns the first match or `null` - not staff-facing, called only by `BreelyBookingProcessor`. |
-| `ClaimHoldAsync` | `Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, CancellationToken ct)` | Added for the Breely webhook. Tries sheets in configured order; on each, looks for a Group Event hold fully covering the window, converts it to Confirmed, and trims the remainder (delete/patch/split). Returns the claimed booking, or `null` if no sheet had a covering hold. Unlike every other create path above, this treats an existing hold as claimable rather than a conflict. |
-| `ForceCreateConfirmedAsync` | `Task<SheetBooking> ForceCreateConfirmedAsync(string sheetMailbox, SheetBooking booking, CancellationToken ct)` | Added for the Breely webhook. Bypasses the conflict check entirely - the deliberate "never drop a real booking" fallback used only when `ClaimHoldAsync` finds no matching hold anywhere. Callers are expected to also flag the result for staff review, since it may land on the wrong sheet. |
+| `ClaimHoldAsync` | `Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, Guid groupId, CancellationToken ct)` | Added for the Breely webhook. Tries sheets in configured order; on each, looks for a Group Event hold fully covering the window, converts it to Confirmed (tagged with the caller-supplied `groupId` rather than minting its own - added 2026-08-03 so multiple sheets from one Breely submission, or a sheet reclaimed on reschedule, can share/keep one `BookingGroupId`), and trims the remainder (delete/patch/split, dropping any remainder shorter than the Settings page's configured minimum interval, titled "Available for Group Events"). Returns the claimed booking, or `null` if no sheet had a covering hold. Unlike every other create path above, this treats an existing hold as claimable rather than a conflict. |
+| `ForceCreateConfirmedAsync` | `Task<SheetBooking> ForceCreateConfirmedAsync(string sheetMailbox, SheetBooking booking, CancellationToken ct)` | Added for the Breely webhook. Bypasses the conflict check entirely - the deliberate "never drop a real booking" fallback used only when `ClaimHoldAsync` finds no matching hold anywhere. Callers are expected to also flag the result for staff review, since it may land on the wrong sheet. Respects a `BookingGroupId` the caller already set on `booking` (used by the Breely processor to keep it in its submission's group) rather than always minting its own. |
+| `MinimumGroupEventBookingIntervalMinutes` / `SetMinimumGroupEventBookingIntervalAsync` | `int MinimumGroupEventBookingIntervalMinutes { get; }` / `Task SetMinimumGroupEventBookingIntervalAsync(int minutes, CancellationToken ct = default)` | Added 2026-08-03, backs the Settings page's "Minimum group event booking interval" field (default 60). Read once at construction from a small file next to the log files; `SetMinimumGroupEventBookingIntervalAsync` updates the in-memory value immediately and re-persists it, taking effect on the next `ClaimHoldAsync`/`TrimHoldAsync` call with no restart needed. |
 
 ### `ClubEventService`
 

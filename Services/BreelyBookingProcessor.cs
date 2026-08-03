@@ -6,13 +6,18 @@ using Microsoft.Extensions.Logging;
 namespace FacilityScheduler.Services;
 
 /// <summary>
-/// Processes a single Breely webhook notification - the real integration that replaced
+/// Processes a Breely webhook notification - the real integration that replaced
 /// WebhookCaptureEndpoint once the payload shape was known empirically (a series of real
-/// create/reschedule/single-sheet samples, since Breely's own documentation for this webhook was
-/// too sparse to build against directly). Breely fires one webhook per sheet-booking event, not one
-/// per purchase - a multi-sheet reservation is several independent calls, each with its own stable
-/// `event.id` that persists across reschedules. That id is this app's only handle on "have I seen
-/// this external booking before," since there is no companion database (architecture doc D7).
+/// create/reschedule/multi-sheet samples, since Breely's own documentation for this webhook was too
+/// sparse to build against directly). Breely fires **one webhook call for an entire multi-sheet
+/// reservation at creation** (the sibling sheet-events are only discoverable via the nested
+/// "submission.events" array - the top-level "event" alone only names one of them), but **one call
+/// per event for reschedule or cancellation** later, since Breely's own UI requires rescheduling a
+/// multi-sheet reservation's sheets one at a time (live-confirmed 2026-08-03, after the original
+/// "one call per sheet, always" assumption turned out to only hold for reschedule/cancel, not
+/// creation). Each event's own `id` is stable across reschedules and is this app's only handle on
+/// "have I seen this external booking before," since there is no companion database (architecture
+/// doc D7).
 ///
 /// This is a "dumb webhook" in the sense the booking already happened in the real world by the
 /// time this fires - the job here is to reflect that, never to reject it. See the architecture doc
@@ -28,7 +33,75 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     private const string ExternalIdSourcePrefix = "breely";
     private const string BookedByLabel = "Breely webhook";
 
-    public async Task ProcessAsync(BreelyEvent evt, CancellationToken ct = default)
+    /// <summary>
+    /// Entry point for the endpoint - resolves which event(s) this webhook call is actually about,
+    /// then processes each independently. Breely's payload always carries a top-level "event" (the
+    /// one this specific call is about) plus a "submission.events" array - at the *original*
+    /// multi-sheet creation call, that array lists every sibling sheet-event together, which is the
+    /// only way this app can discover them at all (Breely fires one webhook per creation regardless
+    /// of sheet count, but individual reschedule/cancel notifications later, one call per event -
+    /// live-confirmed 2026-08-03). On those later calls the array is a stale snapshot of the original
+    /// submission, not a fresh batch - so every id it names is still resolved and reconciled here
+    /// (in case a sibling was never individually claimed), but the top-level "event" object's own
+    /// data always wins for its own id, since that's the one actually being updated by this call.
+    /// </summary>
+    public async Task ProcessAsync(BreelyWebhookPayload payload, CancellationToken ct = default)
+    {
+        var eventsById = new Dictionary<long, BreelyEvent>();
+        if (payload.Submission?.Events is { Count: > 0 } siblings)
+        {
+            foreach (var sibling in siblings)
+            {
+                eventsById[sibling.Id] = sibling;
+            }
+        }
+        if (payload.Event is { } primary)
+        {
+            eventsById[primary.Id] = primary; // freshest data for its own id - overrides any stale copy from the array above
+        }
+
+        if (eventsById.Count == 0)
+        {
+            logger.LogWarning("Breely webhook: request had no top-level \"event\" object and no \"submission.events\" array.");
+            return;
+        }
+
+        // One shared BookingGroupId for the whole batch - reuse an existing sibling's group id if
+        // any of these ids was already claimed before (so a straggler joins its group correctly,
+        // and a reschedule keeps the booking in its original group instead of forking into a new
+        // one), otherwise mint a fresh one for a genuinely new submission.
+        Guid? sharedGroupId = null;
+        foreach (var id in eventsById.Keys)
+        {
+            var existing = await bookingService.FindByExternalIdAsync($"{ExternalIdSourcePrefix}:{id}", ct);
+            if (existing is { BookingGroupId: var gid } && gid != Guid.Empty)
+            {
+                sharedGroupId = gid;
+                break;
+            }
+        }
+        sharedGroupId ??= Guid.NewGuid();
+
+        if (eventsById.Count > 1)
+        {
+            await appLog.LogDebugAsync("WebhookMultiSheetBatch", BookedByLabel,
+                details: $"{eventsById.Count} sibling event(s) resolved for this submission: {string.Join(",", eventsById.Keys)}.", ct: ct);
+        }
+
+        foreach (var evt in eventsById.Values)
+        {
+            try
+            {
+                await ProcessEventAsync(evt, sharedGroupId.Value, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Breely webhook: failed to process event {Id}", evt.Id);
+            }
+        }
+    }
+
+    private async Task ProcessEventAsync(BreelyEvent evt, Guid groupId, CancellationToken ct)
     {
         var breelyId = evt.Id.ToString(CultureInfo.InvariantCulture);
 
@@ -107,10 +180,11 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             RenterEmail = evt.ClientEmail,
             Notes = BuildNotes(evt),
             BookedBy = BookedByLabel,
-            ExternalBookingId = externalId
+            ExternalBookingId = externalId,
+            BookingGroupId = groupId
         };
 
-        var claimed = await bookingService.ClaimHoldAsync(start, end, template, ct);
+        var claimed = await bookingService.ClaimHoldAsync(start, end, template, groupId, ct);
         if (claimed is not null)
         {
             logger.LogInformation("Breely webhook: event {Id} claimed hold on {Sheet} for {Start}-{End}.", evt.Id, claimed.SheetMailbox, start, end);
@@ -248,4 +322,19 @@ public class BreelyWebhookPayload
 {
     [JsonPropertyName("event")]
     public BreelyEvent? Event { get; set; }
+
+    [JsonPropertyName("submission")]
+    public BreelySubmission? Submission { get; set; }
+}
+
+/// <summary>
+/// Wraps the "submission" object's "events" array - the only place a multi-sheet reservation's
+/// sibling event ids appear together in one payload (live-confirmed 2026-08-03). Everything else in
+/// "submission" (form answers, client CRM fields, signed-PDF blobs) is deliberately left unmapped,
+/// same reasoning as BreelyEvent.
+/// </summary>
+public class BreelySubmission
+{
+    [JsonPropertyName("events")]
+    public List<BreelyEvent>? Events { get; set; }
 }
