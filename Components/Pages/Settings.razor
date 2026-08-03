@@ -2,6 +2,7 @@
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services
 @inject AppLogService LogService
+@inject SheetBookingService BookingService
 
 <PageTitle>Settings</PageTitle>
 
@@ -29,6 +30,21 @@
         }
     </section>
 
+    <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
+        <h2 style="font-size:16px;margin-bottom:8px">Minimum group event booking interval</h2>
+        <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">
+            When a Breely booking claims part of an open Group Event hold, whatever time is left
+            over before and/or after it is offered as its own bookable slot - unless it's shorter
+            than this many minutes, in which case that leftover time is dropped instead of offered.
+        </p>
+        <input type="number" min="0" step="5" style="width:80px" @bind="_minimumIntervalMinutes" /> minutes
+        <button class="btn btn-primary" style="margin-left:16px" @onclick="SaveMinimumInterval" disabled="@_savingInterval">Save</button>
+        @if (_intervalSavedMessage is not null)
+        {
+            <span style="margin-left:10px;color:#2d7a3f;font-size:13px">@_intervalSavedMessage</span>
+        }
+    </section>
+
     <section>
         <h2 style="font-size:16px;margin-bottom:8px">Recent Activity</h2>
         <p style="color:#5a7183;font-size:13px;margin-bottom:8px">Most recent 500 log lines.</p>
@@ -46,10 +62,30 @@
     private bool _saving;
     private string? _savedMessage;
 
+    private int _minimumIntervalMinutes;
+    private bool _savingInterval;
+    private string? _intervalSavedMessage;
+
     protected override async Task OnInitializedAsync()
     {
         _level = LogService.CurrentLevel;
+        _minimumIntervalMinutes = BookingService.MinimumGroupEventBookingIntervalMinutes;
         await RefreshTail();
+    }
+
+    private async Task SaveMinimumInterval()
+    {
+        _savingInterval = true;
+        _intervalSavedMessage = null;
+        try
+        {
+            await BookingService.SetMinimumGroupEventBookingIntervalAsync(_minimumIntervalMinutes);
+            _intervalSavedMessage = "Saved.";
+        }
+        finally
+        {
+            _savingInterval = false;
+        }
     }
 
     private async Task RefreshTail()

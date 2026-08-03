@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FacilityScheduler.Domain;
@@ -16,6 +17,59 @@ namespace FacilityScheduler.Services;
 /// </summary>
 public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
 {
+    // Title given to a leftover Group Event hold created/kept by TrimHoldAsync when claiming a
+    // Breely booking (architecture doc §4.8) - distinguishes an app-generated "the rest of this slot
+    // is still open" fragment from a plain staff-created hold, which keeps its category-label title.
+    private const string AvailableForGroupEventsTitle = "Available for Group Events";
+
+    // Minimum group event booking interval (Settings page) - a leftover fragment before/after a
+    // claimed Breely booking shorter than this is dropped instead of offered as its own bookable
+    // slot (TrimHoldAsync below). Deliberately not a whole separate service for one int: read once
+    // at construction, updated in memory and re-persisted only when Settings saves a change.
+    private const string MinimumIntervalFileName = "booking-policy.txt";
+    private const int DefaultMinimumGroupEventBookingIntervalMinutes = 60;
+    private int _minimumGroupEventBookingIntervalMinutes = LoadMinimumInterval(log.LogDirectory);
+
+    public int MinimumGroupEventBookingIntervalMinutes => _minimumGroupEventBookingIntervalMinutes;
+
+    public async Task SetMinimumGroupEventBookingIntervalAsync(int minutes, CancellationToken ct = default)
+    {
+        if (minutes < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(minutes), "Minimum interval cannot be negative.");
+        }
+
+        _minimumGroupEventBookingIntervalMinutes = minutes;
+
+        try
+        {
+            await File.WriteAllTextAsync(Path.Combine(log.LogDirectory, MinimumIntervalFileName), minutes.ToString(CultureInfo.InvariantCulture), ct);
+        }
+        catch (IOException)
+        {
+            // Best-effort persistence - the in-memory value above is already updated and takes
+            // effect immediately either way; a failed write just means it won't survive a restart.
+        }
+    }
+
+    private static int LoadMinimumInterval(string logDirectory)
+    {
+        try
+        {
+            var path = Path.Combine(logDirectory, MinimumIntervalFileName);
+            if (File.Exists(path) && int.TryParse(File.ReadAllText(path).Trim(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) && minutes >= 0)
+            {
+                return minutes;
+            }
+        }
+        catch (IOException)
+        {
+            // Fall through to the default - not worth failing startup over.
+        }
+
+        return DefaultMinimumGroupEventBookingIntervalMinutes;
+    }
+
     // Standard-tier action logging for the external-booking-source methods below
     // (ClaimHoldAsync/ForceCreateConfirmedAsync) is done by BreelyBookingProcessor itself, not here -
     // it has the richer context (Breely event id, reschedule-vs-fresh-claim) to write one clear log
@@ -661,7 +715,15 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
     private async Task TrimHoldAsync(string sheet, SheetBooking hold, DateTime claimedStart, DateTime claimedEnd, CancellationToken ct)
     {
-        var remainders = CalendarStyles.SubtractIntervals(hold.Start, hold.End, [(claimedStart, claimedEnd)]);
+        var minInterval = TimeSpan.FromMinutes(_minimumGroupEventBookingIntervalMinutes);
+
+        // A leftover fragment shorter than the configured minimum (Settings page) is dropped rather
+        // than offered as its own bookable slot - nobody can realistically use a 5-minute sliver of
+        // ice. Filtering here means every branch below (delete-if-none/patch-if-one/split-if-two)
+        // just works on whatever's left, unchanged.
+        var remainders = CalendarStyles.SubtractIntervals(hold.Start, hold.End, [(claimedStart, claimedEnd)])
+            .Where(r => r.End - r.Start >= minInterval)
+            .ToList();
 
         if (hold.SeriesMasterId is not null)
         {
@@ -676,11 +738,6 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
             foreach (var (segStart, segEnd) in remainders)
             {
-                if (segEnd <= segStart)
-                {
-                    continue;
-                }
-
                 var remainderHold = new SheetBooking
                 {
                     SheetMailbox = sheet,
@@ -690,7 +747,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                     State = BookingState.Hold,
                     BookingGroupId = Guid.NewGuid()
                 };
-                await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(remainderHold), cancellationToken: ct);
+                await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(remainderHold, titleOverride: AvailableForGroupEventsTitle), cancellationToken: ct);
             }
 
             return;
@@ -709,6 +766,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         var (firstStart, firstEnd) = remainders[0];
         var patch = new Event
         {
+            Subject = AvailableForGroupEventsTitle,
             Start = new DateTimeTimeZone { DateTime = firstStart.ToString("s"), TimeZone = facility.TimeZone },
             End = new DateTimeTimeZone { DateTime = firstEnd.ToString("s"), TimeZone = facility.TimeZone }
         };
@@ -731,7 +789,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             State = BookingState.Hold,
             BookingGroupId = Guid.NewGuid()
         };
-        await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(secondHold), cancellationToken: ct);
+        await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(secondHold, titleOverride: AvailableForGroupEventsTitle), cancellationToken: ct);
     }
 
     /// <summary>
@@ -838,11 +896,11 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         return allEvents;
     }
 
-    private Event ToGraphEvent(SheetBooking booking, bool includeTime = true)
+    private Event ToGraphEvent(SheetBooking booking, bool includeTime = true, string? titleOverride = null)
     {
-        var subject = string.IsNullOrWhiteSpace(booking.RenterName)
+        var subject = titleOverride ?? (string.IsNullOrWhiteSpace(booking.RenterName)
             ? CalendarStyles.CategoryLabel(booking.Category)
-            : $"{CalendarStyles.CategoryLabel(booking.Category)} - {booking.RenterName}";
+            : $"{CalendarStyles.CategoryLabel(booking.Category)} - {booking.RenterName}");
 
         var extendedProps = new List<SingleValueLegacyExtendedProperty>
         {

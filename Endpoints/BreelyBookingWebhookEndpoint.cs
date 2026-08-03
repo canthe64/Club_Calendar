@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
+using System.Text.RegularExpressions;
 using FacilityScheduler.Services;
 
 namespace FacilityScheduler.Endpoints;
@@ -36,12 +38,24 @@ public static class BreelyBookingWebhookEndpoint
                 return Results.Unauthorized();
             }
 
+            var rawBody = await new StreamReader(context.Request.Body).ReadToEndAsync(ct);
+
+            // Debug-tier only, one-shot diagnostic visibility into the *entire* raw body - not just
+            // the fixed subset BreelyEvent maps. Added 2026-08-03 after a multi-sheet booking only
+            // claimed one sheet: Breely's own UI showed 3 events created but only 1 webhook sent, so
+            // whatever tells us "this reservation is 3 sheets" has to be in this raw body somewhere,
+            // in a field the mapped DTO would otherwise silently drop. Redacts the three known PII
+            // field values (same fields BreelyBookingProcessor redacts) but not any other field, so
+            // a lookalike PII field we don't yet know about could still appear here - acceptable for
+            // a temporary, Debug-tier-only diagnostic capture, not a standing behavior.
+            await appLog.LogDebugAsync("WebhookRawPayloadReceived", "Breely webhook", details: RedactAndTruncate(rawBody), ct: ct);
+
             BreelyWebhookPayload? payload;
             try
             {
-                payload = await context.Request.ReadFromJsonAsync<BreelyWebhookPayload>(cancellationToken: ct);
+                payload = JsonSerializer.Deserialize<BreelyWebhookPayload>(rawBody);
             }
-            catch (System.Text.Json.JsonException ex)
+            catch (JsonException ex)
             {
                 logger.LogWarning(ex, "Breely webhook: malformed JSON body - acknowledged anyway, nothing to retry productively.");
                 return Results.Ok();
@@ -78,5 +92,32 @@ public static class BreelyBookingWebhookEndpoint
         var expectedBytes = Encoding.UTF8.GetBytes(expected);
         var providedBytes = Encoding.UTF8.GetBytes(provided);
         return CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
+    }
+
+    private const int MaxRawPayloadLogLength = 8000;
+
+    private static readonly (Regex Pattern, string Replacement)[] PiiRedactions =
+    [
+        (new Regex(@"""client_full_name""\s*:\s*""[^""]*""", RegexOptions.Compiled), @"""client_full_name"":""[redacted]"""),
+        (new Regex(@"""client_email""\s*:\s*""[^""]*""", RegexOptions.Compiled), @"""client_email"":""[redacted]"""),
+        (new Regex(@"""client_phone""\s*:\s*""[^""]*""", RegexOptions.Compiled), @"""client_phone"":""[redacted]"""),
+    ];
+
+    // Breely's real payload can be large (CRM fields, signed-PDF blobs, raw form-answer dumps) - a
+    // single log line with the whole thing could bloat the log file for one diagnostic capture, so
+    // this caps it rather than logging megabytes. The AppLogService's own line-based format also
+    // collapses embedded double quotes to single quotes when it writes the line - the JSON will look
+    // slightly mangled in the viewer but field names/values are still readable.
+    private static string RedactAndTruncate(string rawBody)
+    {
+        var redacted = rawBody;
+        foreach (var (pattern, replacement) in PiiRedactions)
+        {
+            redacted = pattern.Replace(redacted, replacement);
+        }
+
+        return redacted.Length > MaxRawPayloadLogLength
+            ? redacted[..MaxRawPayloadLogLength] + $"...[truncated, {redacted.Length} total chars]"
+            : redacted;
     }
 }
