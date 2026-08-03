@@ -188,8 +188,8 @@ else
         };
 
         var result = _createAsConfirmed
-            ? await BookingService.CreateConfirmedAsync(booking)
-            : await BookingService.CreateHoldAsync(booking);
+            ? await BookingService.CreateConfirmedAsync(booking, bookedBy)
+            : await BookingService.CreateHoldAsync(booking, bookedBy);
 
         if (result.IsSuccess)
         {
@@ -207,14 +207,16 @@ else
     private async Task ConfirmBookingAsync(SheetBooking booking)
     {
         if (booking.EventId is null) return;
-        await BookingService.ConfirmAsync(booking.SheetMailbox, booking.EventId);
+        var actingUser = await GetCurrentUserNameAsync();
+        await BookingService.ConfirmAsync(booking.SheetMailbox, booking.EventId, actingUser);
         await LoadBookingsAsync();
     }
 
     private async Task CancelBookingAsync(SheetBooking booking)
     {
         if (booking.EventId is null) return;
-        await BookingService.CancelAsync(booking.SheetMailbox, booking.EventId);
+        var actingUser = await GetCurrentUserNameAsync();
+        await BookingService.CancelAsync(booking.SheetMailbox, booking.EventId, actingUser);
         await LoadBookingsAsync();
     }
 

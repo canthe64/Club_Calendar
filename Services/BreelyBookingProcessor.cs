@@ -19,7 +19,7 @@ namespace FacilityScheduler.Services;
 /// for the fuller design rationale (fail-open, never drop a real booking, hold-claiming instead of
 /// hold-blocking, NeedsTriage markers instead of silent best-effort guesses).
 /// </summary>
-public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEventService clubEventService, FacilityConfiguration facility, ILogger<BreelyBookingProcessor> logger)
+public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEventService clubEventService, FacilityConfiguration facility, AppLogService appLog, ILogger<BreelyBookingProcessor> logger)
 {
     // The Breely resource-type name for a physical sheet, as it currently appears in the "booked_with"
     // field. Update here if the club renames the resource in Breely - this app has no way to learn
@@ -30,11 +30,19 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
 
     public async Task ProcessAsync(BreelyEvent evt, CancellationToken ct = default)
     {
+        var breelyId = evt.Id.ToString(CultureInfo.InvariantCulture);
+
+        // Debug-tier only, and with customer contact fields redacted even then - this line exists
+        // to see exactly what Breely sent while troubleshooting a payload-shape question, not to
+        // keep a second at-rest copy of customer PII outside Graph for the whole retention window.
+        await appLog.LogDebugAsync("WebhookPayloadReceived", BookedByLabel, breelyId, details: RedactedSummary(evt), ct: ct);
+
         if (!string.Equals(evt.BookedWith, SheetResourceType, StringComparison.OrdinalIgnoreCase))
         {
             // Not a sheet at all (e.g. a warm room table, if Breely ever sends those as their own
             // top-level event rather than as an add-on question) - nothing for this app to do.
             logger.LogInformation("Breely webhook for event {Id}: booked_with={BookedWith}, not a sheet - ignored.", evt.Id, evt.BookedWith);
+            await appLog.LogDebugAsync("WebhookIgnoredNotASheet", BookedByLabel, breelyId, details: $"booked_with={evt.BookedWith}", ct: ct);
             return;
         }
 
@@ -44,21 +52,27 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
         {
             logger.LogWarning("Breely webhook for event {Id}: could not parse start_date/start_time/duration_in_minutes ({StartDate} {StartTime} {Duration}min) - skipped.",
                 evt.Id, evt.StartDate, evt.StartTime, evt.DurationInMinutes);
+            await appLog.LogDebugAsync("WebhookUnparseableWindow", BookedByLabel, breelyId,
+                details: $"start_date={evt.StartDate} start_time={evt.StartTime} duration_in_minutes={evt.DurationInMinutes}", ct: ct);
             return;
         }
 
         var existing = await bookingService.FindByExternalIdAsync(externalId, ct);
+        await appLog.LogDebugAsync("WebhookExternalIdLookup", BookedByLabel, breelyId, existing?.SheetMailbox,
+            details: existing is null ? "no existing booking found" : $"found existing eventId={existing.EventId}, {existing.Start:g}-{existing.End:g}", ct: ct);
 
         if (evt.Canceled)
         {
             if (existing is not null)
             {
-                await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, ct);
+                await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, BookedByLabel, ct);
                 logger.LogInformation("Breely webhook: event {Id} canceled - released sheet {Sheet}.", evt.Id, existing.SheetMailbox);
+                await appLog.LogActionAsync("BreelyBookingCancelled", BookedByLabel, existing.EventId, existing.SheetMailbox, $"Breely event {breelyId}.", ct);
             }
             else
             {
                 logger.LogInformation("Breely webhook: event {Id} canceled, but no matching booking was found - nothing to release.", evt.Id);
+                await appLog.LogDebugAsync("WebhookCancelNoMatch", BookedByLabel, breelyId, ct: ct);
             }
             return;
         }
@@ -67,15 +81,18 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
         {
             if (existing.Start == start && existing.End == end)
             {
+                await appLog.LogDebugAsync("WebhookDuplicateIgnored", BookedByLabel, breelyId, existing.SheetMailbox, "Already correct - retry or duplicate notification.", ct);
                 return; // retry or duplicate notification - already correct, nothing to do
             }
 
             // Reschedule: release the old slot back to an open hold, then claim fresh at the new
             // time below (possibly landing on a different sheet than before, if the original one
             // isn't free at the new time - that's expected and fine).
-            await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, ct);
+            await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, BookedByLabel, ct);
             logger.LogInformation("Breely webhook: event {Id} rescheduled from {OldStart} to {NewStart} - released old sheet {Sheet}, claiming new slot.",
                 evt.Id, existing.Start, start, existing.SheetMailbox);
+            await appLog.LogActionAsync("BreelyBookingReleased", BookedByLabel, existing.EventId, existing.SheetMailbox,
+                $"Rescheduling Breely event {breelyId}: {existing.Start:g}-{existing.End:g} -> {start:g}-{end:g}.", ct);
         }
 
         var template = new SheetBooking
@@ -97,20 +114,32 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
         if (claimed is not null)
         {
             logger.LogInformation("Breely webhook: event {Id} claimed hold on {Sheet} for {Start}-{End}.", evt.Id, claimed.SheetMailbox, start, end);
+            await appLog.LogActionAsync("BreelyBookingClaimed", BookedByLabel, claimed.EventId, claimed.SheetMailbox, $"Breely event {breelyId}, {start:g}-{end:g}.", ct);
             return;
         }
 
         // No sheet had an open hold covering this window - write it anyway (a real booking is never
         // dropped, per the standing design) onto the first sheet in configured order, and flag it
         // for staff instead of guessing further.
+        await appLog.LogDebugAsync("WebhookNoCoveringHold", BookedByLabel, breelyId, details: $"{start:g}-{end:g} - no sheet had a hold covering this window.", ct: ct);
         var fallbackSheet = facility.SheetMailboxes[0];
-        await bookingService.ForceCreateConfirmedAsync(fallbackSheet, template, ct);
+        var forceBooked = await bookingService.ForceCreateConfirmedAsync(fallbackSheet, template, ct);
         logger.LogWarning("Breely webhook: event {Id} didn't match any open hold - force-booked onto {Sheet}.", evt.Id, fallbackSheet);
+        await appLog.LogActionAsync("BreelyBookingForceBooked", BookedByLabel, forceBooked.EventId, fallbackSheet,
+            $"Breely event {breelyId} matched no open hold - force-booked, flagged for review.", ct);
 
         await FlagNeedsTriageAsync(start,
             $"Breely booking {evt.Id} ({template.RenterName}, {start:h:mmtt}-{end:h:mmtt}) didn't match any open hold on any sheet - booked directly onto {DisplaySheetLabel(fallbackSheet)}. Verify manually and reassign if needed. Admin: {evt.AdminUrl}",
             ct);
     }
+
+    // Debug-tier payload logging - everything Breely sent except the fields that identify a
+    // specific customer (name/email/phone), so the log stays useful for troubleshooting without
+    // becoming a second at-rest store of customer PII outside Exchange.
+    private static string RedactedSummary(BreelyEvent evt) =>
+        $"start_date={evt.StartDate} start_time={evt.StartTime} duration_in_minutes={evt.DurationInMinutes} " +
+        $"booked_with={evt.BookedWith} canceled={evt.Canceled} event_type={evt.EventType} admin_url={evt.AdminUrl} " +
+        "client_full_name=[redacted] client_email=[redacted] client_phone=[redacted]";
 
     private async Task FlagNeedsTriageAsync(DateTime date, string reason, CancellationToken ct)
     {
@@ -127,7 +156,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 Notes = reason,
                 BookedBy = BookedByLabel
             };
-            await clubEventService.CreateAsync(marker, ct);
+            await clubEventService.CreateAsync(marker, BookedByLabel, ct);
         }
         catch (Exception ex)
         {

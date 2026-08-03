@@ -151,7 +151,7 @@ else
                 BookedBy = "Diagnostics"
             };
 
-            var createResult = await BookingService.CreateHoldAsync(booking);
+            var createResult = await BookingService.CreateHoldAsync(booking, "Diagnostics spike test");
             if (!createResult.IsSuccess || createResult.Booking?.EventId is null)
             {
                 _results.Add(new SpikeResult("Booking service round-trip", "FAILED", "CreateHoldAsync did not succeed or returned no EventId."));
@@ -176,14 +176,14 @@ else
                 return;
             }
 
-            var confirmed = await BookingService.ConfirmAsync(TestMailbox, eventId);
+            var confirmed = await BookingService.ConfirmAsync(TestMailbox, eventId, "Diagnostics spike test");
             if (confirmed.State != BookingState.Confirmed)
             {
                 _results.Add(new SpikeResult("Booking service round-trip", "FAILED at confirm", $"Expected Confirmed, got {confirmed.State}."));
                 return;
             }
 
-            await BookingService.CancelAsync(TestMailbox, eventId);
+            await BookingService.CancelAsync(TestMailbox, eventId, "Diagnostics spike test");
             eventId = null; // cancelled - no cleanup needed
 
             var afterCancel = (await BookingService.GetBookingsAsync(TestMailbox, window.Item1, window.Item2))

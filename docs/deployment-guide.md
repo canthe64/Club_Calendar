@@ -65,8 +65,10 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `Facility:LogoPath` | `Facility__LogoPath` | Relative path under `wwwroot` to a logo image (e.g. `/branding/logo.png`) | No | optional, currently inert | optional — the actual image file must be placed under `wwwroot` in the deployed app if set |
 | `Webhook:CaptureToken` | `Webhook__CaptureToken` | Path token for the diagnostic webhook capture listener (`/api/webhook-capture/{token}`, architecture doc §5.5) | Treat as a secret (guessable = anyone can post junk into `/diagnostics`), but not a real security boundary — only diagnostic/throwaway data flows through it | user-secrets, or leave blank to effectively disable the route (any/no token still binds the route, but there's nothing sensitive to protect) | App Service Environment variables |
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Shared secret Breely must send in the `X-Webhook-Secret` header on every call to `/api/webhooks/breely` (architecture doc §4.8/§5.5) | **Yes** — this is the only thing gating a write-capable anonymous endpoint | user-secrets only, never committed | App Service Environment variables, marked as a "slot setting"/secret if the host supports it |
+| `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path where the app's rotating activity/debug log files live (architecture doc §4.9) | No | `App_Data/logs` (relative, under the project folder) is fine locally | **Must** be set to a path outside the deployed app folder — see §2.3 below |
+| `AppLog:RetentionDays` | `AppLog__RetentionDays` | How many days of rotated log files to keep before automatic deletion | No | optional, defaults to `30` | optional |
 
-**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `Webhook:BreelySharedSecret` is not load-bearing in that sense (the app starts fine without it) but if left blank, `/api/webhooks/breely` rejects every request with `401` — see §2.2 below.
+**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below).
 
 ### 2.1 Representing the `SheetMailboxLocalParts` array as environment variables
 
@@ -95,6 +97,19 @@ The index (`__0`, `__1`, …) must be contiguous starting from `0` with no gaps,
 4. If the secret is ever rotated, update it in both places (this app's configuration, and Breely's webhook header) at the same time — a mismatch fails closed (`401`, request dropped), it doesn't fall back to unauthenticated.
 
 The diagnostic capture listener (`/api/webhook-capture/{token}`, `Webhook:CaptureToken`) is unrelated to normal operation — it exists only for inspecting a raw webhook payload during troubleshooting (e.g. if Breely ever changes its payload shape) and doesn't need to be configured for the integration above to work.
+
+### 2.3 Setting up the activity/debug log (Settings page)
+
+`AppLog:LogDirectory` (architecture doc §4.9) controls where the app's rotating log files and the persisted logging-level marker live. **Left unset, it falls back to `App_Data/logs` under the deployed app folder** — fine for local dev, but wrong for Azure App Service: that folder is part of the deployed content and gets replaced on every redeploy/zip-deploy, silently losing log history with no error.
+
+1. Pick a path outside the app's own deployment folder:
+   - **Azure App Service:** use the persistent storage share every instance already has, e.g. `%HOME%\LogFiles\facility-scheduler` (on Windows App Service; adjust for Linux App Service's equivalent persistent path under `/home`). This survives redeploys because it isn't part of the deployed content — only `wwwroot`/the app folder is replaced.
+   - **IIS / other hosts:** any folder outside the deployed app directory that the app pool identity (§4.7) has write access to, e.g. `C:\FacilityScheduler-Logs`.
+2. Set `AppLog:LogDirectory` to that path per §2's table (environment variable form: `AppLog__LogDirectory`).
+3. Optionally set `AppLog:RetentionDays` if 30 days isn't the right window for how long you want to keep rotated files around.
+4. After deploying, sign in and open **Settings** (`/settings`) — confirm a log entry appears after taking any action (create/edit/cancel a booking), and that the level toggle saves and takes effect immediately.
+
+No action is needed for the app to function without this configured — the fallback just means log history won't survive a redeploy, which defeats the point of having it in production.
 
 ---
 
@@ -239,6 +254,7 @@ IIS creates an app pool automatically when you create the site above (named afte
     <environmentVariable name="Facility__TimeZone" value="Pacific Standard Time" />
     <environmentVariable name="Webhook__BreelySharedSecret" value="..." />
     <environmentVariable name="Webhook__CaptureToken" value="..." />
+    <environmentVariable name="AppLog__LogDirectory" value="C:\FacilityScheduler-Logs" />
   </environmentVariables>
 </aspNetCore>
 ```
@@ -246,10 +262,14 @@ Since `web.config` then contains secrets, restrict its NTFS permissions the same
 
 ### 4.7 File permissions
 
-Grant the app pool identity **Read & Execute only** on the deployed folder — nothing here needs to be written to at runtime (no local file logging is configured by default). In an elevated PowerShell prompt:
+Grant the app pool identity **Read & Execute only** on the deployed folder itself — nothing there needs to be written to at runtime. In an elevated PowerShell prompt:
 ```powershell
 $poolName = "FacilityScheduler"
 icacls "C:\inetpub\FacilityScheduler" /grant ("IIS AppPool\$poolName`:(OI)(CI)RX") /T
+```
+The activity/debug log's directory (§2.3) is deliberately **outside** this folder and needs the opposite: grant the app pool identity **write** access there specifically (`RX` above is not enough for it to create/append log files), e.g.:
+```powershell
+icacls "C:\FacilityScheduler-Logs" /grant ("IIS AppPool\$poolName`:(OI)(CI)M") /T
 ```
 
 ### 4.8 Firewall
@@ -299,6 +319,7 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 - [ ] `/public/calendar` loads without signing in, in a private/incognito browser window.
 - [ ] `/api/public/availability` returns JSON without signing in.
 - [ ] If `Webhook:BreelySharedSecret` is configured, a test call to `/api/webhooks/breely` without the `X-Webhook-Secret` header returns `401`, and a real test booking through Breely (§2.2) shows up on the correct sheet's calendar.
+- [ ] `AppLog:LogDirectory` is set to a path outside the deployed app folder (§2.3) — not left at the `App_Data/logs` fallback. Sign in, open `/settings`, take any booking action, and confirm a new line appears in the log viewer after clicking Refresh.
 - [ ] Mailbox audit logging is confirmed enabled on the resource mailboxes (per the provisioning checklist, architecture doc §7) — this is a tenant-side setting, not something the app itself can verify.
 - [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.
 - [ ] (IIS only) The site is bound to 443 with a valid, non-expired certificate, and Windows Firewall shows only the expected inbound ports open.

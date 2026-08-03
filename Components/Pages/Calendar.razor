@@ -339,7 +339,7 @@
                     BookedBy = bookedBy
                 };
 
-                var result = await BookingService.CreateAcrossSheetsAsync(_draft.SelectedSheets, template);
+                var result = await BookingService.CreateAcrossSheetsAsync(_draft.SelectedSheets, template, bookedBy);
                 if (result.IsSuccess)
                 {
                     CloseForm();
@@ -379,7 +379,7 @@
                 var needsFreshGroupId = isPartialEdit || membersToUpdate.Any(m => m.BookingGroupId == Guid.Empty);
                 var splitGroupId = needsFreshGroupId ? Guid.NewGuid() : (Guid?)null;
 
-                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, splitGroupId);
+                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, bookedBy, splitGroupId);
                 if (result.IsSuccess)
                 {
                     CloseForm();
@@ -404,7 +404,8 @@
             return;
         }
 
-        await BookingService.CancelGroupAsync(_cancelGroup, reopenAsGroupEventHold);
+        var actingUser = await GetCurrentUserNameAsync();
+        await BookingService.CancelGroupAsync(_cancelGroup, reopenAsGroupEventHold, actingUser);
         _cancelGroup = null;
         await LoadAsync();
     }
@@ -529,7 +530,8 @@
             return;
         }
 
-        await ClubEventService.CancelAsync(ce.EventId);
+        var actingUser = await GetCurrentUserNameAsync();
+        await ClubEventService.CancelAsync(ce.EventId, actingUser);
         await LoadAsync();
     }
 
@@ -554,11 +556,11 @@
 
             if (_clubEventDraft.EditingEvent is null)
             {
-                await ClubEventService.CreateAsync(clubEvent);
+                await ClubEventService.CreateAsync(clubEvent, bookedBy);
             }
             else
             {
-                await ClubEventService.UpdateAsync(clubEvent);
+                await ClubEventService.UpdateAsync(clubEvent, bookedBy);
             }
 
             CloseClubEventForm();
@@ -577,7 +579,8 @@
             return;
         }
 
-        await ClubEventService.CancelAsync(_clubEventDraft.EditingEvent.EventId);
+        var actingUser = await GetCurrentUserNameAsync();
+        await ClubEventService.CancelAsync(_clubEventDraft.EditingEvent.EventId, actingUser);
         CloseClubEventForm();
         await LoadAsync();
     }
@@ -615,7 +618,7 @@
                 BookedBy = bookedBy
             };
 
-            await BookingService.CreateSeriesAsync(_seriesDraft.SelectedSheets, template, _seriesDraft.LastDate, _seriesDraft.SkippedDates);
+            await BookingService.CreateSeriesAsync(_seriesDraft.SelectedSheets, template, _seriesDraft.LastDate, _seriesDraft.SkippedDates, bookedBy);
             CloseSeriesWizard();
             await LoadAsync();
         }
@@ -638,7 +641,8 @@
             return;
         }
 
-        await BookingService.CancelSeriesAsync(_cancelSeriesGroup);
+        var actingUser = await GetCurrentUserNameAsync();
+        await BookingService.CancelSeriesAsync(_cancelSeriesGroup, actingUser);
         _cancelSeriesGroup = null;
         await LoadAsync();
     }

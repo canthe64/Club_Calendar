@@ -2,16 +2,26 @@
 
 ## Overview
 
-This app exposes **five** HTTP API endpoints, and all are public/anonymous. There is no
-staff-facing REST/JSON API. Staff functionality (creating and managing bookings, club events) is
-built entirely as Blazor Server components rendered over an authenticated SignalR circuit - staff
-never call an HTTP API directly, and no such API exists to call (architecture doc §5.4, §6.2).
+This app exposes **six** HTTP API endpoints. Staff functionality (creating and managing bookings,
+club events) is still built almost entirely as Blazor Server components rendered over an
+authenticated SignalR circuit, not called via HTTP - but as of Phase 10 that's no longer
+*absolute*: one endpoint below exists specifically because a file download doesn't fit the SignalR
+circuit (architecture doc §5.6).
 
-Four of the five are read-only (three customer/member-facing, plus a staff-viewable diagnostic
-listener). The fifth, added in Phase 10, is the app's only anonymous **write** surface: a webhook
-that ingests booking notifications from the Breely booking platform (architecture doc §4.8/§5.5).
-It's a deliberate, bounded exception to "public surfaces are read-only," not a broadening of the
-general rule - see [`POST /api/webhooks/breely`](#post-apiwebhooksbreely).
+Five of the six are anonymous. Four of those five are read-only (three customer/member-facing, plus
+a staff-viewable diagnostic listener). The fifth anonymous endpoint, added in Phase 10, is the app's
+only anonymous **write** surface: a webhook that ingests booking notifications from the Breely
+booking platform (architecture doc §4.8/§5.5). It's a deliberate, bounded exception to "public
+surfaces are read-only," not a broadening of the general rule - see
+[`POST /api/webhooks/breely`](#post-apiwebhooksbreely).
+
+The sixth, also added in Phase 10, is the one **staff-authenticated** HTTP endpoint in the app: a
+log-file download (architecture doc §5.6) - see
+[`GET /settings/logs/download`](#get-settingslogsdownload). Every other staff action still happens
+as a method call inside the authenticated Blazor circuit, not a distinct HTTP request; this one
+endpoint exists only because Blazor Server's SignalR circuit isn't a good way to stream a file
+download, the same reasoning that keeps the anonymous endpoints below out of the Blazor component
+tree in the first place.
 
 This is otherwise a deliberate architectural decision, confirmed by a live incident: at one point
 `.AllowAnonymous()` was tried on the shared Razor Components registration to carve out a public
@@ -21,10 +31,10 @@ the Blazor component tree, never a page inside it (`Program.cs:106-112`).
 
 This document covers:
 
-1. **[Public API](#public-api)** - the five real, callable HTTP endpoints. Anyone can call these
-   without signing in (the webhook additionally requires a shared secret).
-2. **[Staff-facing surface](#staff-facing-surface)** - why there's no staff API, and how staff
-   actions actually reach the server.
+1. **[Public API](#public-api)** - the six real, callable HTTP endpoints. Five need no sign-in
+   (the webhook additionally requires a shared secret); one requires staff sign-in.
+2. **[Staff-facing surface](#staff-facing-surface)** - why there's (almost) no staff API, and how
+   staff actions actually reach the server.
 3. **[Appendix: internal service-layer contract](#appendix-internal-service-layer-contract)** - the
    C# methods the Blazor UI calls to perform staff operations. Not an HTTP API and not reachable
    from outside the process, but documented here for any developer extending the app or wiring in
@@ -261,17 +271,35 @@ no processing and never touches calendar data.
 
 ---
 
+### `GET /settings/logs/download`
+
+The one staff-facing HTTP endpoint in the app (architecture doc §5.6) - built as a plain Minimal API
+endpoint rather than a Blazor page for the same "raw HTTP semantics don't fit the SignalR circuit"
+reason the anonymous endpoints above are, just gated by sign-in instead of `.AllowAnonymous()`.
+Backs the **Settings** page's (`/settings`, architecture doc §4.9) "Download full log archive" link.
+
+- **Auth:** staff sign-in required - covered by the app's default authenticated fallback policy
+  (`Program.cs:64-71`), same as every other page; no separate check needed since this route was
+  never marked anonymous.
+- **Response `200 OK`** - `application/zip`, containing every rotated log file in `AppLog:LogDirectory`
+  (architecture doc §4.9) as separate entries, built in memory (small enough at this app's log
+  volume). Filename: `facility-scheduler-logs-yyyy-MM-dd.zip`.
+- **Response `404`** - no log files exist yet (e.g. immediately after a fresh deploy with nothing
+  logged).
+
+---
+
 ## Staff-facing surface
 
-There is no staff API to call. Staff sign in via Entra ID (`Program.cs:56-62`) and interact entirely
-through Blazor Server pages - every page except the three public endpoints above requires
-authentication by default (`FallbackPolicy = RequireAuthenticatedUser()`, `Program.cs:64-71`).
-Guest-vs-member-vs-any-authenticated-user access is controlled entirely by the Entra Enterprise
-Application's "Assignment required?" setting, not by any code in this app (see the deployment guide's
-§1.2 for how to restrict it).
+Aside from the one exception directly above, there is no staff API to call. Staff sign in via Entra
+ID (`Program.cs:56-62`) and interact entirely through Blazor Server pages - every page except the
+public endpoints above requires authentication by default (`FallbackPolicy =
+RequireAuthenticatedUser()`, `Program.cs:64-71`). Guest-vs-member-vs-any-authenticated-user access is
+controlled entirely by the Entra Enterprise Application's "Assignment required?" setting, not by any
+code in this app (see the deployment guide's §1.2 for how to restrict it).
 
-Because everything runs over one shared, authenticated SignalR circuit, there's no meaningful sense
-in which a staff "request" has its own URL, verb, or independent auth check the way the three public
+Because everything else runs over one shared, authenticated SignalR circuit, there's no meaningful
+sense in which a staff "request" has its own URL, verb, or independent auth check the way the public
 endpoints do - a page load establishes the circuit, and every subsequent staff action (create a
 booking, cancel a series, etc.) is a method call within that same already-authenticated circuit, not
 a new HTTP request.
@@ -296,16 +324,16 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `CreateHoldAsync` | `Task<BookingResult> CreateHoldAsync(SheetBooking booking)` | Creates a single-sheet booking in `Hold` state. Conflict-checked against that sheet's existing events; returns `BookingResult.Conflict` (no write) if anything overlaps. |
-| `CreateConfirmedAsync` | `Task<BookingResult> CreateConfirmedAsync(SheetBooking booking)` | Same as above, in `Confirmed` state. |
-| `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. |
-| `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
-| `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId)` | Hard-deletes a single event. |
-| `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state). Re-checks conflicts against the new time before writing (excluding the group's own events); all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched. |
-| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it. |
+| `CreateHoldAsync` | `Task<BookingResult> CreateHoldAsync(SheetBooking booking, string actingUser)` | Creates a single-sheet booking in `Hold` state. Conflict-checked against that sheet's existing events; returns `BookingResult.Conflict` (no write) if anything overlaps. Logs `BookingCreated` on success (`actingUser`, architecture doc §4.9). |
+| `CreateConfirmedAsync` | `Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, string actingUser)` | Same as above, in `Confirmed` state. |
+| `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. |
+| `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
+| `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId, string actingUser)` | Hard-deletes a single event. Tolerates a `404` from Graph as "already gone" (e.g. the Breely webhook already claimed/trimmed it) rather than throwing (architecture doc D37) - logged at Debug tier as a no-op in that case, `BookingCancelled` at Standard tier otherwise. |
+| `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state). Re-checks conflicts against the new time before writing (excluding the group's own events); all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched. |
+| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it. Same per-member 404-tolerance as `CancelAsync` (D37) - one member already being gone doesn't abort the rest of the group. |
 | `PreviewSeriesConflictsAsync` | `Task<Dictionary<DateTime, List<SheetBooking>>> PreviewSeriesConflictsAsync(IEnumerable<string> sheetMailboxes, IReadOnlyCollection<DateTime> candidateDates, TimeSpan startTime, TimeSpan endTime)` | Informational only - reports conflicts per candidate date so staff can choose to skip that date. Never blocks anything itself. |
-| `CreateSeriesAsync` | `Task<List<SheetBooking>> CreateSeriesAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates)` | Creates one native weekly-recurring Graph event per sheet (sharing a `BookingGroupId`), then deletes the specific `excludedDates` occurrences staff chose to skip during review. Does not conflict-check - that's `PreviewSeriesConflictsAsync`'s job, expected to already have run. |
-| `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. |
+| `CreateSeriesAsync` | `Task<List<SheetBooking>> CreateSeriesAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates, string actingUser)` | Creates one native weekly-recurring Graph event per sheet (sharing a `BookingGroupId`), then deletes the specific `excludedDates` occurrences staff chose to skip during review. Does not conflict-check - that's `PreviewSeriesConflictsAsync`'s job, expected to already have run. |
+| `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members, string actingUser)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. Already tolerated a missing series master (`404`) before Phase 10 - the pattern `CancelAsync`/`CancelGroupAsync` above now also follow. |
 | `GetBookingsAsync` | `Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end)` | Reads one sheet's bookings in a window. Always live (never cached) - used by every conflict check. |
 | `GetBookingsForAllSheetsAsync` | `Task<List<SheetBooking>> GetBookingsForAllSheetsAsync(DateTime start, DateTime end)` | Reads every configured sheet's bookings in a window, in parallel. View-rendering read path only (Calendar page, public availability) - cached for 30 seconds, invalidated on every write. |
 | `FindByExternalIdAsync` | `Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct)` | Added for the Breely webhook (architecture doc §4.8). Validates the id against a strict allow-list charset, then queries every configured sheet via a Graph `$filter` on the `ExternalBookingId` extended property. Returns the first match or `null` - not staff-facing, called only by `BreelyBookingProcessor`. |
@@ -320,9 +348,9 @@ all (neither against sheet bookings nor between club events).
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `CreateAsync` | `Task<ClubEvent> CreateAsync(ClubEvent clubEvent)` | Creates a club event. No conflict check. |
-| `UpdateAsync` | `Task UpdateAsync(ClubEvent clubEvent)` | Updates an existing club event by `EventId`. |
-| `CancelAsync` | `Task CancelAsync(string eventId)` | Hard-deletes a club event. |
+| `CreateAsync` | `Task<ClubEvent> CreateAsync(ClubEvent clubEvent, string actingUser)` | Creates a club event. No conflict check. Logs `ClubEventCreated` on success (architecture doc §4.9). |
+| `UpdateAsync` | `Task UpdateAsync(ClubEvent clubEvent, string actingUser)` | Updates an existing club event by `EventId`. |
+| `CancelAsync` | `Task CancelAsync(string eventId, string actingUser)` | Hard-deletes a club event. |
 | `GetEventsAsync` | `Task<List<ClubEvent>> GetEventsAsync(DateTime start, DateTime end)` | Reads club events in a window. Cached for 30 seconds, invalidated on every write. |
 
 ### Shared domain shapes
@@ -344,3 +372,23 @@ Singleton exposing the tenant's runtime configuration to every service above: `S
 `ToUtcQueryString(DateTime)`/`FromUtcResponseString(string)` helpers for Graph's UTC query-parameter
 and response conventions. Constructed eagerly at startup (`Program.cs:78-81`) so a misconfigured
 deployment fails immediately rather than on first request.
+
+### `AppLogService`
+
+Added in Phase 10 (architecture doc §4.9) - the app-level activity/debug log backing the Settings
+page, deliberately separate from the framework's own `ILogger`. Every service above that writes to
+Graph calls into this one after a successful write.
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `LogActionAsync` | `Task LogActionAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default)` | Standard tier - always written. Used for definitive actions (booking/series/club-event created, edited, canceled). |
+| `LogSecurityAsync` | `Task LogSecurityAsync(string action, string actor, string? details = null, CancellationToken ct = default)` | Standard tier - always written. Used for security-relevant events regardless of level, e.g. a failed webhook secret check. |
+| `LogDebugAsync` | `Task LogDebugAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default)` | Debug tier - a no-op unless the current level is Debug. |
+| `SetLevelAsync` | `Task SetLevelAsync(AppLogLevel level, CancellationToken ct = default)` | Called by the Settings page. Updates the in-memory level immediately and persists it to a marker file in the log directory, so it survives a restart without a redeploy. |
+| `TailAsync` | `Task<List<string>> TailAsync(int count, CancellationToken ct = default)` | Returns up to `count` of the most recent lines, oldest-to-newest, reading backward through older rotated files if the current day's file doesn't have enough on its own. Backs the Settings page's 500-line viewer. |
+| `ListLogFiles` | `List<string> ListLogFiles()` | Every rotated log file, newest first. Used by `GET /settings/logs/download` to build the zip. |
+| `CurrentLevel` / `LogDirectory` | `AppLogLevel CurrentLevel { get; }` / `string LogDirectory { get; }` | Current level and the resolved log directory path (after the `AppLog:LogDirectory` fallback, if unset - see the deployment guide). |
+
+Log lines are single-line, space-separated `key=value` pairs (timestamp, tier, `action`, `actor`,
+optionally `eventId`/`sheet`/`details`) - human-readable and grep-able, not JSON. Files rotate daily
+(`app-yyyy-MM-dd.log`) and are deleted automatically past `AppLog:RetentionDays` (default 30).

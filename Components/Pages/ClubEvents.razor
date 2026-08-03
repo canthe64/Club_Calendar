@@ -135,11 +135,11 @@
 
             if (_draft.EditingEvent is null)
             {
-                await EventService.CreateAsync(clubEvent);
+                await EventService.CreateAsync(clubEvent, bookedBy);
             }
             else
             {
-                await EventService.UpdateAsync(clubEvent);
+                await EventService.UpdateAsync(clubEvent, bookedBy);
             }
 
             CloseForm();
@@ -158,7 +158,8 @@
             return;
         }
 
-        await EventService.CancelAsync(_draft.EditingEvent.EventId);
+        var actingUser = await GetCurrentUserNameAsync();
+        await EventService.CancelAsync(_draft.EditingEvent.EventId, actingUser);
         CloseForm();
         await LoadAsync();
     }

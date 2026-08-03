@@ -14,8 +14,13 @@ namespace FacilityScheduler.Services;
 /// Booking Attendant (confirmed via spike, architecture doc D3/S6.1), so this service is the
 /// only thing standing between two overlapping bookings on the same sheet.
 /// </summary>
-public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility)
+public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
 {
+    // Standard-tier action logging for the external-booking-source methods below
+    // (ClaimHoldAsync/ForceCreateConfirmedAsync) is done by BreelyBookingProcessor itself, not here -
+    // it has the richer context (Breely event id, reschedule-vs-fresh-claim) to write one clear log
+    // line per real-world action, rather than this generic layer guessing at "why" and duplicating it.
+
     // One semaphore per sheet mailbox, lazily created. Serializes create/confirm/cancel per
     // sheet so the check-then-write conflict check can't race. Adequate at the app's known
     // concurrency (1-2 staff); would need a distributed lock if this ever ran multi-instance.
@@ -64,19 +69,19 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     // no other reason to accept anything an OData filter clause could misinterpret.
     private static readonly Regex ExternalIdPattern = new(@"^[A-Za-z0-9:_-]+$", RegexOptions.Compiled);
 
-    public Task<BookingResult> CreateHoldAsync(SheetBooking booking, CancellationToken ct = default)
+    public Task<BookingResult> CreateHoldAsync(SheetBooking booking, string actingUser, CancellationToken ct = default)
     {
         booking.State = BookingState.Hold;
-        return CreateAsync(booking, ct);
+        return CreateAsync(booking, actingUser, ct);
     }
 
-    public Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, CancellationToken ct = default)
+    public Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, string actingUser, CancellationToken ct = default)
     {
         booking.State = BookingState.Confirmed;
-        return CreateAsync(booking, ct);
+        return CreateAsync(booking, actingUser, ct);
     }
 
-    private async Task<BookingResult> CreateAsync(SheetBooking booking, CancellationToken ct)
+    private async Task<BookingResult> CreateAsync(SheetBooking booking, string actingUser, CancellationToken ct)
     {
         var sem = SheetLocks.GetOrAdd(booking.SheetMailbox, _ => new SemaphoreSlim(1, 1));
         await sem.WaitAsync(ct);
@@ -100,6 +105,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             booking.EventId = created?.Id;
             booking.ICalUId = created?.ICalUId;
             InvalidateViewCache();
+            await log.LogActionAsync("BookingCreated", actingUser, booking.EventId, booking.SheetMailbox,
+                $"{booking.Category} {booking.State}, {booking.Start:g}-{booking.End:g}" + (string.IsNullOrWhiteSpace(booking.RenterName) ? "" : $", {booking.RenterName}"), ct);
             return BookingResult.Success(booking);
         }
         finally
@@ -114,7 +121,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     /// and every conflict across every sheet is reported, so the caller can deselect a sheet or
     /// change the time rather than getting a partially-booked result.
     /// </summary>
-    public async Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, CancellationToken ct = default)
+    public async Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser, CancellationToken ct = default)
     {
         // Sorted lock order avoids deadlock if two staff book overlapping multi-sheet requests
         // that share some sheets but list them in a different order.
@@ -167,6 +174,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             }
 
             InvalidateViewCache();
+            await log.LogActionAsync("BookingCreated", actingUser, string.Join(",", created.Select(c => c.EventId)), string.Join(",", orderedSheets),
+                $"{template.Category} {template.State}, {template.Start:g}-{template.End:g}" + (string.IsNullOrWhiteSpace(template.RenterName) ? "" : $", {template.RenterName}"), ct);
             return GroupBookingResult.Success(created);
         }
         finally
@@ -178,18 +187,34 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         }
     }
 
-    public async Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, CancellationToken ct = default)
+    public async Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser, CancellationToken ct = default)
     {
         var update = new Event { ShowAs = FreeBusyStatus.Busy };
         await graphClient.Users[sheetMailbox].Events[eventId].PatchAsync(update, cancellationToken: ct);
         InvalidateViewCache();
+        await log.LogActionAsync("BookingConfirmed", actingUser, eventId, sheetMailbox, ct: ct);
         return await GetEventAsync(sheetMailbox, eventId, ct);
     }
 
-    public async Task CancelAsync(string sheetMailbox, string eventId, CancellationToken ct = default)
+    public async Task CancelAsync(string sheetMailbox, string eventId, string actingUser, CancellationToken ct = default)
     {
-        await graphClient.Users[sheetMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
+        try
+        {
+            await graphClient.Users[sheetMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            // Already gone - e.g. the Breely webhook claimed/trimmed this exact hold out from under a
+            // stale staff browser tab between page load and clicking Cancel (live-hit 2026-08-03,
+            // same class of "already gone" 404 CancelSeriesAsync below has always tolerated). Treat
+            // as already-cancelled rather than letting a 404 here crash the Blazor circuit.
+            InvalidateViewCache();
+            await log.LogDebugAsync("BookingCancelNoOp", actingUser, eventId, sheetMailbox, "Already gone by the time this ran.", ct);
+            return;
+        }
+
         InvalidateViewCache();
+        await log.LogActionAsync("BookingCancelled", actingUser, eventId, sheetMailbox, ct: ct);
     }
 
     /// <summary>
@@ -204,7 +229,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     /// sheets that were deliberately left untouched.
     /// </summary>
     public async Task<GroupBookingResult> UpdateGroupAsync(
-        IEnumerable<SheetBooking> members, SheetBooking updatedFields, Guid? newBookingGroupId = null, CancellationToken ct = default)
+        IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, Guid? newBookingGroupId = null, CancellationToken ct = default)
     {
         var memberList = members.Where(m => m.EventId is not null).ToList();
         if (memberList.Count == 0)
@@ -267,6 +292,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             }
 
             InvalidateViewCache();
+            await log.LogActionAsync("BookingUpdated", actingUser, string.Join(",", updated.Select(u => u.EventId)), string.Join(",", orderedSheets),
+                $"{updatedFields.Category} {updatedFields.State}, {updatedFields.Start:g}-{updatedFields.End:g}" + (string.IsNullOrWhiteSpace(updatedFields.RenterName) ? "" : $", {updatedFields.RenterName}"), ct);
             return GroupBookingResult.Success(updated);
         }
         finally
@@ -284,38 +311,72 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     /// "open for group event" hold, publicly bookable again) vs. close the ice (hard delete, slot no
     /// longer offered at all).
     /// </summary>
-    public async Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, CancellationToken ct = default)
+    public async Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser, CancellationToken ct = default)
     {
-        foreach (var member in members)
+        var memberList = members.ToList();
+        var affected = new List<SheetBooking>();
+        var alreadyGone = new List<SheetBooking>();
+
+        foreach (var member in memberList)
         {
             if (member.EventId is null)
             {
                 continue;
             }
 
-            if (reopenAsGroupEventHold)
+            try
             {
-                var reopened = new SheetBooking
+                if (reopenAsGroupEventHold)
                 {
-                    SheetMailbox = member.SheetMailbox,
-                    Start = member.Start,
-                    End = member.End,
-                    Category = BookingCategory.GroupEvent,
-                    State = BookingState.Hold,
-                    BookingGroupId = member.BookingGroupId
-                    // Renter-specific fields intentionally omitted - back to a plain open hold.
-                };
+                    var reopened = new SheetBooking
+                    {
+                        SheetMailbox = member.SheetMailbox,
+                        Start = member.Start,
+                        End = member.End,
+                        Category = BookingCategory.GroupEvent,
+                        State = BookingState.Hold,
+                        BookingGroupId = member.BookingGroupId
+                        // Renter-specific fields intentionally omitted - back to a plain open hold.
+                    };
 
-                var graphEvent = ToGraphEvent(reopened, includeTime: false);
-                await graphClient.Users[member.SheetMailbox].Events[member.EventId].PatchAsync(graphEvent, cancellationToken: ct);
+                    var graphEvent = ToGraphEvent(reopened, includeTime: false);
+                    await graphClient.Users[member.SheetMailbox].Events[member.EventId].PatchAsync(graphEvent, cancellationToken: ct);
+                }
+                else
+                {
+                    await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
+                }
+
+                affected.Add(member);
             }
-            else
+            catch (ODataError ex) when (ex.ResponseStatusCode == 404)
             {
-                await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
+                // Already gone - e.g. the Breely webhook claimed/trimmed this exact hold out from
+                // under a stale staff browser tab between page load and clicking Cancel (live-hit
+                // 2026-08-03, same class of "already gone" 404 CancelSeriesAsync below has always
+                // tolerated). Treat as already-cancelled for this member and keep processing the
+                // rest of the group, rather than letting a 404 here crash the Blazor circuit.
+                alreadyGone.Add(member);
             }
         }
 
         InvalidateViewCache();
+        var action = reopenAsGroupEventHold ? "BookingReleased" : "BookingCancelled";
+
+        if (affected.Count > 0)
+        {
+            await log.LogActionAsync(action, actingUser,
+                string.Join(",", affected.Select(m => m.EventId)),
+                string.Join(",", affected.Select(m => m.SheetMailbox).Distinct()),
+                alreadyGone.Count > 0 ? $"{alreadyGone.Count} other member(s) were already gone." : null, ct);
+        }
+        else if (alreadyGone.Count > 0)
+        {
+            await log.LogDebugAsync(action + "NoOp", actingUser,
+                string.Join(",", alreadyGone.Select(m => m.EventId)),
+                string.Join(",", alreadyGone.Select(m => m.SheetMailbox).Distinct()),
+                "All members were already gone by the time this ran.", ct);
+        }
     }
 
     /// <summary>
@@ -366,7 +427,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     /// PreviewSeriesConflictsAsync.
     /// </summary>
     public async Task<List<SheetBooking>> CreateSeriesAsync(
-        IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates, CancellationToken ct = default)
+        IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates, string actingUser, CancellationToken ct = default)
     {
         var orderedSheets = sheetMailboxes.Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
         var groupId = Guid.NewGuid();
@@ -453,6 +514,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         }
 
         InvalidateViewCache();
+        await log.LogActionAsync("SeriesCreated", actingUser, string.Join(",", created.Select(c => c.EventId)), string.Join(",", orderedSheets),
+            $"{template.Category}, weekly through {lastOccurrenceDate:d}" + (string.IsNullOrWhiteSpace(template.RenterName) ? "" : $", {template.RenterName}"), ct);
         return created;
     }
 
@@ -461,9 +524,10 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     /// the group. This is the "backdoor" for correcting a data-entry mistake at series creation -
     /// deliberately not a primary UX path. No-op for members that aren't part of a series.
     /// </summary>
-    public async Task CancelSeriesAsync(IEnumerable<SheetBooking> members, CancellationToken ct = default)
+    public async Task CancelSeriesAsync(IEnumerable<SheetBooking> members, string actingUser, CancellationToken ct = default)
     {
-        foreach (var member in members)
+        var memberList = members.ToList();
+        foreach (var member in memberList)
         {
             if (member.SeriesMasterId is null)
             {
@@ -483,6 +547,9 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         }
 
         InvalidateViewCache();
+        await log.LogActionAsync("SeriesCancelled", actingUser,
+            string.Join(",", memberList.Select(m => m.SeriesMasterId).Where(id => id is not null)),
+            string.Join(",", memberList.Select(m => m.SheetMailbox).Distinct()), ct: ct);
     }
 
     // ── External booking source support (e.g. a booking-platform webhook) ─────────────────────────

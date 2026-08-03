@@ -1,0 +1,76 @@
+@page "/settings"
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject AppLogService LogService
+
+<PageTitle>Settings</PageTitle>
+
+<div style="padding:16px 24px;max-width:900px">
+    <h1>Settings</h1>
+
+    <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
+        <h2 style="font-size:16px;margin-bottom:8px">Logging Level</h2>
+        <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">
+            <strong>Standard</strong> logs definitive actions only - bookings, series, and club events
+            created, edited, or canceled, with who did it. <strong>Debug</strong> adds staff sign-in
+            events and full detail on every Breely webhook call - useful while actively
+            troubleshooting, but noisier; switch back to Standard once you're done.
+        </p>
+        <label style="margin-right:16px;cursor:pointer">
+            <input type="radio" name="level" checked="@(_level == AppLogLevel.Standard)" @onchange="() => _level = AppLogLevel.Standard" /> Standard
+        </label>
+        <label style="cursor:pointer">
+            <input type="radio" name="level" checked="@(_level == AppLogLevel.Debug)" @onchange="() => _level = AppLogLevel.Debug" /> Debug
+        </label>
+        <button class="btn btn-primary" style="margin-left:16px" @onclick="SaveLevel" disabled="@_saving">Save</button>
+        @if (_savedMessage is not null)
+        {
+            <span style="margin-left:10px;color:#2d7a3f;font-size:13px">@_savedMessage</span>
+        }
+    </section>
+
+    <section>
+        <h2 style="font-size:16px;margin-bottom:8px">Recent Activity</h2>
+        <p style="color:#5a7183;font-size:13px;margin-bottom:8px">Most recent 500 log lines.</p>
+        <div style="margin-bottom:8px">
+            <button class="btn btn-secondary" @onclick="RefreshTail">Refresh</button>
+            <a href="/settings/logs/download" style="margin-left:12px;font-size:13px;color:#2d5f8a" target="_blank">Download full log archive (.zip)</a>
+        </div>
+        <pre style="background:#0f1720;color:#d7e2ea;border-radius:8px;padding:12px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all">@string.Join("\n", _tail)</pre>
+    </section>
+</div>
+
+@code {
+    private AppLogLevel _level;
+    private List<string> _tail = [];
+    private bool _saving;
+    private string? _savedMessage;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _level = LogService.CurrentLevel;
+        await RefreshTail();
+    }
+
+    private async Task RefreshTail()
+    {
+        var lines = await LogService.TailAsync(500);
+        _tail = lines.Count > 0 ? lines : ["(no log entries yet)"];
+    }
+
+    private async Task SaveLevel()
+    {
+        _saving = true;
+        _savedMessage = null;
+        try
+        {
+            await LogService.SetLevelAsync(_level);
+            _savedMessage = "Saved.";
+            await RefreshTail();
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}

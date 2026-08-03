@@ -19,6 +19,7 @@ builder.Services.AddRazorComponents()
 
 builder.Services.Configure<GraphOptions>(builder.Configuration.GetSection(GraphOptions.SectionName));
 builder.Services.Configure<FacilityOptions>(builder.Configuration.GetSection(FacilityOptions.SectionName));
+builder.Services.Configure<AppLogOptions>(builder.Configuration.GetSection(AppLogOptions.SectionName));
 
 builder.Services.AddSingleton(sp =>
 {
@@ -28,6 +29,7 @@ builder.Services.AddSingleton(sp =>
 });
 
 builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
+builder.Services.AddSingleton<FacilityScheduler.Services.AppLogService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
@@ -77,6 +79,26 @@ builder.Services.AddCors(options =>
 // already said was fine to skip.
 builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
     .AddMicrosoftIdentityWebApp(builder.Configuration.GetSection("AzureAd"));
+
+// Debug-tier "authorizations" logging (architecture doc/Settings page) - chains onto whatever
+// OnTokenValidated handler Microsoft.Identity.Web already wired up above (token cache population,
+// etc.) rather than replacing it, so this only adds a log line and never interferes with sign-in
+// itself. A no-op unless the Settings page's logging level is currently set to Debug.
+builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, options =>
+{
+    var inner = options.Events.OnTokenValidated;
+    options.Events.OnTokenValidated = async ctx =>
+    {
+        if (inner is not null)
+        {
+            await inner(ctx);
+        }
+
+        var appLog = ctx.HttpContext.RequestServices.GetRequiredService<FacilityScheduler.Services.AppLogService>();
+        var name = ctx.Principal?.Identity?.Name ?? "unknown";
+        await appLog.LogDebugAsync("StaffSignIn", name);
+    };
+});
 
 builder.Services.AddAuthorization(options =>
 {
@@ -134,5 +156,6 @@ app.MapPublicCalendarEndpoint();
 app.MapPublicSearchEndpoint();
 app.MapWebhookCaptureEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
+app.MapSettingsLogsEndpoint();
 
 app.Run();

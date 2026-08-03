@@ -23,13 +23,16 @@ public static class BreelyBookingWebhookEndpoint
 {
     public static void MapBreelyBookingWebhookEndpoint(this WebApplication app)
     {
-        app.MapPost("/api/webhooks/breely", async (HttpContext context, IConfiguration config, BreelyBookingProcessor processor, ILogger<BreelyBookingProcessor> logger, CancellationToken ct) =>
+        app.MapPost("/api/webhooks/breely", async (HttpContext context, IConfiguration config, BreelyBookingProcessor processor, AppLogService appLog, ILogger<BreelyBookingProcessor> logger, CancellationToken ct) =>
         {
             var expectedSecret = config["Webhook:BreelySharedSecret"];
             var providedSecret = context.Request.Headers["X-Webhook-Secret"].FirstOrDefault();
 
             if (string.IsNullOrEmpty(expectedSecret) || providedSecret is null || !SecretsMatch(expectedSecret, providedSecret))
             {
+                var remoteIp = context.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+                logger.LogWarning("Breely webhook: rejected a request with a missing/incorrect X-Webhook-Secret from {RemoteIp}.", remoteIp);
+                await appLog.LogSecurityAsync("WebhookAuthFailed", remoteIp, "Missing or incorrect X-Webhook-Secret on /api/webhooks/breely.", ct);
                 return Results.Unauthorized();
             }
 

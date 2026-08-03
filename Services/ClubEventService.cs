@@ -13,7 +13,7 @@ namespace FacilityScheduler.Services;
 /// sheet bookings nor between club events themselves) - build-simplicity is the explicit design
 /// choice here, not an oversight.
 /// </summary>
-public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility)
+public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
 {
     private const string PropertyGuid = FacilityGraphConventions.PropertyGuid;
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name ClubEventBookedBy";
@@ -39,27 +39,32 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
         _viewCacheKeys.Clear();
     }
 
-    public async Task<ClubEvent> CreateAsync(ClubEvent clubEvent, CancellationToken ct = default)
+    public async Task<ClubEvent> CreateAsync(ClubEvent clubEvent, string actingUser, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
         var created = await graphClient.Users[facility.ClubEventsMailbox].Events.PostAsync(graphEvent, cancellationToken: ct);
         clubEvent.EventId = created?.Id;
         clubEvent.ICalUId = created?.ICalUId;
         InvalidateViewCache();
+        await log.LogActionAsync("ClubEventCreated", actingUser, clubEvent.EventId, sheet: null,
+            details: $"{clubEvent.Category} \"{clubEvent.Title}\", {clubEvent.Start:d}-{clubEvent.End:d}", ct: ct);
         return clubEvent;
     }
 
-    public async Task UpdateAsync(ClubEvent clubEvent, CancellationToken ct = default)
+    public async Task UpdateAsync(ClubEvent clubEvent, string actingUser, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
         await graphClient.Users[facility.ClubEventsMailbox].Events[clubEvent.EventId!].PatchAsync(graphEvent, cancellationToken: ct);
         InvalidateViewCache();
+        await log.LogActionAsync("ClubEventUpdated", actingUser, clubEvent.EventId, sheet: null,
+            details: $"{clubEvent.Category} \"{clubEvent.Title}\", {clubEvent.Start:d}-{clubEvent.End:d}", ct: ct);
     }
 
-    public async Task CancelAsync(string eventId, CancellationToken ct = default)
+    public async Task CancelAsync(string eventId, string actingUser, CancellationToken ct = default)
     {
         await graphClient.Users[facility.ClubEventsMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
         InvalidateViewCache();
+        await log.LogActionAsync("ClubEventCancelled", actingUser, eventId, ct: ct);
     }
 
     /// <summary>Read-cached (Phase 7, 30s TTL) - used by Calendar.razor, ClubEvents.razor, both

@@ -1,8 +1,8 @@
 # Facility Scheduler — Staff User Guide
 
 **Audience:** staff who create, edit, and cancel bookings through the app.
-**Scope:** everything on the staff-facing `/calendar` and `/club-events` pages. The public calendar
-members see is read-only and needs no instructions.
+**Scope:** everything on the staff-facing `/calendar`, `/club-events`, and `/settings` pages. The
+public calendar members see is read-only and needs no instructions.
 
 ---
 
@@ -153,3 +153,31 @@ Whenever a red conflict banner appears, it lists one of two kinds of conflict:
 For a single booking or edit, either kind blocks the save entirely — nothing is written until you
 change the sheets or time. For the series wizard's review step, conflicts are informational: you
 choose per date whether to skip it or include it anyway.
+
+---
+
+## 7. Settings — Activity Log
+
+The **Settings** page (top nav bar) shows a record of what's actually happened in the app, and lets
+you control how much detail it captures.
+
+**Logging Level** — two options:
+
+- **Standard** (the default) — records only definitive actions: a booking, series, or Club Event
+  created, edited, or canceled, who did it, and which sheet/event it affects. This is what you'll
+  normally leave it on.
+- **Debug** — adds staff sign-in events and full detail on every notification received from the
+  Breely booking website. Turn this on only while actively troubleshooting something (e.g. "did a
+  Breely booking come through correctly?") — it's noisier, and there's no reason to leave it on day
+  to day. Switch it back to Standard once you're done.
+
+Pick a level and click **Save** — it takes effect immediately, no restart needed.
+
+**Recent Activity** shows the most recent 500 lines from the log. Click **Refresh** to pull in
+anything logged since you opened the page — it doesn't update on its own. Each line has a
+timestamp, what happened, and who (or what — Breely-originated bookings show as "Breely webhook")
+did it.
+
+**Download full log archive (.zip)** downloads every log file the app currently has on hand, not
+just what's shown in the 500-line viewer — useful if you need to look further back or hand the file
+to whoever's helping troubleshoot something.

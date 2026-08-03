@@ -10,7 +10,7 @@
 
 ## 1. Executive Summary
 
-A web-based system for managing the scheduling and availability of curling sheets, built on Microsoft Exchange Online (EXO) resource mailboxes as the system of record. Each sheet is modeled as an EXO resource mailbox; every booking is a calendar event on that mailbox. A custom Blazor Server application — not Outlook — is the operational interface for staff: per-sheet/consolidated calendar views (Month/Week/Day), one-off and recurring bookings spanning multiple sheets at once, a separate whole-club "Club Events" resource, three read-only public-facing surfaces (a minimized JSON availability API for a thin CMS embed, a full public calendar page members browse directly with its own Month/Week/Day views, and a search page for finding a window with enough open sheets for a group event), and one inbound write surface: a webhook that ingests booking notifications from Breely, the club's separate customer-facing booking platform, as a Phase 10 stopgap pending real bidirectional sync (§4.8).
+A web-based system for managing the scheduling and availability of curling sheets, built on Microsoft Exchange Online (EXO) resource mailboxes as the system of record. Each sheet is modeled as an EXO resource mailbox; every booking is a calendar event on that mailbox. A custom Blazor Server application — not Outlook — is the operational interface for staff: per-sheet/consolidated calendar views (Month/Week/Day), one-off and recurring bookings spanning multiple sheets at once, a separate whole-club "Club Events" resource, three read-only public-facing surfaces (a minimized JSON availability API for a thin CMS embed, a full public calendar page members browse directly with its own Month/Week/Day views, and a search page for finding a window with enough open sheets for a group event), one inbound write surface: a webhook that ingests booking notifications from Breely, the club's separate customer-facing booking platform, as a Phase 10 stopgap pending real bidirectional sync (§4.8), and a staff-only Settings page (§4.9) giving visibility into what the app has actually done in production - a rotating activity/debug log, since none previously existed once the Breely webhook started acting on its own.
 
 The design still avoids any adjacent authoritative datastore: all booking data, including rich metadata (renter contact, notes), lives on the calendar event itself. The only additional infrastructure is a short-lived, disposable read cache, deliberately scoped to never touch the paths that enforce double-booking prevention.
 
@@ -39,6 +39,7 @@ The pattern generalizes to other bookable facilities (bowling lanes, tennis cour
 | R11 | **Club Events**: a whole-club resource for large events, separate from individual sheet reservations | Done (§4.4), including a closure-conflict cross-check added after build (§4.4) |
 | R12 | Configuration-driven tenant/mailbox/timezone, no hardcoded tenant values in code | Done (§4.6), added during Phase 10 |
 | R13 | Reflect bookings made through the club's separate customer-facing booking platform (Breely) onto this calendar | Done (§4.8), added during Phase 10 as an explicit fallback/stopgap - not a replacement for real bidirectional sync, which remains future work (§2.2) |
+| R14 | Staff-visible record of what the app has actually done in production (who created/edited/canceled what, plus optional deeper detail while troubleshooting) | Done (§4.9), added during Phase 10 after the operator found the Breely webhook's production behavior opaque with no way to see it - a Settings page exposes a Standard/Debug level toggle and a viewer/download for a rotating log file |
 
 ### 2.2 Out of Scope (explicitly deferred or rejected)
 
@@ -89,6 +90,8 @@ flowchart TB
         PUBCAL["Public calendar endpoint<br/>(plain Minimal API, no Blazor circuit)"]
         PUBSEARCH["Public search endpoint<br/>(≥N sheets available, §5.4.3)"]
         WEBHOOK["Booking webhook endpoint<br/>(shared-secret auth, §4.8/§5.5)"]
+        SETTINGS["Settings UI<br/>(logging level, log viewer/download, §4.9)"]
+        LOG[["Rotating log files<br/>(outside app folder, §4.9)"]]
     end
 
     subgraph Web ["Club website (CMS)"]
@@ -99,6 +102,7 @@ flowchart TB
     BREELY(("Breely booking platform<br/>(external, non-authoritative for this app)"))
 
     STAFF(("Staff")) -->|"HTTPS + Entra SSO"| UI
+    STAFF -->|"HTTPS + Entra SSO"| SETTINGS
     MEMBER(("Club members<br/>(anonymous)")) --> IFRAME
     MEMBER --> PUBSEARCH
     ANON(("Public visitors")) --> EMBED
@@ -115,6 +119,9 @@ flowchart TB
     PUBCAL --> API
     PUBSEARCH --> API
     WEBHOOK --> API
+    API -.->|"writes: actions, security events"| LOG
+    WEBHOOK -.->|"writes: auth failures"| LOG
+    SETTINGS -.->|"reads/downloads;<br/>sets level"| LOG
 ```
 
 Key structural decisions visible above:
@@ -125,6 +132,7 @@ Key structural decisions visible above:
 - **Public pages are plain Minimal API endpoints, never Blazor components** sharing the staff app's authenticated circuit (`MapRazorComponents<App>()`). This is a hard architectural rule established the hard way (§8) — not a style preference, and it applies to the webhook too.
 - **The cache is scoped to view-rendering reads only.** Every conflict-check read (the thing standing between two staff members double-booking a sheet) always hits Graph live, never the cache. See §4.3.
 - **Outlook is a read path only.** Staff hold Reviewer (read-only) calendar permission on the resource mailboxes.
+- **The activity/debug log (§4.9) is a flat rotating file, not a database** — consistent with D7 (no companion datastore for booking data). It's written by the same services that write to Graph, and by the webhook endpoint's own auth check; the Settings page reads it and controls the log level, but nothing else in the app depends on it existing.
 
 ### 3.2 What Exchange Provides vs. What the App Owns
 
@@ -262,6 +270,24 @@ Bookings taken through Breely (a separate, third-party booking site with its own
 
 **Payload shape was reverse-engineered, not documented.** Breely's own webhook documentation was too sparse to build against directly. The actual shape was determined empirically during Phase 10 from a series of real captured payloads (a first booking, a reschedule pair, and a corrected single-sheet sample after an earlier sample turned out to be manually-edited and unreliable) via the diagnostic capture listener described in §5.5 — kept in place after this integration shipped, in case the payload shape needs re-inspecting for some future Breely change.
 
+### 4.9 Application Activity/Debug Log and Settings Page (Phase 10)
+
+Added immediately after the Breely webhook (§4.8) shipped, once the operator found its production behavior opaque: the framework's own `ILogger` output only reaches the console/Azure Log Stream, isn't retained anywhere staff can see without portal access, and wasn't answering "what did the webhook actually do." `AppLogService` is a second, deliberately separate log aimed at that gap — a flat rotating text file, not a database (same D7 spirit as the rest of this app's data model), with a staff-facing **Settings** page (`/settings`) to control it and read it.
+
+**Two tiers, one on by default.** *Standard* entries are definitive actions — a booking, series, or Club Event created, edited, or canceled — and are always written, along with a small set of security-relevant events (a failed webhook-secret check) that matter regardless of level. *Debug* entries — the raw (PII-redacted) Breely webhook payload, the external-id lookup result, staff sign-in events — are a no-op unless the level is currently set to Debug. The level is chosen on the Settings page, takes effect immediately (no restart), and persists to a small marker file in the log directory itself rather than to `appsettings.json`, so a level change survives an app restart without needing a redeploy.
+
+**Actor identity reuses the existing sign-in trust boundary, not a new one.** Every Standard-tier staff action logs the real signed-in Entra display name (`ClaimsPrincipal.Identity.Name`) — the same value already shown in the header and defaulted into the free-text "Booked By" field (§6.2) — rather than that editable free-text field itself, since a typed field isn't a reliable audit identity. Breely-originated actions log the actor as the literal string `"Breely webhook"`, matching the `BookedBy` value those bookings already carry.
+
+**Storage location is deliberately outside the deployed app folder.** `AppLog:LogDirectory` (configuration, §4.6-style — never hardcoded) points at where daily-rotating files (`app-yyyy-MM-dd.log`) and the level marker live. Left unset, it falls back to `App_Data/logs` under the content root and logs a startup warning — adequate for local dev, but on Azure App Service that folder is replaced by every redeploy/zip-deploy, silently losing log history. Production deployments must point this at a persistent path outside the deployed folder (see the deployment guide). Files older than `AppLog:RetentionDays` (default 30) are deleted automatically on the next day's rotation — a deliberate bound so leaving Debug mode on doesn't grow the log without limit.
+
+**PII handling in Debug-tier webhook logging.** Breely's payload carries the customer's name, email, and phone number. Logging it raw in Debug mode would create a second at-rest copy of customer contact information outside Exchange, for as long as retention keeps it — decided against explicitly with the operator. `BreelyBookingProcessor`'s Debug-tier payload log redacts those three fields (`client_full_name`/`client_email`/`client_phone` → `[redacted]`) while keeping everything else (booking id, times, sheet, `admin_url`, event type) intact, so the log stays useful for troubleshooting a payload-shape question without becoming a PII store.
+
+**"All network traffic" was scoped down from its literal reading.** The original request for Debug mode was "all network traffic, authorizations, webhook calls, webhook actions." Literal HTTP-level tracing of every Microsoft Graph call would have meant hooking into the Graph SDK's HTTP client pipeline (Kiota's `IRequestAdapter`/`DelegatingHandler` plumbing) — riskier to get right without the ability to test locally against real Graph traffic (per the same constraint that shaped §4.8's build), and it would flood the log with routine calendar-page reads that have nothing to do with what an operator is actually trying to debug. What shipped instead: every step of the Breely webhook's own processing (payload received, external-id lookup, hold-claim attempt, force-book fallback), plus staff sign-in events. If Debug mode turns out not to show enough once exercised against real production traffic, this is the boundary to revisit first.
+
+**Log viewer and download.** The Settings page shows the most recent 500 lines (`AppLogService.TailAsync`, walking backward through older rotated files if the current day's file doesn't have 500 lines on its own) with a manual Refresh button — not auto-refreshing, consistent with every other view in this app being a simple request/response read rather than a live-updating one. `GET /settings/logs/download` (§5.6) zips every rotated file for download, since a support conversation shouldn't be limited to "whatever's in today's file."
+
+**A related live-found fix, surfaced by testing this feature.** Cancelling a booking (`SheetBookingService.CancelAsync`/`CancelGroupAsync`) could throw an unhandled `ODataError` ("The specified object was not found in the store," Graph's 404) if the target event no longer existed by the time the delete/patch ran — crashing the entire Blazor circuit, the same failure mode already on record elsewhere in this app (§8). Live-hit 2026-08-03: the most likely cause is the Breely webhook (§4.8) claiming or trimming a hold out from under a staff browser tab that had loaded it moments earlier and was now stale. Fixed by tolerating a 404 on cancel/reopen as "already gone, treat as already-cancelled" — the exact pattern `CancelSeriesAsync` already used for a missing series master, just not previously applied to the plainer single/group cancel paths (D37).
+
 ---
 
 ## 5. API Interactions
@@ -312,6 +338,10 @@ The originally-designed "≥N sheets available for rental" interval-merge view (
 
 **Diagnostic capture listener, still present alongside the real endpoint.** `POST /api/webhook-capture/{token}` (`WebhookCaptureEndpoint`/`WebhookCaptureService`) predates §4.8 and was built to reverse-engineer Breely's undocumented payload shape before the real integration could be written against it: it accepts any JSON body behind a static path token (`Webhook:CaptureToken`), stores the raw payload in memory, and exposes it for viewing at `/diagnostics` (staff-authenticated). It performs no processing and touches no calendar data — zero blast radius by design. It has been superseded by `/api/webhooks/breely` for real traffic but is deliberately kept registered, since a future Breely payload-shape change would need the same capture-and-inspect workflow again.
 
+### 5.6 Log Download Endpoint (Settings page support, §4.9)
+
+`GET /settings/logs/download` (`SettingsLogsEndpoint`) is the one staff-facing surface built as a plain Minimal API endpoint rather than a Blazor page — the same "raw HTTP semantics don't fit the SignalR circuit" reasoning as the public endpoints (D15), just gated by the app's default authenticated fallback policy instead of `.AllowAnonymous()`, since this one isn't meant to be public. It zips every rotated log file in `AppLog:LogDirectory` (§4.9) into a single in-memory archive and returns it as `application/zip` — small enough at this app's log volume to build in memory rather than streaming to a temp file. `404` if no log files exist yet (e.g. immediately after a fresh deploy with nothing logged).
+
 ---
 
 ## 6. Identity, Security, and Permissions
@@ -324,7 +354,7 @@ Unchanged: the Resource Booking Attendant only processes meeting requests, and t
 
 | Principal | Mechanism | Used for |
 |---|---|---|
-| Staff (interactive) | Entra ID SSO, identity/audit only | Booking create/edit/delete from the UI. Graph itself stays on the app-only credential below, not a delegated on-behalf-of flow — deliberately, to avoid per-request token acquisition complexity for a benefit (native Exchange attribution) the design accepted skipping. |
+| Staff (interactive) | Entra ID SSO, identity/audit only | Booking create/edit/delete from the UI. Graph itself stays on the app-only credential below, not a delegated on-behalf-of flow — deliberately, to avoid per-request token acquisition complexity for a benefit (native Exchange attribution) the design accepted skipping. As of Phase 10 (§4.9) this same identity is also the "actor" recorded on every Standard-tier activity-log line for a staff action, reusing this trust boundary rather than introducing a new one. |
 | App service identity | Client credentials → application permissions | All Graph reads/writes, including the public endpoints' data source. |
 | Staff (fallback viewing) | Reviewer (read-only) calendar permission | Opening sheet calendars in Outlook/OWA. |
 | Anonymous public (read) | None — never touches Graph directly | Served only by the three read-only plain Minimal API endpoints (§5.4), through the app's own service layer. |
@@ -342,6 +372,7 @@ Unchanged: sheet + Club Events mailboxes live in a dedicated mail-enabled securi
 - **A specific, live-verified gotcha:** never apply `.AllowAnonymous()` to `MapRazorComponents<App>()` itself — it disables authorization for every page in the app, not just an intended public one (§5.4). Any future anonymous page must be a plain Minimal API endpoint outside the Blazor component tree.
 - Static assets (CSS/JS/images) are explicitly `.AllowAnonymous()`'d (`app.MapStaticAssets().AllowAnonymous()`) — safe, since they carry nothing sensitive, and necessary since the global `FallbackPolicy` otherwise gates every routed endpoint including these.
 - Mailbox audit logging enabled on every resource mailbox.
+- **The activity/debug log (§4.9) is its own security surface, not covered by the points above.** `AppLog:LogDirectory` should be a path only the app's own process account can read/write — the same "keep secrets out of anything world-readable" concern as everything else in this section, since a Debug-tier Breely log line still carries booking times/sheets/admin URLs even with customer PII redacted. `/settings/logs/download` is gated by the default authenticated fallback policy (§5.6), not `.AllowAnonymous()`, so it requires the same staff sign-in as every other page.
 - **Phase 10 security review completed (2026-07-16).** Confirmed sound: the auth model above, XSS encoding discipline on both public surfaces, input clamping on `?days=`, CORS scoping, secrets posture, and the uncached conflict-check invariant (D16). Found and fixed: missing rate limiting on `/public/calendar`, the unbounded `?month=` quota-exhaustion vector (§5.4.2), and an `innerHTML` interpolation in the embed widget (admin-config data only, hardened to `textContent` as defense in depth since that script executes on the club's own website). Accepted with eyes open: the rate limiter is a single global 60/min bucket, not per-IP — stronger Graph-quota protection, but one abusive client can starve the widget for legitimate visitors; revisit with per-IP partitioning (plus forwarded-headers config) if real traffic warrants. `/diagnostics` remains reachable by any signed-in staff member — remove or admin-gate before members get accounts.
 
 ---
@@ -389,6 +420,9 @@ See `docs/deployment-guide.md` for the full deployment process this checklist fe
 | `FindByExternalIdAsync`'s Graph `$filter` query is unverified against real production traffic | The query shape (`singleValueExtendedProperties/Any(...)` filtering on `ExternalBookingId`) was written against Graph's documented filter syntax but not live-tested at the time of this writing, since the operator can't test the webhook locally and testing against production risked writing spurious bookings. Verify on the first real Breely notification after deployment; if the filter doesn't match as expected, every booking would still get written (never silently dropped, per §4.8) but would land as a duplicate/force-booked `NeedsTriage` case rather than a clean upsert. |
 | Breely cancellation path is untested against real traffic | The operator has not yet cancelled a real booking through Breely as of this writing, so `ProcessAsync`'s cancel branch (§4.8) has only been exercised against synthetic data. Verify on the first real cancellation. |
 | This calendar's copy of a Breely booking can diverge from Breely's own record | By design (§2.3, §4.8) — Breely is the source of truth; this app's copy is best-effort. A missed/failed webhook, a manual Breely-side edit, or the untested paths above could all cause drift. Accepted because the operator confirmed one-off manual reconciliation is acceptable as long as the vast majority of bookings sync correctly; not a defect to "fix" so much as a standing operational reality until real bidirectional sync exists. |
+| Cancelling a booking could crash the Blazor circuit on a 404 from Graph | **Found live, fixed (2026-08-03)** — `CancelAsync`/`CancelGroupAsync` let an unhandled `ODataError` ("specified object was not found in the store") propagate out of a Blazor event handler, taking down the whole circuit. Most likely cause: the Breely webhook (§4.8) claiming/trimming the exact hold a staff browser tab had loaded moments earlier, leaving that tab's view stale. Fixed by tolerating a 404 on cancel/reopen as "already gone" (D37) — the same pattern `CancelSeriesAsync` already used for a missing series master, extended to the plainer single/group cancel paths that didn't have it. |
+| `AppLog:LogDirectory` unset falls back to a path inside the deployed app folder | Adequate for local dev; on Azure App Service that folder is replaced on every redeploy, silently losing log history with no error (§4.9). Deployments must set this explicitly to a persistent path — added to the deployment guide's config table and post-deploy checklist. |
+| Debug-tier "network traffic" logging is scoped to the Breely webhook flow, not literal Graph HTTP tracing | **Accepted, not a defect** — hooking the Graph SDK's own HTTP pipeline was judged riskier to get right without local Graph testing, and would have buried webhook-specific detail under routine calendar-page reads. Revisit if Debug mode proves insufficient once exercised against real production traffic (§4.9). |
 
 ---
 
@@ -428,6 +462,11 @@ See `docs/deployment-guide.md` for the full deployment process this checklist fe
 | D30 | Sheets are claimed in `Facility.SheetMailboxes` configured order, with no additional sorting | Explicit operator requirement: "when assigning sheets for rentals, always go in numerical order (first is sheet 1, second is sheet 2, etc.)" — already satisfied by the existing configuration order (§4.6), so no new sorting logic was needed. |
 | D31 | An unmatched Breely booking is force-written (bypassing the conflict check) rather than rejected or queued | Consistent with the "dumb webhook, never drop a real booking" philosophy (§4.8) — the booking already happened in the real world regardless of what this calendar's holds show. Paired with a non-blocking `NeedsTriage` Club Event marker so staff can find and reassign it, rather than silently accepting a possibly-wrong sheet assignment. |
 | D32 | Breely webhook auth uses a static shared secret compared with `CryptographicOperations.FixedTimeEquals`, not an HMAC signature | Breely's webhook configuration only supports a fixed URL, static custom headers, and a body — no per-request signing capability (confirmed empirically). Constant-time comparison avoids a timing side-channel on the one credential available; accepted as weaker than HMAC given the sending platform's real constraints (§6.4). |
+| D33 | A second, app-level activity/debug log (`AppLogService`) was added, separate from `ILogger` | The operator found the Breely webhook's production behavior opaque once it went live — `ILogger`'s console/Azure Log Stream output isn't retained anywhere staff can see without portal access. A flat rotating file (§4.9), not a database, matching D7's spirit; exposed via a new staff-only Settings page rather than requiring Azure portal access for something this operational. |
+| D34 | The activity log's "actor" for staff actions reuses the signed-in Entra display name already shown in the header, not a new claim-resolution path | Consistency with the existing trust boundary (§6.2) already used for the "Booked By" default — a typed, editable field isn't a reliable audit identity, but the actual signed-in identity is. |
+| D35 | Debug-tier Breely webhook payload logging redacts customer name/email/phone, keeping every other field | Decided explicitly with the operator (§4.9) — logging raw customer contact info would create a second at-rest PII store outside Exchange for the whole retention window, undermining the same privacy discipline already applied to the public surfaces (D11). |
+| D36 | Debug-mode "network traffic" logging covers the Breely webhook's own processing steps and staff sign-ins, not literal Graph HTTP-level tracing | The literal reading would mean hooking the Graph SDK's HTTP pipeline - riskier to get right without local Graph testing access, and would flood the log with routine calendar-page reads unrelated to what an operator is actually debugging. Explicitly flagged to the operator as a scoping call, open to revisiting (§8). |
+| D37 | `CancelAsync`/`CancelGroupAsync` tolerate a 404 from Graph on cancel/reopen as "already gone," instead of letting it crash the Blazor circuit | Live-hit 2026-08-03 while testing the new logging feature: cancelling a booking whose event had likely already been claimed/trimmed by the Breely webhook (§4.8) out from under a stale staff view threw an unhandled `ODataError` that took down the whole circuit. Extends the same 404-tolerance pattern `CancelSeriesAsync` already had for a missing series master to the plainer cancel paths, which didn't have it. |
 
 ---
 
