@@ -31,4 +31,12 @@ public class SheetBooking
     /// Used only for the "cancel entire series" backdoor, not surfaced as a primary edit path.
     /// </summary>
     public string? SeriesMasterId { get; set; }
+
+    /// <summary>
+    /// Non-null when this booking originated from an external booking platform's webhook
+    /// notification (e.g. "breely:461906") rather than being entered directly by staff - the stable
+    /// identity used to upsert on repeat/rescheduled notifications for the same external booking,
+    /// since Graph's own EventId isn't known to the external system. Never set by staff-facing UI.
+    /// </summary>
+    public string? ExternalBookingId { get; set; }
 }

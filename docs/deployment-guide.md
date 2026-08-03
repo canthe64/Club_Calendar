@@ -63,8 +63,10 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID the facility operates in (e.g. `Pacific Standard Time`) | No | same | same |
 | `Facility:Name` | `Facility__Name` | Facility display name | No | optional, currently inert (no UI wiring yet) | optional |
 | `Facility:LogoPath` | `Facility__LogoPath` | Relative path under `wwwroot` to a logo image (e.g. `/branding/logo.png`) | No | optional, currently inert | optional — the actual image file must be placed under `wwwroot` in the deployed app if set |
+| `Webhook:CaptureToken` | `Webhook__CaptureToken` | Path token for the diagnostic webhook capture listener (`/api/webhook-capture/{token}`, architecture doc §5.5) | Treat as a secret (guessable = anyone can post junk into `/diagnostics`), but not a real security boundary — only diagnostic/throwaway data flows through it | user-secrets, or leave blank to effectively disable the route (any/no token still binds the route, but there's nothing sensitive to protect) | App Service Environment variables |
+| `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Shared secret Breely must send in the `X-Webhook-Secret` header on every call to `/api/webhooks/breely` (architecture doc §4.8/§5.5) | **Yes** — this is the only thing gating a write-capable anonymous endpoint | user-secrets only, never committed | App Service Environment variables, marked as a "slot setting"/secret if the host supports it |
 
-**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state.
+**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `Webhook:BreelySharedSecret` is not load-bearing in that sense (the app starts fine without it) but if left blank, `/api/webhooks/breely` rejects every request with `401` — see §2.2 below.
 
 ### 2.1 Representing the `SheetMailboxLocalParts` array as environment variables
 
@@ -82,6 +84,17 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `Facility__TimeZone` | `Pacific Standard Time` |
 
 The index (`__0`, `__1`, …) must be contiguous starting from `0` with no gaps, or .NET's configuration binder will stop reading the array at the first missing index. If a sheet is ever added or removed, add/remove exactly one indexed row here — nothing else in configuration changes.
+
+### 2.2 Setting up the Breely booking webhook
+
+`/api/webhooks/breely` (architecture doc §4.8/§5.5) is how bookings taken through the Breely booking platform get reflected onto this app's calendar. It's optional in the sense the app runs fine without it configured — but until it is, Breely bookings simply won't appear here at all, since nothing else feeds them in.
+
+1. Generate a strong random secret (e.g. `openssl rand -base64 32`, or any password generator producing 32+ random characters — this doesn't need to be memorable, only unguessable) and set it as `Webhook:BreelySharedSecret` per the table above.
+2. In Breely's own admin/webhook configuration for this club's account, configure a webhook pointing at `https://<your-app-domain>/api/webhooks/breely`, with a custom header `X-Webhook-Secret` set to the same value generated in step 1. (Breely's webhook configuration only supports a fixed URL, static custom headers, and a body — there's no per-request signature to configure, hence the static-secret approach rather than HMAC; see architecture doc §6.4 for why that's an accepted trade-off.)
+3. Trigger a real test booking through Breely and confirm it appears on the correct sheet's calendar in this app. If it lands on the fallback sheet with a `⚠ Web booking needs review` Club Event marker instead, that means no open Group Event hold matched the booking's window — check that a hold actually exists on some sheet covering that time.
+4. If the secret is ever rotated, update it in both places (this app's configuration, and Breely's webhook header) at the same time — a mismatch fails closed (`401`, request dropped), it doesn't fall back to unauthenticated.
+
+The diagnostic capture listener (`/api/webhook-capture/{token}`, `Webhook:CaptureToken`) is unrelated to normal operation — it exists only for inspecting a raw webhook payload during troubleshooting (e.g. if Breely ever changes its payload shape) and doesn't need to be configured for the integration above to work.
 
 ---
 
@@ -224,6 +237,8 @@ IIS creates an app pool automatically when you create the site above (named afte
     <environmentVariable name="Facility__SheetMailboxLocalParts__4" value="sheet5" />
     <environmentVariable name="Facility__ClubEventsMailboxLocalPart" value="clubevents" />
     <environmentVariable name="Facility__TimeZone" value="Pacific Standard Time" />
+    <environmentVariable name="Webhook__BreelySharedSecret" value="..." />
+    <environmentVariable name="Webhook__CaptureToken" value="..." />
   </environmentVariables>
 </aspNetCore>
 ```
@@ -283,6 +298,7 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 - [ ] A non-assigned account is correctly blocked from signing in, if §1.2's Enterprise Application assignment restriction was configured.
 - [ ] `/public/calendar` loads without signing in, in a private/incognito browser window.
 - [ ] `/api/public/availability` returns JSON without signing in.
+- [ ] If `Webhook:BreelySharedSecret` is configured, a test call to `/api/webhooks/breely` without the `X-Webhook-Secret` header returns `401`, and a real test booking through Breely (§2.2) shows up on the correct sheet's calendar.
 - [ ] Mailbox audit logging is confirmed enabled on the resource mailboxes (per the provisioning checklist, architecture doc §7) — this is a tenant-side setting, not something the app itself can verify.
 - [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.
 - [ ] (IIS only) The site is bound to 443 with a valid, non-expired certificate, and Windows Firewall shows only the expected inbound ports open.

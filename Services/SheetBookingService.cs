@@ -1,5 +1,6 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using FacilityScheduler.Domain;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Graph;
@@ -47,14 +48,21 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name BookedBy";
     private const string DetailsPropertyId = $"String {{{PropertyGuid}}} Name BookingDetails";
     private const string GroupIdPropertyId = $"String {{{PropertyGuid}}} Name BookingGroupId";
+    private const string ExternalIdPropertyId = $"String {{{PropertyGuid}}} Name ExternalBookingId";
 
     // A blanket $expand=singleValueExtendedProperties is not sufficient in practice - Graph
     // appears to require the $filter sub-clause scoped to the specific property IDs to actually
     // populate results, matching the pattern shown in Microsoft's own documentation examples.
     private static readonly string[] ExtendedPropertiesExpand =
     [
-        $"singleValueExtendedProperties($filter=id eq '{DetailsPropertyId}' or id eq '{BookedByPropertyId}' or id eq '{GroupIdPropertyId}')"
+        $"singleValueExtendedProperties($filter=id eq '{DetailsPropertyId}' or id eq '{BookedByPropertyId}' or id eq '{GroupIdPropertyId}' or id eq '{ExternalIdPropertyId}')"
     ];
+
+    // Breely (and any future external booking source) sends its own event id as a plain integer -
+    // this is deliberately strict rather than trying to escape arbitrary input, since the value is
+    // embedded directly into a Graph $filter query string (FindByExternalIdAsync) and this app has
+    // no other reason to accept anything an OData filter clause could misinterpret.
+    private static readonly Regex ExternalIdPattern = new(@"^[A-Za-z0-9:_-]+$", RegexOptions.Compiled);
 
     public Task<BookingResult> CreateHoldAsync(SheetBooking booking, CancellationToken ct = default)
     {
@@ -477,6 +485,224 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         InvalidateViewCache();
     }
 
+    // ── External booking source support (e.g. a booking-platform webhook) ─────────────────────────
+    // These three methods exist for one caller: an external booking notification that already
+    // happened in the real world and must be reflected here, not re-validated against it. Unlike
+    // every method above, a hold on the same sheet is treated as claimable rather than a conflict -
+    // that's exactly what an open hold means - and a booking that doesn't match any known
+    // availability is still written rather than dropped (see ForceCreateConfirmedAsync).
+
+    /// <summary>
+    /// Finds the booking (on whichever sheet it currently lives on, at whatever time it's currently
+    /// scheduled) tagged with this external booking id, or null if none exists yet. Used to upsert
+    /// on repeat/rescheduled notifications for the same external booking - there is no companion
+    /// database (architecture doc D7) to look this up in, so it's a live Graph query, one per
+    /// configured sheet in the worst case (fine at this app's volume).
+    /// </summary>
+    public async Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct = default)
+    {
+        if (!ExternalIdPattern.IsMatch(externalBookingId))
+        {
+            throw new ArgumentException("externalBookingId contains characters unsafe for a Graph $filter query.", nameof(externalBookingId));
+        }
+
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            var response = await graphClient.Users[sheet].Events.GetAsync(config =>
+            {
+                config.QueryParameters.Filter = $"singleValueExtendedProperties/Any(ep: ep/id eq '{ExternalIdPropertyId}' and ep/value eq '{externalBookingId}')";
+                config.QueryParameters.Expand = ExtendedPropertiesExpand;
+            }, ct);
+
+            var match = response?.Value?.FirstOrDefault();
+            if (match is not null)
+            {
+                return FromGraphEvent(sheet, match);
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Claims an open Group Event hold for an externally-sourced booking - tries sheets in
+    /// <see cref="FacilityConfiguration.SheetMailboxes"/> order (Sheet 1 first) and claims the
+    /// first one whose open hold(s) fully cover [start, end). The claimed hold is trimmed to
+    /// reflect the remaining open time (deleted if nothing remains, patched if one segment
+    /// remains, split into two events if the claim was in the middle of it) - a hold that's an
+    /// occurrence of a recurring series has that occurrence deleted and standalone events created
+    /// for any remainder instead, since Graph rejects a time-bearing PATCH on a recurring
+    /// occurrence even when the time is technically unchanged. Returns null if no sheet's hold(s)
+    /// fully cover the window; the caller decides how to handle that (see ForceCreateConfirmedAsync).
+    /// </summary>
+    public async Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, CancellationToken ct = default)
+    {
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            var sem = SheetLocks.GetOrAdd(sheet, _ => new SemaphoreSlim(1, 1));
+            await sem.WaitAsync(ct);
+            try
+            {
+                var events = await GetEventsInRangeAsync(sheet, start, end, ct);
+                var covering = events
+                    .Select(e => FromGraphEvent(sheet, e))
+                    .Where(b => b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold)
+                    .Where(b => b.Start <= start && b.End >= end)
+                    .ToList();
+
+                if (covering.Count == 0)
+                {
+                    continue; // no covering hold on this sheet - try the next
+                }
+
+                var hold = covering[0];
+
+                var booking = new SheetBooking
+                {
+                    SheetMailbox = sheet,
+                    Start = start,
+                    End = end,
+                    Category = template.Category,
+                    State = BookingState.Confirmed,
+                    RenterName = template.RenterName,
+                    RenterPhone = template.RenterPhone,
+                    RenterEmail = template.RenterEmail,
+                    Notes = template.Notes,
+                    BookedBy = template.BookedBy,
+                    ExternalBookingId = template.ExternalBookingId,
+                    BookingGroupId = Guid.NewGuid()
+                };
+
+                var graphEvent = ToGraphEvent(booking);
+                var created = await graphClient.Users[sheet].Events.PostAsync(graphEvent, cancellationToken: ct);
+                booking.EventId = created?.Id;
+                booking.ICalUId = created?.ICalUId;
+
+                await TrimHoldAsync(sheet, hold, start, end, ct);
+
+                InvalidateViewCache();
+                return booking;
+            }
+            finally
+            {
+                sem.Release();
+            }
+        }
+
+        return null;
+    }
+
+    private async Task TrimHoldAsync(string sheet, SheetBooking hold, DateTime claimedStart, DateTime claimedEnd, CancellationToken ct)
+    {
+        var remainders = CalendarStyles.SubtractIntervals(hold.Start, hold.End, [(claimedStart, claimedEnd)]);
+
+        if (hold.SeriesMasterId is not null)
+        {
+            // Delete this occurrence and create standalone events for whatever remains, rather than
+            // trying to PATCH it in place - Graph rejects a time-bearing PATCH on a recurring
+            // occurrence with "Modified occurrence is crossing or overlapping adjacent occurrence"
+            // even when the resulting time doesn't actually conflict with anything.
+            if (hold.EventId is not null)
+            {
+                await graphClient.Users[sheet].Events[hold.EventId].DeleteAsync(cancellationToken: ct);
+            }
+
+            foreach (var (segStart, segEnd) in remainders)
+            {
+                if (segEnd <= segStart)
+                {
+                    continue;
+                }
+
+                var remainderHold = new SheetBooking
+                {
+                    SheetMailbox = sheet,
+                    Start = segStart,
+                    End = segEnd,
+                    Category = BookingCategory.GroupEvent,
+                    State = BookingState.Hold,
+                    BookingGroupId = Guid.NewGuid()
+                };
+                await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(remainderHold), cancellationToken: ct);
+            }
+
+            return;
+        }
+
+        if (remainders.Count == 0)
+        {
+            if (hold.EventId is not null)
+            {
+                await graphClient.Users[sheet].Events[hold.EventId].DeleteAsync(cancellationToken: ct);
+            }
+            return;
+        }
+
+        // One remainder: patch the existing hold in place to the shrunken window.
+        var (firstStart, firstEnd) = remainders[0];
+        var patch = new Event
+        {
+            Start = new DateTimeTimeZone { DateTime = firstStart.ToString("s"), TimeZone = facility.TimeZone },
+            End = new DateTimeTimeZone { DateTime = firstEnd.ToString("s"), TimeZone = facility.TimeZone }
+        };
+        await graphClient.Users[sheet].Events[hold.EventId!].PatchAsync(patch, cancellationToken: ct);
+
+        if (remainders.Count < 2)
+        {
+            return;
+        }
+
+        // Two remainders (the claim was in the middle of the hold): the patch above covers the
+        // first fragment; create a new event for the second.
+        var (secondStart, secondEnd) = remainders[1];
+        var secondHold = new SheetBooking
+        {
+            SheetMailbox = sheet,
+            Start = secondStart,
+            End = secondEnd,
+            Category = BookingCategory.GroupEvent,
+            State = BookingState.Hold,
+            BookingGroupId = Guid.NewGuid()
+        };
+        await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(secondHold), cancellationToken: ct);
+    }
+
+    /// <summary>
+    /// Writes a Confirmed booking directly, bypassing the conflict check entirely - the last-resort
+    /// fallback when an externally-sourced booking doesn't match any advertised open hold on any
+    /// sheet. Graph itself never enforces non-overlap (D3) - this app's own conflict check is the
+    /// only thing that normally prevents an overlap, and this method deliberately steps around it
+    /// because the booking already happened in the real world regardless of what this calendar
+    /// currently shows; never dropping a real booking matters more than keeping the calendar tidy.
+    /// The caller is responsible for flagging this for staff review - this method never runs silently.
+    /// </summary>
+    public async Task<SheetBooking> ForceCreateConfirmedAsync(string sheetMailbox, SheetBooking booking, CancellationToken ct = default)
+    {
+        var sem = SheetLocks.GetOrAdd(sheetMailbox, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(ct);
+        try
+        {
+            booking.SheetMailbox = sheetMailbox;
+            booking.State = BookingState.Confirmed;
+            if (booking.BookingGroupId == Guid.Empty)
+            {
+                booking.BookingGroupId = Guid.NewGuid();
+            }
+
+            var graphEvent = ToGraphEvent(booking);
+            var created = await graphClient.Users[sheetMailbox].Events.PostAsync(graphEvent, cancellationToken: ct);
+            booking.EventId = created?.Id;
+            booking.ICalUId = created?.ICalUId;
+
+            InvalidateViewCache();
+            return booking;
+        }
+        finally
+        {
+            sem.Release();
+        }
+    }
+
     public async Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct = default)
     {
         var events = await GetEventsInRangeAsync(sheetMailbox, start, end, ct);
@@ -570,6 +796,11 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             extendedProps.Add(new SingleValueLegacyExtendedProperty { Id = BookedByPropertyId, Value = booking.BookedBy });
         }
 
+        if (!string.IsNullOrWhiteSpace(booking.ExternalBookingId))
+        {
+            extendedProps.Add(new SingleValueLegacyExtendedProperty { Id = ExternalIdPropertyId, Value = booking.ExternalBookingId });
+        }
+
         var graphEvent = new Event
         {
             Subject = subject,
@@ -598,6 +829,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         var detailsJson = e.SingleValueExtendedProperties?.FirstOrDefault(p => p.Id == DetailsPropertyId)?.Value;
         var bookedBy = e.SingleValueExtendedProperties?.FirstOrDefault(p => p.Id == BookedByPropertyId)?.Value;
         var groupIdRaw = e.SingleValueExtendedProperties?.FirstOrDefault(p => p.Id == GroupIdPropertyId)?.Value;
+        var externalBookingId = e.SingleValueExtendedProperties?.FirstOrDefault(p => p.Id == ExternalIdPropertyId)?.Value;
 
         BookingDetails? details = null;
         if (detailsJson is not null)
@@ -621,7 +853,8 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             Notes = details?.Notes,
             BookedBy = bookedBy,
             BookingGroupId = Guid.TryParse(groupIdRaw, out var groupId) ? groupId : Guid.Empty,
-            SeriesMasterId = e.SeriesMasterId
+            SeriesMasterId = e.SeriesMasterId,
+            ExternalBookingId = externalBookingId
         };
     }
 

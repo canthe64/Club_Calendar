@@ -2,12 +2,18 @@
 
 ## Overview
 
-This app exposes exactly **three** HTTP API endpoints, and all are public/anonymous. There is no
+This app exposes **five** HTTP API endpoints, and all are public/anonymous. There is no
 staff-facing REST/JSON API. Staff functionality (creating and managing bookings, club events) is
 built entirely as Blazor Server components rendered over an authenticated SignalR circuit - staff
 never call an HTTP API directly, and no such API exists to call (architecture doc §5.4, §6.2).
 
-This is a deliberate architectural decision, confirmed by a live incident: at one point
+Four of the five are read-only (three customer/member-facing, plus a staff-viewable diagnostic
+listener). The fifth, added in Phase 10, is the app's only anonymous **write** surface: a webhook
+that ingests booking notifications from the Breely booking platform (architecture doc §4.8/§5.5).
+It's a deliberate, bounded exception to "public surfaces are read-only," not a broadening of the
+general rule - see [`POST /api/webhooks/breely`](#post-apiwebhooksbreely).
+
+This is otherwise a deliberate architectural decision, confirmed by a live incident: at one point
 `.AllowAnonymous()` was tried on the shared Razor Components registration to carve out a public
 page, and it silently disabled authorization for *every* page in the app. The fix was to make the
 rule absolute - any anonymous surface must be a plain Minimal API endpoint living entirely outside
@@ -15,8 +21,8 @@ the Blazor component tree, never a page inside it (`Program.cs:106-112`).
 
 This document covers:
 
-1. **[Public API](#public-api)** - the three real, callable HTTP endpoints. Anyone can call these
-   without signing in.
+1. **[Public API](#public-api)** - the five real, callable HTTP endpoints. Anyone can call these
+   without signing in (the webhook additionally requires a shared secret).
 2. **[Staff-facing surface](#staff-facing-surface)** - why there's no staff API, and how staff
    actions actually reach the server.
 3. **[Appendix: internal service-layer contract](#appendix-internal-service-layer-contract)** - the
@@ -28,12 +34,17 @@ This document covers:
 
 ## Public API
 
-Both endpoints are registered with `.AllowAnonymous()`, rate-limited via a shared fixed-window
-limiter (`public-api`: 60 requests/minute per limiter instance, no queueing - excess requests get an
-immediate `429`), and never touch or expose renter-identifying data, resource mailbox addresses, or
-any booking category the club hasn't chosen to publish (architecture doc §5.4). Non-public categories
-(League, Bonspiel, Maintenance, Practice Ice, Other) are excluded from the availability feed entirely;
-the month calendar shows every category but strips nothing except the underlying mailbox address.
+The three read-only member/customer-facing endpoints below are all registered with
+`.AllowAnonymous()`, rate-limited via a shared fixed-window limiter (`public-api`: 60
+requests/minute per limiter instance, no queueing - excess requests get an immediate `429`), and
+never touch or expose renter-identifying data, resource mailbox addresses, or any booking category
+the club hasn't chosen to publish (architecture doc §5.4). Non-public categories (League, Bonspiel,
+Maintenance, Practice Ice, Other) are excluded from the availability feed entirely; the month
+calendar shows every category but strips nothing except the underlying mailbox address.
+
+The booking webhook and the diagnostic capture listener (documented after the three read endpoints
+below) are also `.AllowAnonymous()`, but sit on their own separate `booking-webhook` rate limiter
+and carry their own secret-based auth on top of route isolation - see each endpoint's own section.
 
 ### `GET /api/public/availability`
 
@@ -191,6 +202,65 @@ booking or a `marksSheetsUnavailable` club event actually occupies part of it. C
 
 ---
 
+### `POST /api/webhooks/breely`
+
+The app's only anonymous **write** endpoint - ingests booking notifications from the Breely
+third-party booking platform and reflects them onto the matching sheet's calendar (architecture doc
+§4.8/§5.5). Breely is the source of truth for what a customer was actually promised; this app's copy
+is a best-effort, one-way reflection kept current for staff's benefit, not relied on as authoritative.
+
+- **Auth:** static shared-secret header, `X-Webhook-Secret`, compared against configuration
+  (`Webhook:BreelySharedSecret`) using a constant-time comparison. Missing/unconfigured secret or a
+  mismatch → `401 Unauthorized`. Not HMAC-signed - Breely's own webhook configuration has no
+  capability to compute a per-request signature (confirmed empirically, not from documentation).
+- **CORS:** not applicable (server-to-server POST, not a browser fetch).
+- **Rate limit:** its own `booking-webhook` limiter, 30 req/min, no queue - deliberately separate
+  from `public-api` so a flood aimed at one can't starve the other.
+
+**Request body** — `application/json`, `{ "event": { ... } }`. Only a subset of Breely's real
+(much larger) payload is read:
+
+| Field | Type | Notes |
+|---|---|---|
+| `event.id` | integer | Stable identity across reschedules; stored as `breely:{id}` in the `ExternalBookingId` extended property for upsert matching. |
+| `event.start_date` / `event.start_time` | string | e.g. `"Sep 25, 2026"` / `"9:00am"`. Parsed as facility-local time; any timezone abbreviation Breely also sends is ignored. |
+| `event.duration_in_minutes` | integer | Combined with the above to compute the booking's end time. |
+| `event.booked_with` | string | Must equal the configured sheet resource-type name (currently `"Curling Sheet"`) or the event is ignored as not applicable to this calendar. |
+| `event.canceled` | boolean | `true` releases the matching booking back to an open Group Event hold. |
+| `event.client_full_name` / `client_email` / `client_phone` | string | Stored on the booking as renter contact info. |
+| `event.event_type` / `admin_url` | string | Stored in the booking's notes for staff reference back to Breely's own admin view. |
+
+Everything else in the real payload (CRM/marketing fields, signed-PDF blobs, raw form-answer
+dumps) is silently ignored - `System.Text.Json` drops unmapped properties.
+
+**Response:** always `200 OK` once past the secret check, including on malformed JSON, an
+unrecognized shape, or an internal processing exception - a deliberate "dumb webhook" design
+(§4.8): the booking already happened in the real world, so this endpoint never rejects or signals
+failure back to the sender. Failures are surfaced via server logs and, for an unmatched booking,
+a non-blocking `⚠ Web booking needs review` Club Event marker for staff to reassign manually.
+
+**Known limitations (see architecture doc §8):** the Graph query used to detect a repeat
+notification for the same booking (`FindByExternalIdAsync`) is unverified against real production
+traffic as of this writing; the cancellation path has not yet been exercised against a real Breely
+cancellation, only synthetic samples.
+
+---
+
+### `POST /api/webhook-capture/{token}`
+
+A diagnostic-only listener, not part of the Breely integration's real request path - it predates
+`/api/webhooks/breely` and was built to capture real webhook payloads for inspection while that
+integration's payload shape was still being reverse-engineered. Accepts any JSON body, stores it in
+memory, and exposes it for viewing at `/diagnostics` (staff-authenticated, not anonymous). Performs
+no processing and never touches calendar data.
+
+- **Auth:** a static path token (`Webhook:CaptureToken`) - not intended as a real security boundary,
+  since the data it captures is throwaway diagnostic payloads, not live bookings.
+- **Kept in place deliberately** alongside the real endpoint, in case Breely's payload shape changes
+  in the future and needs to be re-captured and re-inspected.
+
+---
+
 ## Staff-facing surface
 
 There is no staff API to call. Staff sign in via Entra ID (`Program.cs:56-62`) and interact entirely
@@ -238,6 +308,9 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 | `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. |
 | `GetBookingsAsync` | `Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end)` | Reads one sheet's bookings in a window. Always live (never cached) - used by every conflict check. |
 | `GetBookingsForAllSheetsAsync` | `Task<List<SheetBooking>> GetBookingsForAllSheetsAsync(DateTime start, DateTime end)` | Reads every configured sheet's bookings in a window, in parallel. View-rendering read path only (Calendar page, public availability) - cached for 30 seconds, invalidated on every write. |
+| `FindByExternalIdAsync` | `Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct)` | Added for the Breely webhook (architecture doc §4.8). Validates the id against a strict allow-list charset, then queries every configured sheet via a Graph `$filter` on the `ExternalBookingId` extended property. Returns the first match or `null` - not staff-facing, called only by `BreelyBookingProcessor`. |
+| `ClaimHoldAsync` | `Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, CancellationToken ct)` | Added for the Breely webhook. Tries sheets in configured order; on each, looks for a Group Event hold fully covering the window, converts it to Confirmed, and trims the remainder (delete/patch/split). Returns the claimed booking, or `null` if no sheet had a covering hold. Unlike every other create path above, this treats an existing hold as claimable rather than a conflict. |
+| `ForceCreateConfirmedAsync` | `Task<SheetBooking> ForceCreateConfirmedAsync(string sheetMailbox, SheetBooking booking, CancellationToken ct)` | Added for the Breely webhook. Bypasses the conflict check entirely - the deliberate "never drop a real booking" fallback used only when `ClaimHoldAsync` finds no matching hold anywhere. Callers are expected to also flag the result for staff review, since it may land on the wrong sheet. |
 
 ### `ClubEventService`
 
@@ -256,7 +329,7 @@ all (neither against sheet bookings nor between club events).
 
 | Type | Shape | Notes |
 |---|---|---|
-| `SheetBooking` | `EventId`, `ICalUId`, `SheetMailbox`, `Start`, `End`, `Category` (`BookingCategory`), `State` (`BookingState`), `RenterName`, `RenterPhone`, `RenterEmail`, `Notes`, `BookedBy`, `BookingGroupId` (Guid), `SeriesMasterId` | `BookingGroupId` links every sheet's event belonging to one conceptual booking, even single-sheet ones. `SeriesMasterId` is set only on occurrences of a recurring series. |
+| `SheetBooking` | `EventId`, `ICalUId`, `SheetMailbox`, `Start`, `End`, `Category` (`BookingCategory`), `State` (`BookingState`), `RenterName`, `RenterPhone`, `RenterEmail`, `Notes`, `BookedBy`, `BookingGroupId` (Guid), `SeriesMasterId`, `ExternalBookingId` | `BookingGroupId` links every sheet's event belonging to one conceptual booking, even single-sheet ones. `SeriesMasterId` is set only on occurrences of a recurring series. `ExternalBookingId` (added for the Breely webhook, architecture doc §4.8) is non-null only for bookings that originated from an external platform's notification rather than staff entry - never set by staff-facing UI. |
 | `ClubEvent` | `EventId`, `ICalUId`, `Title`, `Category` (`ClubEventCategory`), `Start`, `End`, `IsAllDay`, `MarksSheetsUnavailable`, `Notes`, `BookedBy` | Not tied to any sheet. |
 | `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `Other` | Display labels ("Group Event", "Practice Ice") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
 | `BookingState` | `Hold`, `Confirmed` | |

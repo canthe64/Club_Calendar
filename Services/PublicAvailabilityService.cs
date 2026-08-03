@@ -81,7 +81,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
             var openSegments = blockers.Count == 0
                 ? [(hold.Start, hold.End)]
-                : Subtract(hold.Start, hold.End, blockers);
+                : CalendarStyles.SubtractIntervals(hold.Start, hold.End, blockers);
 
             foreach (var (segStart, segEnd) in openSegments)
             {
@@ -100,39 +100,6 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         }
 
         return result.OrderBy(s => s.Start).ToList();
-    }
-
-    // Removes every blocker interval from [start, end), splitting it into 0-2+ remaining
-    // sub-ranges as needed (e.g. a blocker in the middle splits one range into two).
-    private static List<(DateTime Start, DateTime End)> Subtract(DateTime start, DateTime end, List<(DateTime Start, DateTime End)> blockers)
-    {
-        var segments = new List<(DateTime Start, DateTime End)> { (start, end) };
-
-        foreach (var blocker in blockers.OrderBy(b => b.Start))
-        {
-            var next = new List<(DateTime Start, DateTime End)>();
-            foreach (var seg in segments)
-            {
-                if (blocker.End <= seg.Start || blocker.Start >= seg.End)
-                {
-                    next.Add(seg);
-                    continue;
-                }
-
-                if (blocker.Start > seg.Start)
-                {
-                    next.Add((seg.Start, blocker.Start));
-                }
-
-                if (blocker.End < seg.End)
-                {
-                    next.Add((blocker.End, seg.End));
-                }
-            }
-            segments = next;
-        }
-
-        return segments;
     }
 
     /// <summary>

@@ -165,6 +165,44 @@ public static class CalendarStyles
     }
 
     /// <summary>
+    /// Removes every blocker interval from [start, end), splitting it into 0-2+ remaining
+    /// sub-ranges as needed (e.g. a blocker in the middle splits one range into two). Shared by
+    /// PublicAvailabilityService (excluding other bookings from a hold's advertised window) and
+    /// SheetBookingService (trimming a hold when an external booking claims part of it) so both
+    /// use the exact same interval math.
+    /// </summary>
+    public static List<(DateTime Start, DateTime End)> SubtractIntervals(DateTime start, DateTime end, List<(DateTime Start, DateTime End)> blockers)
+    {
+        var segments = new List<(DateTime Start, DateTime End)> { (start, end) };
+
+        foreach (var blocker in blockers.OrderBy(b => b.Start))
+        {
+            var next = new List<(DateTime Start, DateTime End)>();
+            foreach (var seg in segments)
+            {
+                if (blocker.End <= seg.Start || blocker.Start >= seg.End)
+                {
+                    next.Add(seg);
+                    continue;
+                }
+
+                if (blocker.Start > seg.Start)
+                {
+                    next.Add((seg.Start, blocker.Start));
+                }
+
+                if (blocker.End < seg.End)
+                {
+                    next.Add((blocker.End, seg.End));
+                }
+            }
+            segments = next;
+        }
+
+        return segments;
+    }
+
+    /// <summary>
     /// Classic calendar-view lane layout, generic so both the staff Week grid and the public Week
     /// view use the exact same algorithm instead of each maintaining their own copy: walk items in
     /// start order, grouping any that time-overlap into a cluster, then greedily assign each

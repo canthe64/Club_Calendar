@@ -33,9 +33,11 @@ builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityService>();
 
-// Temporary diagnostic buffer for WebhookCaptureEndpoint - see that file's doc comment. Remove once
-// the real, signature-verified booking-notification endpoint replaces it.
+// Temporary diagnostic buffer for WebhookCaptureEndpoint - see that file's doc comment. Superseded
+// by BreelyBookingWebhookEndpoint below for real traffic; kept around for now in case the platform's
+// payload shape needs re-inspecting for some future change.
 builder.Services.AddSingleton<FacilityScheduler.Services.WebhookCaptureService>();
+builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>();
 
 // The public availability endpoint is the app's only internet-anonymous surface (architecture
 // doc §6.4) - rate-limited and CORS-scoped to just that one route, not applied globally.
@@ -44,6 +46,17 @@ builder.Services.AddRateLimiter(options =>
     options.AddFixedWindowLimiter("public-api", limiterOptions =>
     {
         limiterOptions.PermitLimit = 60;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueLimit = 0;
+    });
+
+    // Separate from public-api deliberately - a spam flood aimed at the booking webhook shouldn't
+    // starve the calendar/widget/search endpoints, and vice versa. Generous relative to this club's
+    // actual booking cadence (a handful a day at most), tight relative to what a scanner could throw
+    // at an anonymous POST endpoint.
+    options.AddFixedWindowLimiter("booking-webhook", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 30;
         limiterOptions.Window = TimeSpan.FromMinutes(1);
         limiterOptions.QueueLimit = 0;
     });
@@ -120,5 +133,6 @@ app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
 app.MapPublicSearchEndpoint();
 app.MapWebhookCaptureEndpoint();
+app.MapBreelyBookingWebhookEndpoint();
 
 app.Run();

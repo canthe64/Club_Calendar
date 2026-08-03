@@ -132,6 +132,13 @@ flagged per-date (for a series preview) the same way a real sheet conflict is.
 To delete a Club Event, open it for editing and use the **Delete Club Event** link at the bottom of
 the form.
 
+**A Club Event titled "⚠ Web booking needs review"** is created automatically, not by staff, when a
+booking notification from the Breely booking website doesn't match any open group-event slot on any
+sheet — the booking is still made (onto a fallback sheet) so it's never lost, but it needs a human to
+check it landed on the right sheet and reassign it if not. Its notes include a link back to that
+booking's page in Breely. It doesn't close any ice itself ("Marks all sheets unavailable" is off) —
+delete it once you've verified or corrected the booking it refers to.
+
 ---
 
 ## 6. Understanding Conflict Warnings
