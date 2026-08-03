@@ -6,6 +6,7 @@
 @inject GraphServiceClient GraphClient
 @inject SheetBookingService BookingService
 @inject FacilityConfiguration Facility
+@inject WebhookCaptureService WebhookCapture
 
 <PageTitle>Diagnostics</PageTitle>
 
@@ -39,10 +40,77 @@
     </table>
 }
 
+<hr style="margin:24px 0">
+
+<h1>Webhook Capture</h1>
+<p>
+    Temporary diagnostic listener - not a real integration. Give the sending platform this URL
+    (fill in your configured token): <code>https://YOUR-APP-HOSTNAME/api/webhook-capture/&lt;token&gt;</code>.
+    Whatever it sends (any headers, any body) shows up below. Nothing here touches the calendar or
+    Graph - this only records requests so the actual payload shape can be inspected before anything
+    real is built against it.
+</p>
+<button class="btn btn-secondary" @onclick="RefreshCaptures">Refresh</button>
+<button class="btn btn-outline-danger" @onclick="ClearCaptures" style="margin-left:6px">Clear</button>
+
+@if (_captures.Count == 0)
+{
+    <p style="margin-top:12px;color:#90a0ab"><em>No requests captured yet.</em></p>
+}
+else
+{
+    <div style="margin-top:12px;display:flex;flex-direction:column;gap:14px">
+        @foreach (var c in _captures)
+        {
+            <div style="border:1px solid #e7ecef;border-radius:8px;padding:12px 14px">
+                <div style="font-weight:600;color:#1e2a33">
+                    @c.ReceivedAtUtc.ToString("yyyy-MM-dd HH:mm:ss") UTC — @c.Method
+                    @if (!string.IsNullOrEmpty(c.QueryString))
+                    {
+                        <span style="color:#5a7183;font-weight:400">@c.QueryString</span>
+                    }
+                </div>
+                <div style="font-size:12px;color:#5a7183;margin:4px 0">
+                    From @(c.RemoteIp ?? "(unknown)") · Content-Type: @(c.ContentType ?? "(none)")
+                </div>
+                <details style="margin-top:6px">
+                    <summary style="cursor:pointer;font-size:12px;color:#2d5f8a">Headers (@c.Headers.Count)</summary>
+                    <table class="table table-sm" style="margin-top:6px">
+                        <tbody>
+                            @foreach (var h in c.Headers)
+                            {
+                                <tr>
+                                    <td style="font-weight:600;white-space:nowrap">@h.Name</td>
+                                    <td style="word-break:break-all">@h.Value</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </details>
+                <div style="margin-top:6px">
+                    <div style="font-size:12px;color:#5a7183;margin-bottom:3px">Body (@c.Body.Length chars)</div>
+                    <pre style="background:#f6f8f9;border:1px solid #eef1f3;border-radius:6px;padding:8px;white-space:pre-wrap;word-break:break-all;font-size:12px;max-height:280px;overflow:auto">@c.Body</pre>
+                </div>
+            </div>
+        }
+    </div>
+}
+
 @code {
     private string TestMailbox => Facility.SheetMailboxes[0];
     private bool _running;
     private readonly List<SpikeResult> _results = [];
+    private List<CapturedWebhookRequest> _captures = [];
+
+    protected override void OnInitialized() => RefreshCaptures();
+
+    private void RefreshCaptures() => _captures = WebhookCapture.GetRecent();
+
+    private void ClearCaptures()
+    {
+        WebhookCapture.Clear();
+        RefreshCaptures();
+    }
 
     private sealed record SpikeResult(string Name, string Result, string Detail);
 

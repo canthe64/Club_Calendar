@@ -33,6 +33,10 @@ builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityService>();
 
+// Temporary diagnostic buffer for WebhookCaptureEndpoint - see that file's doc comment. Remove once
+// the real, signature-verified booking-notification endpoint replaces it.
+builder.Services.AddSingleton<FacilityScheduler.Services.WebhookCaptureService>();
+
 // The public availability endpoint is the app's only internet-anonymous surface (architecture
 // doc §6.4) - rate-limited and CORS-scoped to just that one route, not applied globally.
 builder.Services.AddRateLimiter(options =>
@@ -115,5 +119,6 @@ app.MapRazorComponents<App>()
 app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
 app.MapPublicSearchEndpoint();
+app.MapWebhookCaptureEndpoint();
 
 app.Run();
