@@ -1,4 +1,4 @@
-# Facility Scheduler — Staff User Guide
+# GCC Ice & Event Calendar — Staff User Guide
 
 **Audience:** staff who create, edit, and cancel bookings through the app.
 **Scope:** everything on the staff-facing `/calendar`, `/club-events`, and `/settings` pages. The

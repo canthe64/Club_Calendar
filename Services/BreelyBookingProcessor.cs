@@ -7,10 +7,7 @@ using Microsoft.Extensions.Logging;
 namespace FacilityScheduler.Services;
 
 /// <summary>
-/// Processes a Breely webhook notification - the real integration that replaced
-/// WebhookCaptureEndpoint once the payload shape was known empirically (a series of real
-/// create/reschedule/multi-sheet samples, since Breely's own documentation for this webhook was too
-/// sparse to build against directly). Breely fires **one webhook call for an entire multi-sheet
+/// Processes a Breely webhook notification. Breely fires **one webhook call for an entire multi-sheet
 /// reservation at creation** (the sibling sheet-events are only discoverable via the nested
 /// "submission.events" array - the top-level "event" alone only names one of them), but **one call
 /// per event for reschedule or cancellation** later, since Breely's own UI requires rescheduling a

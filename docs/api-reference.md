@@ -270,21 +270,6 @@ Event marker for staff to reassign manually.
 
 ---
 
-### `POST /api/webhook-capture/{token}`
-
-A diagnostic-only listener, not part of the Breely integration's real request path - it predates
-`/api/webhooks/breely` and was built to capture real webhook payloads for inspection while that
-integration's payload shape was still being reverse-engineered. Accepts any JSON body, stores it in
-memory, and exposes it for viewing at `/diagnostics` (staff-authenticated, not anonymous). Performs
-no processing and never touches calendar data.
-
-- **Auth:** a static path token (`Webhook:CaptureToken`) - not intended as a real security boundary,
-  since the data it captures is throwaway diagnostic payloads, not live bookings.
-- **Kept in place deliberately** alongside the real endpoint, in case Breely's payload shape changes
-  in the future and needs to be re-captured and re-inspected.
-
----
-
 ### `GET /settings/logs/download`
 
 The one staff-facing HTTP endpoint in the app (architecture doc §5.6) - built as a plain Minimal API

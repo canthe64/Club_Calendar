@@ -36,10 +36,6 @@ builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityService>();
 
-// Temporary diagnostic buffer for WebhookCaptureEndpoint - see that file's doc comment. Superseded
-// by BreelyBookingWebhookEndpoint below for real traffic; kept around for now in case the platform's
-// payload shape needs re-inspecting for some future change.
-builder.Services.AddSingleton<FacilityScheduler.Services.WebhookCaptureService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>();
 
 // The public availability endpoint is the app's only internet-anonymous surface (architecture
@@ -176,7 +172,6 @@ app.MapRazorComponents<App>()
 app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
 app.MapPublicSearchEndpoint();
-app.MapWebhookCaptureEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
 app.MapSettingsLogsEndpoint();
 

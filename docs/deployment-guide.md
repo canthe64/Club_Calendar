@@ -1,4 +1,4 @@
-# Facility Scheduler — Deployment / Installation Guide
+# GCC Ice & Event Calendar — Deployment / Installation Guide
 
 **Audience:** whoever is standing up a new instance of this app (a new tenant, a new environment, or a fresh facility entirely). Written assuming no prior Azure experience.
 **Companion to:** `curling-facility-scheduling-architecture.md` (design), `provision-categories.ps1` (tenant provisioning script).
@@ -73,7 +73,6 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID the facility operates in (e.g. `Pacific Standard Time`) | No | same | same |
 | `Facility:Name` | `Facility__Name` | Facility display name | No | optional, currently inert (no UI wiring yet) | optional |
 | `Facility:LogoPath` | `Facility__LogoPath` | Relative path under `wwwroot` to a logo image (e.g. `/branding/logo.png`) | No | optional, currently inert | optional — the actual image file must be placed under `wwwroot` in the deployed app if set |
-| `Webhook:CaptureToken` | `Webhook__CaptureToken` | Path token for the diagnostic webhook capture listener (`/api/webhook-capture/{token}`, architecture doc §5.5) | Treat as a secret (guessable = anyone can post junk into `/diagnostics`), but not a real security boundary — only diagnostic/throwaway data flows through it | user-secrets, or leave blank to effectively disable the route (any/no token still binds the route, but there's nothing sensitive to protect) | App Service Environment variables |
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Shared secret Breely must send in the `X-Webhook-Secret` header on every call to `/api/webhooks/breely` (architecture doc §4.8/§5.5) | **Yes** — this is the only thing gating a write-capable anonymous endpoint | user-secrets only, never committed | App Service Environment variables, marked as a "slot setting"/secret if the host supports it |
 | `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path where the app's rotating activity/debug log files live (architecture doc §4.9) | No | `App_Data/logs` (relative, under the project folder) is fine locally | **Must** be set to a path outside the deployed app folder — see §2.3 below |
 | `AppLog:RetentionDays` | `AppLog__RetentionDays` | How many days of rotated log files to keep before automatic deletion | No | optional, defaults to `30` | optional |
@@ -105,8 +104,6 @@ The index (`__0`, `__1`, …) must be contiguous starting from `0` with no gaps,
 2. In Breely's own admin/webhook configuration for this club's account, configure a webhook pointing at `https://<your-app-domain>/api/webhooks/breely`, with a custom header `X-Webhook-Secret` set to the same value generated in step 1. (Breely's webhook configuration only supports a fixed URL, static custom headers, and a body — there's no per-request signature to configure, hence the static-secret approach rather than HMAC; see architecture doc §6.4 for why that's an accepted trade-off.)
 3. Trigger a real test booking through Breely and confirm it appears on the correct sheet's calendar in this app. If it lands on the fallback sheet with a `⚠ Web booking needs review` Club Event marker instead, that means no open Group Event hold matched the booking's window — check that a hold actually exists on some sheet covering that time.
 4. If the secret is ever rotated, update it in both places (this app's configuration, and Breely's webhook header) at the same time — a mismatch fails closed (`401`, request dropped), it doesn't fall back to unauthenticated.
-
-The diagnostic capture listener (`/api/webhook-capture/{token}`, `Webhook:CaptureToken`) is unrelated to normal operation — it exists only for inspecting a raw webhook payload during troubleshooting (e.g. if Breely ever changes its payload shape) and doesn't need to be configured for the integration above to work.
 
 ### 2.3 Setting up the activity/debug log (Settings page)
 
@@ -263,7 +260,6 @@ IIS creates an app pool automatically when you create the site above (named afte
     <environmentVariable name="Facility__ClubEventsMailboxLocalPart" value="clubevents" />
     <environmentVariable name="Facility__TimeZone" value="Pacific Standard Time" />
     <environmentVariable name="Webhook__BreelySharedSecret" value="..." />
-    <environmentVariable name="Webhook__CaptureToken" value="..." />
     <environmentVariable name="AppLog__LogDirectory" value="C:\FacilityScheduler-Logs" />
   </environmentVariables>
 </aspNetCore>
