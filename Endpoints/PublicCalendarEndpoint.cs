@@ -23,7 +23,7 @@ namespace FacilityScheduler.Endpoints;
 /// </summary>
 public static class PublicCalendarEndpoint
 {
-    private enum ViewMode { Month, Week, Day }
+    internal enum ViewMode { Month, Week, Day }
 
     public static void MapPublicCalendarEndpoint(this WebApplication app)
     {
@@ -43,7 +43,7 @@ public static class PublicCalendarEndpoint
         .RequireRateLimiting("public-api");
     }
 
-    private static ViewMode ParseView(string? view) => view?.ToLowerInvariant() switch
+    internal static ViewMode ParseView(string? view) => view?.ToLowerInvariant() switch
     {
         "week" => ViewMode.Week,
         "day" => ViewMode.Day,
@@ -58,7 +58,7 @@ public static class PublicCalendarEndpoint
     // legitimate use (members browsing the season) while capping the anonymous surface at ~37 keys.
     // "today" is facility-local (FacilityConfiguration.Today), not DateTime.UtcNow - passed in by the
     // caller rather than read here, so this stays a pure function of its arguments.
-    private static DateTime? ParseMonth(string? month, DateTime today)
+    internal static DateTime? ParseMonth(string? month, DateTime today)
     {
         if (string.IsNullOrWhiteSpace(month) || !DateTime.TryParse(month + "-01", out var parsed))
         {
@@ -71,7 +71,7 @@ public static class PublicCalendarEndpoint
     }
 
     // Same clamping rationale as ParseMonth, applied to Week/Day's ?date= parameter.
-    private static DateTime? ParseDate(string? date, DateTime today)
+    internal static DateTime? ParseDate(string? date, DateTime today)
     {
         if (string.IsNullOrWhiteSpace(date) || !DateTime.TryParse(date, out var parsed))
         {

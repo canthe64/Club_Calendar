@@ -3,8 +3,8 @@ using System.Globalization;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using FacilityScheduler.Domain;
+using FacilityScheduler.Services.Graph;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using Microsoft.Graph.Models.ODataErrors;
 
@@ -15,7 +15,7 @@ namespace FacilityScheduler.Services;
 /// Booking Attendant (confirmed via spike, architecture doc D3/S6.1), so this service is the
 /// only thing standing between two overlapping bookings on the same sheet.
 /// </summary>
-public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
+public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
 {
     // Title given to a leftover Group Event hold created/kept by TrimHoldAsync when claiming a
     // Breely booking (architecture doc §4.8) - distinguishes an app-generated "the rest of this slot
@@ -160,7 +160,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             }
 
             var graphEvent = ToGraphEvent(booking);
-            var created = await graphClient.Users[booking.SheetMailbox].Events.PostAsync(graphEvent, cancellationToken: ct);
+            var created = await graph.CreateEventAsync(booking.SheetMailbox, graphEvent, ct);
 
             booking.EventId = created?.Id;
             booking.ICalUId = created?.ICalUId;
@@ -227,7 +227,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 };
 
                 var graphEvent = ToGraphEvent(booking);
-                var result = await graphClient.Users[sheet].Events.PostAsync(graphEvent, cancellationToken: ct);
+                var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
                 booking.EventId = result?.Id;
                 booking.ICalUId = result?.ICalUId;
                 created.Add(booking);
@@ -250,7 +250,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     public async Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser, CancellationToken ct = default)
     {
         var update = new Event { ShowAs = FreeBusyStatus.Busy };
-        await graphClient.Users[sheetMailbox].Events[eventId].PatchAsync(update, cancellationToken: ct);
+        await graph.PatchEventAsync(sheetMailbox, eventId, update, ct);
         InvalidateViewCache();
         await log.LogActionAsync("BookingConfirmed", actingUser, eventId, sheetMailbox, ct: ct);
         return await GetEventAsync(sheetMailbox, eventId, ct);
@@ -260,7 +260,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     {
         try
         {
-            await graphClient.Users[sheetMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
+            await graph.DeleteEventAsync(sheetMailbox, eventId, ct);
         }
         catch (ODataError ex) when (ex.ResponseStatusCode == 404)
         {
@@ -359,7 +359,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 };
 
                 var graphEvent = ToGraphEvent(merged, includeTime: timeChanged);
-                await graphClient.Users[member.SheetMailbox].Events[member.EventId!].PatchAsync(graphEvent, cancellationToken: ct);
+                await graph.PatchEventAsync(member.SheetMailbox, member.EventId!, graphEvent, ct);
                 merged.EventId = member.EventId;
                 updated.Add(merged);
             }
@@ -387,7 +387,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 };
 
                 var graphEvent = ToGraphEvent(created);
-                var result = await graphClient.Users[sheet].Events.PostAsync(graphEvent, cancellationToken: ct);
+                var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
                 created.EventId = result?.Id;
                 created.ICalUId = result?.ICalUId;
                 updated.Add(created);
@@ -463,18 +463,18 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                             // Start/End change on an occurrence that would cross into an adjacent
                             // occurrence, same restriction TrimHoldAsync already works around. Delete
                             // this occurrence and create a standalone merged hold instead.
-                            await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
-                            await graphClient.Users[member.SheetMailbox].Events.PostAsync(ToGraphEvent(reopened, titleOverride: AvailableForGroupEventsTitle, clearUnsetOptionalProperties: true), cancellationToken: ct);
+                            await graph.DeleteEventAsync(member.SheetMailbox, member.EventId, ct);
+                            await graph.CreateEventAsync(member.SheetMailbox, ToGraphEvent(reopened, titleOverride: AvailableForGroupEventsTitle, clearUnsetOptionalProperties: true), ct);
                         }
                         else
                         {
                             var graphEvent = ToGraphEvent(reopened, includeTime: merged, titleOverride: AvailableForGroupEventsTitle, clearUnsetOptionalProperties: true);
-                            await graphClient.Users[member.SheetMailbox].Events[member.EventId].PatchAsync(graphEvent, cancellationToken: ct);
+                            await graph.PatchEventAsync(member.SheetMailbox, member.EventId, graphEvent, ct);
                         }
                     }
                     else
                     {
-                        await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
+                        await graph.DeleteEventAsync(member.SheetMailbox, member.EventId, ct);
                     }
 
                     affected.Add(member);
@@ -563,7 +563,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
         foreach (var eventId in absorbedIds)
         {
-            await graphClient.Users[sheet].Events[eventId].DeleteAsync(cancellationToken: ct);
+            await graph.DeleteEventAsync(sheet, eventId, ct);
         }
 
         return (mergedStart, mergedEnd);
@@ -659,33 +659,15 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 }
             };
 
-            var result = await graphClient.Users[sheet].Events.PostAsync(graphEvent, cancellationToken: ct);
+            var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
             booking.EventId = result?.Id;
             booking.ICalUId = result?.ICalUId;
             created.Add(booking);
 
             if (excluded.Count > 0 && result?.Id is not null)
             {
-                var allInstances = new List<Event>();
-                var instances = await graphClient.Users[sheet].Events[result.Id].Instances.GetAsync(config =>
-                {
-                    config.QueryParameters.StartDateTime = facility.ToUtcQueryString(template.Start);
-                    config.QueryParameters.EndDateTime = facility.ToUtcQueryString(lastOccurrenceDate.Date.AddDays(1));
-                }, ct);
-
-                // Same pagination gotcha as GetEventsInRangeAsync - a long season's worth of
-                // occurrences can exceed one page.
-                while (instances is not null)
-                {
-                    if (instances.Value is not null)
-                    {
-                        allInstances.AddRange(instances.Value);
-                    }
-
-                    instances = instances.OdataNextLink is not null
-                        ? await graphClient.Users[sheet].Events[result.Id].Instances.WithUrl(instances.OdataNextLink).GetAsync(cancellationToken: ct)
-                        : null;
-                }
+                var allInstances = await graph.GetInstancesAsync(sheet, result.Id,
+                    facility.ToUtcQueryString(template.Start), facility.ToUtcQueryString(lastOccurrenceDate.Date.AddDays(1)), ct);
 
                 foreach (var instance in allInstances)
                 {
@@ -697,7 +679,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                     var instanceDate = facility.FromUtcResponseString(instance.Start.DateTime).Date;
                     if (excluded.Contains(instanceDate))
                     {
-                        await graphClient.Users[sheet].Events[instance.Id].DeleteAsync(cancellationToken: ct);
+                        await graph.DeleteEventAsync(sheet, instance.Id, ct);
                     }
                 }
             }
@@ -726,7 +708,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
             try
             {
-                await graphClient.Users[member.SheetMailbox].Events[member.SeriesMasterId].DeleteAsync(cancellationToken: ct);
+                await graph.DeleteEventAsync(member.SheetMailbox, member.SeriesMasterId, ct);
             }
             catch (ODataError ex) when (ex.ResponseStatusCode == 404)
             {
@@ -765,13 +747,10 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
         foreach (var sheet in facility.SheetMailboxes)
         {
-            var response = await graphClient.Users[sheet].Events.GetAsync(config =>
-            {
-                config.QueryParameters.Filter = $"singleValueExtendedProperties/Any(ep: ep/id eq '{ExternalIdPropertyId}' and ep/value eq '{externalBookingId}')";
-                config.QueryParameters.Expand = ExtendedPropertiesExpand;
-            }, ct);
+            var matches = await graph.FindEventsAsync(sheet,
+                $"singleValueExtendedProperties/Any(ep: ep/id eq '{ExternalIdPropertyId}' and ep/value eq '{externalBookingId}')",
+                ExtendedPropertiesExpand, ct);
 
-            var matches = response?.Value;
             if (matches is { Count: > 0 })
             {
                 // Defense in depth: this app's own writers always keep at most one live match per
@@ -841,7 +820,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 };
 
                 var graphEvent = ToGraphEvent(booking);
-                var created = await graphClient.Users[sheet].Events.PostAsync(graphEvent, cancellationToken: ct);
+                var created = await graph.CreateEventAsync(sheet, graphEvent, ct);
                 booking.EventId = created?.Id;
                 booking.ICalUId = created?.ICalUId;
 
@@ -879,7 +858,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             // even when the resulting time doesn't actually conflict with anything.
             if (hold.EventId is not null)
             {
-                await graphClient.Users[sheet].Events[hold.EventId].DeleteAsync(cancellationToken: ct);
+                await graph.DeleteEventAsync(sheet, hold.EventId, ct);
             }
 
             foreach (var (segStart, segEnd) in remainders)
@@ -893,7 +872,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                     State = BookingState.Hold,
                     BookingGroupId = Guid.NewGuid()
                 };
-                await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(remainderHold, titleOverride: AvailableForGroupEventsTitle), cancellationToken: ct);
+                await graph.CreateEventAsync(sheet, ToGraphEvent(remainderHold, titleOverride: AvailableForGroupEventsTitle), ct);
             }
 
             return;
@@ -903,7 +882,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         {
             if (hold.EventId is not null)
             {
-                await graphClient.Users[sheet].Events[hold.EventId].DeleteAsync(cancellationToken: ct);
+                await graph.DeleteEventAsync(sheet, hold.EventId, ct);
             }
             return;
         }
@@ -916,7 +895,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             Start = new DateTimeTimeZone { DateTime = firstStart.ToString("s"), TimeZone = facility.TimeZone },
             End = new DateTimeTimeZone { DateTime = firstEnd.ToString("s"), TimeZone = facility.TimeZone }
         };
-        await graphClient.Users[sheet].Events[hold.EventId!].PatchAsync(patch, cancellationToken: ct);
+        await graph.PatchEventAsync(sheet, hold.EventId!, patch, ct);
 
         if (remainders.Count < 2)
         {
@@ -935,7 +914,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             State = BookingState.Hold,
             BookingGroupId = Guid.NewGuid()
         };
-        await graphClient.Users[sheet].Events.PostAsync(ToGraphEvent(secondHold, titleOverride: AvailableForGroupEventsTitle), cancellationToken: ct);
+        await graph.CreateEventAsync(sheet, ToGraphEvent(secondHold, titleOverride: AvailableForGroupEventsTitle), ct);
     }
 
     /// <summary>
@@ -961,7 +940,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             }
 
             var graphEvent = ToGraphEvent(booking);
-            var created = await graphClient.Users[sheetMailbox].Events.PostAsync(graphEvent, cancellationToken: ct);
+            var created = await graph.CreateEventAsync(sheetMailbox, graphEvent, ct);
             booking.EventId = created?.Id;
             booking.ICalUId = created?.ICalUId;
 
@@ -1006,41 +985,13 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
     {
         // Re-fetch rather than trust a PATCH/POST response shape - extended properties are only
         // returned when explicitly expanded, and that's not guaranteed on those response bodies.
-        var refreshed = await graphClient.Users[sheetMailbox].Events[eventId].GetAsync(config =>
-        {
-            config.QueryParameters.Expand = ExtendedPropertiesExpand;
-        }, ct);
+        var refreshed = await graph.GetEventAsync(sheetMailbox, eventId, ExtendedPropertiesExpand, ct);
 
         return FromGraphEvent(sheetMailbox, refreshed!);
     }
 
-    private async Task<List<Event>> GetEventsInRangeAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct)
-    {
-        var allEvents = new List<Event>();
-        var response = await graphClient.Users[sheetMailbox].CalendarView.GetAsync(config =>
-        {
-            config.QueryParameters.StartDateTime = facility.ToUtcQueryString(start);
-            config.QueryParameters.EndDateTime = facility.ToUtcQueryString(end);
-            config.QueryParameters.Expand = ExtendedPropertiesExpand;
-        }, ct);
-
-        // calendarView pages its results - a wide window (e.g. a 6-week month view) with several
-        // recurring series expanded into occurrences can easily exceed one page. Only reading
-        // the first page silently truncates later occurrences; follow @odata.nextLink until exhausted.
-        while (response is not null)
-        {
-            if (response.Value is not null)
-            {
-                allEvents.AddRange(response.Value);
-            }
-
-            response = response.OdataNextLink is not null
-                ? await graphClient.Users[sheetMailbox].CalendarView.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct)
-                : null;
-        }
-
-        return allEvents;
-    }
+    private Task<List<Event>> GetEventsInRangeAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct) =>
+        graph.GetCalendarViewAsync(sheetMailbox, facility.ToUtcQueryString(start), facility.ToUtcQueryString(end), ExtendedPropertiesExpand, ct: ct);
 
     private Event ToGraphEvent(SheetBooking booking, bool includeTime = true, string? titleOverride = null, bool clearUnsetOptionalProperties = false)
     {

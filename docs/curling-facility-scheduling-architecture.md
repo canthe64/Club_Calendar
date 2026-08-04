@@ -133,6 +133,7 @@ Key structural decisions visible above:
 - **The cache is scoped to view-rendering reads only.** Every conflict-check read (the thing standing between two staff members double-booking a sheet) always hits Graph live, never the cache. See §4.3.
 - **Outlook is a read path only.** Staff hold Reviewer (read-only) calendar permission on the resource mailboxes.
 - **The activity/debug log (§4.9) is a flat rotating file, not a database** — consistent with D7 (no companion datastore for booking data). It's written by the same services that write to Graph, and by the webhook endpoint's own auth check; the Settings page reads it and controls the log level, but nothing else in the app depends on it existing.
+- **Graph calendar operations sit behind `IGraphEventGateway`** (§11), not `GraphServiceClient` directly — `SheetBookingService`/`ClubEventService` depend on the interface; production wiring still resolves to the real Graph client. Added specifically to make automated testing possible (§11) without driving Graph SDK's fluent request builders directly.
 
 ### 3.2 What Exchange Provides vs. What the App Owns
 
@@ -470,6 +471,7 @@ See `docs/deployment-guide.md` for the full deployment process this checklist fe
 | Minimum group event booking interval accepted an arbitrary (including negative) number | **Found live, fixed (2026-08-04)** — a negative value reached `SetMinimumGroupEventBookingIntervalAsync`'s `ArgumentOutOfRangeException` guard unhandled, crashing the circuit (before the `ErrorBoundary` above existed). Changed to a fixed 30/60/90/120-minute dropdown, which makes an invalid value structurally impossible from the UI (§4.9). |
 | Two concurrent duplicate Breely deliveries for the same external id could double-claim it | **Found via code review, fixed (2026-08-04)** — a per-external-id lock (`BreelyBookingProcessor.ExternalIdLocks`) now serializes the lookup-then-act sequence per id, re-checking fresh once acquired (§4.8). |
 | `AbsorbAdjacentHoldsAsync` requires exact `Start`/`End` equality to merge touching holds | A sub-minute misalignment (e.g. a hand-edited event in Outlook) silently prevents an otherwise-adjacent hold from merging. Noted via code review 2026-08-04, not yet addressed - low likelihood, cosmetic (a fragmented-but-correct calendar) rather than a correctness risk. |
+| No automated test coverage anywhere in the repo | **RESOLVED (2026-08-04)** — an xUnit/bUnit test suite (§11) now covers concurrency locking, Breely webhook processing, conflict/booking rules, facility-timezone conversion, anonymous-endpoint request parsing, and two staff pages; wired into CI. Recurring-series instance expansion (`CreateSeriesAsync`'s excluded-date deletion) and full HTTP-level endpoint integration testing remain uncovered (§11). |
 
 ---
 
@@ -535,9 +537,37 @@ See `docs/deployment-guide.md` for the full deployment process this checklist fe
 | D56 | The Settings page shows a standing PII warning whenever Debug logging is the active/selected level, with no automatic revert to Standard | Debug mode's raw webhook payload capture can log customer contact info; the warning is a UI nudge for a rare, staff-supervised toggle, and an automatic revert was deliberately not built to avoid surprising an operator mid-troubleshooting session (§4.9/§8). |
 | D57 | A per-external-id lock (`BreelyBookingProcessor.ExternalIdLocks`) serializes the lookup-then-act sequence for a given Breely event id | Breely has been observed re-sending the same creation notification twice within minutes; without this, two concurrent deliveries could both see "no existing booking" and independently claim two different sheets for what's really one booking (§4.8/§8). |
 | D58 | Rate-limit rejections return `429 Too Many Requests`, set explicitly via `RateLimiterOptions.RejectionStatusCode` | The ASP.NET Core default is `503`, which every doc/comment describing this app's rate limiting had already (incorrectly) assumed was `429` - a code-review finding, not a live incident (§5.5/§8). |
+| D59 | `SheetBookingService`/`ClubEventService` depend on a new `IGraphEventGateway` interface instead of `GraphServiceClient` directly | Graph SDK's fluent request builders (`graphClient.Users[x].Events[y]...`) are impractical to mock directly; a thin gateway wrapping only the handful of operations these two services actually use makes the write/conflict logic unit-testable against an in-memory fake instead (§11). Production DI still resolves the interface to a `GraphServiceClient`-backed implementation - no behavior change. |
+| D60 | The webhook secret comparison and the anonymous-endpoint date/range-clamping helpers are `internal` (via `InternalsVisibleTo`), not `private` | Lets the test project exercise this logic directly rather than through a full ASP.NET Core test host, which would need dummy Azure AD/Graph config threaded through the real auth pipeline just to boot (§11). Trades full HTTP-level integration coverage for lower-risk, faster unit coverage of the actual parsing/validation logic. |
 
 ---
 
 ## 10. Generalization Note
 
 To reuse this for bowling lanes, tennis courts, or other facilities: the resource-mailbox-per-unit model, state/category mechanism, conflict enforcement, and public-endpoint pattern are all facility-agnostic, and — as of Phase 10 — the sheet count, mailbox naming, tenant, and time zone are genuinely configuration, not code. What still changes per facility is vocabulary (categories, states) and slot-granularity rules, which live in the application's domain layer (`Domain/BookingCategory.cs`, `Domain/ClubEventCategory.cs`), not its architecture.
+
+## 11. Automated Testing (added 2026-08-04)
+
+`FacilityScheduler.Tests` (xUnit + Moq + bUnit, referenced from `FacilityScheduler.slnx`) is the first automated test coverage this repo has had. It exists specifically to guard the concurrency and identity-matching logic the 2026-08-04 code review found and fixed (§8/§9 D47–D58) against silent regression.
+
+**Why it was possible at all:** every write/read the test suite needs to observe goes through `SheetBookingService`/`ClubEventService`, which now depend on `IGraphEventGateway` (D59) rather than `GraphServiceClient` directly. `FakeGraphEventGateway` (test project only) is an in-memory stand-in precise enough to reproduce the specific Graph behaviors the fixes above depend on:
+- PATCH only applies fields actually set on the request, and merges `SingleValueExtendedProperties` per-property-id rather than replacing the collection — the exact semantics D48/H1 was fixed against.
+- Delete/patch on an unknown event id throws a 404 `ODataError`, matching the "already gone" tolerance D37 relies on.
+- Event times are normalized to UTC digits at write time, the same way real Graph normalizes whatever local-time-plus-zone an event is written with — `FromGraphEvent` always treats a read-back `DateTime` string as UTC (`FacilityConfiguration.FromUtcResponseString`), so a fake that stored local-plus-zone verbatim would silently misconvert on the very next read. (Caught mid-build via a failing test that turned out to be exercising the force-book fallback instead of the intended hold-claim path — both produce an identical-looking booking, which is itself a reminder that a test asserting only "a booking exists" can pass for the wrong reason.)
+- An injectable await-delay inside the fake's calendar-view/find-events read step lets a concurrency test force two callers to genuinely interleave, so `SheetLocks`/`ExternalIdLocks` tests can't pass by luck of fully-synchronous fake I/O never actually racing.
+
+**Coverage, by area:**
+- Concurrency/locking — `SheetBookingService.SheetLocks` and `BreelyBookingProcessor.ExternalIdLocks` actually serialize concurrent callers (the exact races D57/H2/M5 closed).
+- Breely webhook processing — claim/reschedule/cancel/duplicate-notification handling, the fallback-sheet round-robin (D50), the stale-sibling mutation guard (D51).
+- Conflict detection & booking rules — sheet/time overlap rejection, all-or-nothing multi-sheet creation, the minimum-interval sliver-dropping rule (D38), and the D48/H1 reopen-clears-identity regression.
+- Facility-timezone conversion — DST-boundary round trips through `ToUtcQueryString`/`FromUtcResponseString`, plus a test pinned at the exact instant the original D47 bug manifested at.
+- Anonymous-endpoint request parsing — the date/month/range clamping on `/public/calendar` and `/public/search`, and the constant-time webhook secret comparison, exposed via `internal` + `InternalsVisibleTo` (D60) rather than a full ASP.NET Core test host.
+- Two staff pages via bUnit — `Settings.razor` (the D56 PII warning banner, the D55 interval dropdown) and `Schedule.razor` (the facility-local-today field-initializer pattern, create/conflict form flow).
+
+**Known gaps**, left for a future pass rather than addressed now:
+- `CreateSeriesAsync`'s excluded-date deletion relies on Graph's recurring-instance expansion (`GetInstancesAsync`), which the fake doesn't model — no test exercises that path.
+- Endpoint coverage is unit-level (D60), not a full HTTP-level integration test through the real ASP.NET Core pipeline (routing, rate limiting, the Entra auth handler) — would need a `WebApplicationFactory`-based host fed dummy Azure AD/Graph config.
+- `Calendar.razor` and the Breely-side `ClubEvents`/series-wizard UI have no bUnit coverage yet; `Schedule.razor` was chosen instead as the simpler self-contained page (no child modal components).
+- `FindByExternalIdAsync`'s defensive "prefer Confirmed over Hold on multiple matches" branch (guarding a data invariant this app's own writers always maintain) has no realistic production code path to construct a violating scenario from, so it isn't covered.
+
+CI: `.github/workflows/tests.yml` runs `dotnet test` on push/PR to `master`, on `windows-latest` specifically — this app's `TimeZoneInfo` IDs are the Windows convention (`"Pacific Standard Time"`, not the IANA `"America/Los_Angeles"`), matching `appsettings.Development.json` and the Azure App Service (Windows) deployment target.

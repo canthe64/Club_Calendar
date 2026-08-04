@@ -40,6 +40,16 @@ $env:CURLING_APP_CLIENT_SECRET = '<client secret>'
 
 **.NET 10 ASP.NET Core runtime** available wherever the app will run — the exact install mechanism depends on the host; see §3 (Azure) or §4 (IIS) below.
 
+### 1.5 Run the test suite before publishing
+
+`FacilityScheduler.Tests` (architecture doc §11) runs against an in-memory fake, not a real tenant — no configuration needed:
+
+```
+dotnet test FacilityScheduler.Tests/FacilityScheduler.Tests.csproj
+```
+
+CI (`.github/workflows/tests.yml`) runs this on every push/PR to `master`; run it locally too before a manual publish (§3.3/§4) since CI passing on `master` doesn't guarantee an uncommitted local change still passes.
+
 ---
 
 ## 2. Configuration Reference

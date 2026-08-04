@@ -12,8 +12,10 @@
          .razor file next to it in that folder trips BLAZOR106 ("JS module file was defined but no
          associated razor component or view was found for it"). Live-hit 2026-07-16 - excluding any
          top-level "publish" folder here means this can't recur regardless of where a future local
-         publish happens to land. -->
-    <DefaultItemExcludes>$(DefaultItemExcludes);publish/**;publish\**</DefaultItemExcludes>
+         publish happens to land. FacilityScheduler.Tests is excluded for the same class of reason -
+         it's a separate project nested under this one, and without the exclude its own generated
+         obj/ files (e.g. GlobalUsings.g.cs) get globbed into this project's compile items too. -->
+    <DefaultItemExcludes>$(DefaultItemExcludes);publish/**;publish\**;FacilityScheduler.Tests/**;FacilityScheduler.Tests\**</DefaultItemExcludes>
   </PropertyGroup>
 
   <ItemGroup>

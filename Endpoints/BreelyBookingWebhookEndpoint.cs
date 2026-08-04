@@ -98,7 +98,7 @@ public static class BreelyBookingWebhookEndpoint
         }
     }
 
-    private static bool SecretsMatch(string expected, string provided)
+    internal static bool SecretsMatch(string expected, string provided)
     {
         var expectedBytes = Encoding.UTF8.GetBytes(expected);
         var providedBytes = Encoding.UTF8.GetBytes(provided);

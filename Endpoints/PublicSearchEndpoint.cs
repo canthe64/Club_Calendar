@@ -40,7 +40,7 @@ public static class PublicSearchEndpoint
     // cache-key/Graph-fanout surface. The 60-day cap on the span itself is the search's own
     // requirement (a search this wide across every sheet is meaningfully more expensive per request
     // than a single month/week/day view).
-    private static (DateTime Start, DateTime End) ParseRange(string? start, string? end, DateTime today)
+    internal static (DateTime Start, DateTime End) ParseRange(string? start, string? end, DateTime today)
     {
         var minAllowed = today.AddYears(-1);
         var maxAllowed = today.AddYears(2);

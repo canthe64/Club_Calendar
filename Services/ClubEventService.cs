@@ -1,6 +1,6 @@
 using FacilityScheduler.Domain;
+using FacilityScheduler.Services.Graph;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Graph;
 using Microsoft.Graph.Models;
 using System.Collections.Concurrent;
 
@@ -13,7 +13,7 @@ namespace FacilityScheduler.Services;
 /// sheet bookings nor between club events themselves) - build-simplicity is the explicit design
 /// choice here, not an oversight.
 /// </summary>
-public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
+public class ClubEventService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
 {
     private const string PropertyGuid = FacilityGraphConventions.PropertyGuid;
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name ClubEventBookedBy";
@@ -42,7 +42,7 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
     public async Task<ClubEvent> CreateAsync(ClubEvent clubEvent, string actingUser, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
-        var created = await graphClient.Users[facility.ClubEventsMailbox].Events.PostAsync(graphEvent, cancellationToken: ct);
+        var created = await graph.CreateEventAsync(facility.ClubEventsMailbox, graphEvent, ct);
         clubEvent.EventId = created?.Id;
         clubEvent.ICalUId = created?.ICalUId;
         InvalidateViewCache();
@@ -54,7 +54,7 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
     public async Task UpdateAsync(ClubEvent clubEvent, string actingUser, CancellationToken ct = default)
     {
         var graphEvent = ToGraphEvent(clubEvent);
-        await graphClient.Users[facility.ClubEventsMailbox].Events[clubEvent.EventId!].PatchAsync(graphEvent, cancellationToken: ct);
+        await graph.PatchEventAsync(facility.ClubEventsMailbox, clubEvent.EventId!, graphEvent, ct);
         InvalidateViewCache();
         await log.LogActionAsync("ClubEventUpdated", actingUser, clubEvent.EventId, sheet: null,
             details: $"{clubEvent.Category} \"{clubEvent.Title}\", {clubEvent.Start:d}-{clubEvent.End:d}", ct: ct);
@@ -62,7 +62,7 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
 
     public async Task CancelAsync(string eventId, string actingUser, CancellationToken ct = default)
     {
-        await graphClient.Users[facility.ClubEventsMailbox].Events[eventId].DeleteAsync(cancellationToken: ct);
+        await graph.DeleteEventAsync(facility.ClubEventsMailbox, eventId, ct);
         InvalidateViewCache();
         await log.LogActionAsync("ClubEventCancelled", actingUser, eventId, ct: ct);
     }
@@ -80,32 +80,12 @@ public class ClubEventService(GraphServiceClient graphClient, IMemoryCache cache
             return cached;
         }
 
-        var allEvents = new List<Event>();
-        var response = await graphClient.Users[facility.ClubEventsMailbox].CalendarView.GetAsync(config =>
-        {
-            config.QueryParameters.StartDateTime = facility.ToUtcQueryString(start);
-            config.QueryParameters.EndDateTime = facility.ToUtcQueryString(end);
-            config.QueryParameters.Expand = ExtendedPropertiesExpand;
-            // Exchange auto-converts/wraps a plain-text event body internally regardless of the
-            // ContentType we send on write ("converted from text" HTML wrapper) - this Prefer
-            // directive asks Graph to normalize the response body back to plain text on the way out.
-            // No outlook.timezone preference here (deliberately) - see FacilityConfiguration.FromUtcResponseString.
-            config.Headers.Add("Prefer", "outlook.body-content-type=\"text\"");
-        }, ct);
-
-        // Same pagination gotcha as SheetBookingService.GetEventsInRangeAsync - a wide window can
-        // exceed one calendarView page, silently truncating results if only .Value is read.
-        while (response is not null)
-        {
-            if (response.Value is not null)
-            {
-                allEvents.AddRange(response.Value);
-            }
-
-            response = response.OdataNextLink is not null
-                ? await graphClient.Users[facility.ClubEventsMailbox].CalendarView.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct)
-                : null;
-        }
+        // Exchange auto-converts/wraps a plain-text event body internally regardless of the
+        // ContentType we send on write ("converted from text" HTML wrapper) - this Prefer
+        // directive asks Graph to normalize the response body back to plain text on the way out.
+        // No outlook.timezone preference here (deliberately) - see FacilityConfiguration.FromUtcResponseString.
+        var allEvents = await graph.GetCalendarViewAsync(facility.ClubEventsMailbox, facility.ToUtcQueryString(start), facility.ToUtcQueryString(end),
+            ExtendedPropertiesExpand, extraHeaders: new Dictionary<string, string> { ["Prefer"] = "outlook.body-content-type=\"text\"" }, ct: ct);
 
         var result = allEvents.Select(FromGraphEvent).ToList();
         cache.Set(cacheKey, result, ViewCacheTtl);

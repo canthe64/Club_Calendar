@@ -1,0 +1,31 @@
+name: Tests
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+
+jobs:
+  test:
+    # windows-latest, not ubuntu - this app's TimeZoneInfo IDs are the Windows convention
+    # ("Pacific Standard Time", not the IANA "America/Los_Angeles"), matching the deployment
+    # target (Azure App Service on Windows) and appsettings.Development.json's own TimeZone value.
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Restore
+        run: dotnet restore
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+
+      - name: Test
+        run: dotnet test FacilityScheduler.Tests/FacilityScheduler.Tests.csproj --no-build --configuration Release --logger "console;verbosity=normal"

@@ -1,0 +1,187 @@
+using FacilityScheduler.Domain;
+using FacilityScheduler.Services;
+using FacilityScheduler.Tests.TestSupport;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Graph.Models;
+
+namespace FacilityScheduler.Tests.Services;
+
+public class SheetBookingServiceTests
+{
+    private static (SheetBookingService Service, FakeGraphEventGateway Gateway, FacilityConfiguration Facility) Build()
+    {
+        var facility = TestFacility.Create();
+        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
+        var service = new SheetBookingService(gateway, new MemoryCache(new MemoryCacheOptions()), facility, TestAppLog.Create());
+        return (service, gateway, facility);
+    }
+
+    [Fact]
+    public async Task CreateAsync_OverlappingTimeOnSameSheet_ReturnsConflictAndWritesNothing()
+    {
+        var (service, gateway, facility) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(18);
+
+        var first = await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed
+        }, "tester");
+        Assert.True(first.IsSuccess);
+
+        var second = await service.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start.AddMinutes(30), End = start.AddMinutes(90), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester");
+
+        Assert.False(second.IsSuccess);
+        Assert.Single(second.Conflicts);
+        Assert.Single(gateway.Events(sheet)); // nothing written for the rejected booking
+    }
+
+    [Fact]
+    public async Task CreateAsync_NonOverlappingTime_Succeeds()
+    {
+        var (service, _, facility) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(9);
+
+        var first = await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed
+        }, "tester");
+        var second = await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start.AddHours(2), End = start.AddHours(3), Category = BookingCategory.League, State = BookingState.Confirmed
+        }, "tester");
+
+        Assert.True(first.IsSuccess);
+        Assert.True(second.IsSuccess);
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_ConflictOnOneSheet_CreatesNothingOnAnySheet()
+    {
+        var (service, gateway, facility) = Build();
+        var sheets = TestFacility.SheetMailboxes;
+        var start = facility.Today.AddDays(1).AddHours(18);
+
+        // Pre-existing booking on sheet[1] only.
+        await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheets[1], Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed
+        }, "tester");
+
+        var result = await service.CreateAcrossSheetsAsync([sheets[0], sheets[1]], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = start.AddHours(1), Category = BookingCategory.Bonspiel, State = BookingState.Confirmed
+        }, "tester");
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(gateway.Events(sheets[0])); // all-or-nothing: sheet[0] was free but nothing was written there either
+        Assert.Single(gateway.Events(sheets[1])); // only the pre-existing booking, no new one
+    }
+
+    [Fact]
+    public async Task UpdateGroupAsync_DoesNotConflictWithItsOwnUnmovedEvent()
+    {
+        var (service, _, facility) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(18);
+
+        var created = await service.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start, End = start.AddHours(1), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester");
+        Assert.True(created.IsSuccess);
+        var booking = created.Booking!;
+
+        var result = await service.UpdateGroupAsync([booking], new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start, End = start.AddHours(1), Category = BookingCategory.GroupEvent, State = BookingState.Hold, Notes = "updated"
+        }, "tester");
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task ClaimHoldAsync_DropsRemainderShorterThanMinimumInterval_KeepsRemainderAtOrAboveIt()
+    {
+        var (service, gateway, facility) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var holdStart = facility.Today.AddDays(1).AddHours(9);
+        var holdEnd = holdStart.AddHours(3); // 9:00-12:00
+        gateway.Seed(sheet, new Event
+        {
+            Subject = "Available for Group Events", ShowAs = FreeBusyStatus.Tentative,
+            Categories = [BookingCategory.GroupEvent.ToString()], Start = TestFacility.Dtz(holdStart), End = TestFacility.Dtz(holdEnd)
+        });
+
+        // Claim 9:30-11:00: leaves a 30-min remainder before (below the 60-min default minimum,
+        // dropped) and a 60-min remainder after (at the minimum, kept).
+        var claimStart = holdStart.AddMinutes(30);
+        var claimEnd = holdStart.AddHours(2);
+        var claimed = await service.ClaimHoldAsync(claimStart, claimEnd, new SheetBooking
+        {
+            SheetMailbox = "", Start = claimStart, End = claimEnd, Category = BookingCategory.GroupEvent, State = BookingState.Confirmed
+        }, Guid.NewGuid());
+
+        Assert.NotNull(claimed);
+        var events = gateway.Events(sheet);
+        Assert.Equal(2, events.Count); // the confirmed claim + the surviving 60-min remainder; the 30-min sliver is gone entirely
+        Assert.Single(events, e => e.ShowAs == FreeBusyStatus.Busy);
+        var remainder = Assert.Single(events, e => e.ShowAs == FreeBusyStatus.Tentative);
+        Assert.Equal(claimEnd, facility.FromUtcResponseString(remainder.Start!.DateTime!));
+        Assert.Equal(holdEnd, facility.FromUtcResponseString(remainder.End!.DateTime!));
+    }
+
+    [Fact]
+    public async Task CancelGroupAsync_Reopen_ClearsBookedByAndExternalBookingId()
+    {
+        // Regression test for H1: a reopened hold must not keep the departed booking's BookedBy/
+        // ExternalBookingId - Graph's PATCH only upserts extended properties it includes, so the fix
+        // must explicitly send an empty value rather than omitting them.
+        var (service, gateway, facility) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(19);
+        var end = start.AddHours(2);
+        gateway.Seed(sheet, new Event
+        {
+            Subject = "Available for Group Events", ShowAs = FreeBusyStatus.Tentative,
+            Categories = [BookingCategory.GroupEvent.ToString()], Start = TestFacility.Dtz(start), End = TestFacility.Dtz(end)
+        });
+
+        var claimed = await service.ClaimHoldAsync(start, end, new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = end, Category = BookingCategory.GroupEvent, State = BookingState.Confirmed,
+            BookedBy = "Breely webhook", ExternalBookingId = "breely:123", RenterName = "Jane Curler"
+        }, Guid.NewGuid());
+        Assert.NotNull(claimed);
+
+        await service.CancelGroupAsync([claimed!], reopenAsGroupEventHold: true, "tester");
+
+        var reopened = Assert.Single(await service.GetBookingsAsync(sheet, start.AddHours(-1), end.AddHours(1)), b => b.State == BookingState.Hold);
+        Assert.True(string.IsNullOrEmpty(reopened.BookedBy));
+        Assert.True(string.IsNullOrEmpty(reopened.ExternalBookingId));
+    }
+
+    [Fact]
+    public async Task CancelAsync_AlreadyGone_IsTreatedAsNoOpNotAnError()
+    {
+        var (service, gateway, facility) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(9);
+        var created = await service.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start, End = start.AddHours(1), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester");
+        var eventId = created.Booking!.EventId!;
+
+        // Simulate the booking having already been removed by something else (e.g. a concurrent
+        // Breely claim) between the staff page loading and clicking Cancel.
+        await gateway.DeleteEventAsync(sheet, eventId);
+
+        await service.CancelAsync(sheet, eventId, "tester"); // must not throw
+        Assert.Empty(gateway.Events(sheet));
+    }
+}

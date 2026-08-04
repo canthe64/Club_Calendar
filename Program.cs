@@ -27,6 +27,7 @@ builder.Services.AddSingleton(sp =>
     var credential = new ClientSecretCredential(options.TenantId, options.ClientId, options.ClientSecret);
     return new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
 });
+builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphEventGateway, FacilityScheduler.Services.Graph.GraphEventGateway>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
 builder.Services.AddSingleton<FacilityScheduler.Services.AppLogService>();
