@@ -5,6 +5,7 @@
 @inject SheetBookingService BookingService
 @inject ClubEventService ClubEventService
 @inject AuthenticationStateProvider AuthProvider
+@inject FacilityConfiguration Facility
 
 <PageTitle>Calendar</PageTitle>
 
@@ -96,7 +97,10 @@
     private enum ViewMode { Month, Week, Day }
 
     private ViewMode View = ViewMode.Month;
-    private DateTime _anchorDate = DateTime.UtcNow.Date;
+
+    // Placeholder only, overwritten in OnInitializedAsync - a field initializer runs before Blazor
+    // sets @inject properties, so Facility.Today isn't available here yet.
+    private DateTime _anchorDate = DateTime.MinValue;
     private List<SheetBooking> _allBookings = [];
     private List<ClubEvent> _activeClubEvents = [];
     private bool _newMenuOpen;
@@ -141,7 +145,11 @@
         _ => _anchorDate.ToString("dddd, MMMM d, yyyy")
     };
 
-    protected override async Task OnInitializedAsync() => await LoadAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _anchorDate = Facility.Today;
+        await LoadAsync();
+    }
 
     private async Task LoadAsync()
     {
@@ -203,7 +211,7 @@
 
     private async Task GoToday()
     {
-        _anchorDate = DateTime.UtcNow.Date;
+        _anchorDate = Facility.Today;
         await LoadAsync();
     }
 
@@ -261,7 +269,7 @@
     private void OpenCreateForm()
     {
         _draft = new BookingDraft();
-        _draft.Reset(initialStart: _anchorDate.AddHours(18));
+        _draft.Reset(Facility.Today, initialStart: _anchorDate.AddHours(18));
         _formConflicts = [];
         _formOpen = true;
     }
@@ -269,7 +277,7 @@
     private void OpenSlotForm((string Sheet, DateTime Start) slot)
     {
         _draft = new BookingDraft();
-        _draft.Reset(initialSheets: [slot.Sheet], initialStart: slot.Start);
+        _draft.Reset(Facility.Today, initialSheets: [slot.Sheet], initialStart: slot.Start);
         _formConflicts = [];
         _formOpen = true;
     }
@@ -420,7 +428,7 @@
     private void OpenSeriesWizard()
     {
         _seriesDraft = new SeriesDraft();
-        _seriesDraft.Reset();
+        _seriesDraft.Reset(Facility.Today);
         _seriesConflicts = [];
         _seriesStep = 1;
         _seriesWizardOpen = true;

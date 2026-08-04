@@ -15,10 +15,35 @@
     </AuthorizeView>
 </header>
 
-@Body
+@* Catches an unhandled exception thrown from a page's own event handler (e.g. a Graph 404, a bad
+   input like a negative number reaching a service call) so it shows a recoverable in-page message
+   instead of crashing the whole SignalR circuit - previously every such error surfaced as the
+   generic "unhandled error" banner below, which requires reloading the entire app and had already
+   been hit twice this project (a 404 from a stale view, an inverted booking time range). This
+   doesn't replace input validation; it's the backstop for whatever validation misses. *@
+<ErrorBoundary @ref="_errorBoundary">
+    <ChildContent>
+        @Body
+    </ChildContent>
+    <ErrorContent Context="ex">
+        <div style="margin:16px 24px;padding:14px 18px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:8px;color:#a02c21;font-size:13px">
+            <strong>Something went wrong loading this page.</strong>
+            <span style="color:#5a7183">This is usually transient - try again.</span>
+            <button class="btn btn-secondary" style="margin-left:10px" @onclick="Recover">Try again</button>
+        </div>
+    </ErrorContent>
+</ErrorBoundary>
 
 <div id="blazor-error-ui" data-nosnippet>
     An unhandled error has occurred.
     <a href="." class="reload">Reload</a>
     <span class="dismiss">🗙</span>
 </div>
+
+@code {
+    private ErrorBoundary? _errorBoundary;
+
+    // Resets the boundary so the page's own OnInitializedAsync (etc.) runs again in place, rather
+    // than forcing a full browser reload the way the circuit-level error banner above does.
+    private void Recover() => _errorBoundary?.Recover();
+}

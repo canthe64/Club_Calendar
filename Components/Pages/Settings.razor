@@ -3,6 +3,7 @@
 @using FacilityScheduler.Services
 @inject AppLogService LogService
 @inject SheetBookingService BookingService
+@inject AuthenticationStateProvider AuthProvider
 
 <PageTitle>Settings</PageTitle>
 
@@ -12,10 +13,10 @@
     <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
         <h2 style="font-size:16px;margin-bottom:8px">Logging Level</h2>
         <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">
-            <strong>Standard</strong> logs definitive actions only - bookings, series, and club events
-            created, edited, or canceled, with who did it. <strong>Debug</strong> adds staff sign-in
-            events and full detail on every Breely webhook call - useful while actively
-            troubleshooting, but noisier; switch back to Standard once you're done.
+            <strong>Standard</strong> (the default) logs definitive actions only - bookings, series,
+            and club events created, edited, or canceled, with who did it. <strong>Debug</strong> adds
+            staff sign-in events and full detail on every Breely webhook call, including the raw data
+            Breely sends - useful while actively troubleshooting, but noisier.
         </p>
         <label style="margin-right:16px;cursor:pointer">
             <input type="radio" name="level" checked="@(_level == AppLogLevel.Standard)" @onchange="() => _level = AppLogLevel.Standard" /> Standard
@@ -28,6 +29,14 @@
         {
             <span style="margin-left:10px;color:#2d7a3f;font-size:13px">@_savedMessage</span>
         }
+        @if (_level == AppLogLevel.Debug)
+        {
+            <div style="margin-top:10px;padding:8px 12px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:6px;color:#a02c21;font-size:12px;max-width:640px">
+                <strong>Debug mode may log customer names, emails, and phone numbers</strong> from
+                Breely bookings. Turn it back to <strong>Standard</strong> once you're done
+                troubleshooting - don't leave it on.
+            </div>
+        }
     </section>
 
     <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
@@ -37,7 +46,12 @@
             over before and/or after it is offered as its own bookable slot - unless it's shorter
             than this many minutes, in which case that leftover time is dropped instead of offered.
         </p>
-        <input type="number" min="0" step="5" style="width:80px" @bind="_minimumIntervalMinutes" /> minutes
+        <select @bind="_minimumIntervalMinutes">
+            @foreach (var minutes in MinimumIntervalChoices)
+            {
+                <option value="@minutes">@minutes minutes</option>
+            }
+        </select>
         <button class="btn btn-primary" style="margin-left:16px" @onclick="SaveMinimumInterval" disabled="@_savingInterval">Save</button>
         @if (_intervalSavedMessage is not null)
         {
@@ -62,6 +76,7 @@
     private bool _saving;
     private string? _savedMessage;
 
+    private static readonly int[] MinimumIntervalChoices = [30, 60, 90, 120];
     private int _minimumIntervalMinutes;
     private bool _savingInterval;
     private string? _intervalSavedMessage;
@@ -69,7 +84,14 @@
     protected override async Task OnInitializedAsync()
     {
         _level = LogService.CurrentLevel;
-        _minimumIntervalMinutes = BookingService.MinimumGroupEventBookingIntervalMinutes;
+
+        // Snap to the nearest of the four fixed choices - a value persisted before this was a
+        // dropdown (or edited directly on disk) might not be exactly one of them.
+        var current = BookingService.MinimumGroupEventBookingIntervalMinutes;
+        _minimumIntervalMinutes = MinimumIntervalChoices.Contains(current)
+            ? current
+            : MinimumIntervalChoices.OrderBy(m => Math.Abs(m - current)).First();
+
         await RefreshTail();
     }
 
@@ -79,7 +101,8 @@
         _intervalSavedMessage = null;
         try
         {
-            await BookingService.SetMinimumGroupEventBookingIntervalAsync(_minimumIntervalMinutes);
+            var actor = await GetCurrentUserNameAsync();
+            await BookingService.SetMinimumGroupEventBookingIntervalAsync(_minimumIntervalMinutes, actor);
             _intervalSavedMessage = "Saved.";
         }
         finally
@@ -100,7 +123,8 @@
         _savedMessage = null;
         try
         {
-            await LogService.SetLevelAsync(_level);
+            var actor = await GetCurrentUserNameAsync();
+            await LogService.SetLevelAsync(_level, actor);
             _savedMessage = "Saved.";
             await RefreshTail();
         }
@@ -108,5 +132,11 @@
         {
             _saving = false;
         }
+    }
+
+    private async Task<string> GetCurrentUserNameAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        return authState.User.Identity?.Name ?? "Unknown";
     }
 }

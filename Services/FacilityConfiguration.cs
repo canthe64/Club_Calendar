@@ -53,6 +53,15 @@ public class FacilityConfiguration
     public string ToUtcQueryString(DateTime facilityLocalTime) =>
         TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(facilityLocalTime, DateTimeKind.Unspecified), ZoneInfo).ToString("o");
 
+    // "Today"/"now" in facility-local wall-clock time - DateTime.UtcNow.Date is NOT the same thing
+    // and using it directly was a live-found bug (2026-08-04): from ~5pm PDT/4pm PST onward, UTC has
+    // already rolled to tomorrow, so anything anchored on DateTime.UtcNow.Date (calendar "Today"
+    // buttons, new-booking defaults, the public availability window's start) silently shifted a day
+    // ahead during the facility's own evening hours - exactly when curling ice is busiest. Every
+    // "today"/"now" in the app should route through these instead of calling DateTime.UtcNow directly.
+    public DateTime Today => Now.Date;
+    public DateTime Now => TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, ZoneInfo);
+
     // The read-side counterpart. Originally relied on a Prefer: outlook.timezone header to have
     // Graph return Start/End already converted to facility-local wall-clock digits - live-confirmed
     // 2026-07-16 to be unreliable specifically for occurrences of a recurring series expanded out of

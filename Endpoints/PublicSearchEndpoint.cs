@@ -22,7 +22,7 @@ public static class PublicSearchEndpoint
         app.MapGet("/public/search", async (string? start, string? end, int? sheets, PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
         {
             var maxSheets = Math.Max(1, facility.SheetMailboxes.Length);
-            var (rangeStart, rangeEnd) = ParseRange(start, end);
+            var (rangeStart, rangeEnd) = ParseRange(start, end, facility.Today);
             var minSheets = Math.Clamp(sheets ?? 1, 1, maxSheets);
 
             // rangeEnd is the last INCLUDED day for display/form purposes; the actual data fetch
@@ -40,9 +40,8 @@ public static class PublicSearchEndpoint
     // cache-key/Graph-fanout surface. The 60-day cap on the span itself is the search's own
     // requirement (a search this wide across every sheet is meaningfully more expensive per request
     // than a single month/week/day view).
-    private static (DateTime Start, DateTime End) ParseRange(string? start, string? end)
+    private static (DateTime Start, DateTime End) ParseRange(string? start, string? end, DateTime today)
     {
-        var today = DateTime.UtcNow.Date;
         var minAllowed = today.AddYears(-1);
         var maxAllowed = today.AddYears(2);
 

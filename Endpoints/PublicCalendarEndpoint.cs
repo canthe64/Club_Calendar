@@ -27,14 +27,15 @@ public static class PublicCalendarEndpoint
 
     public static void MapPublicCalendarEndpoint(this WebApplication app)
     {
-        app.MapGet("/public/calendar", async (string? view, string? month, string? date, PublicAvailabilityService service, CancellationToken ct) =>
+        app.MapGet("/public/calendar", async (string? view, string? month, string? date, PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
         {
+            var today = facility.Today;
             var mode = ParseView(view);
             var html = mode switch
             {
-                ViewMode.Week => await RenderWeekPageAsync(ParseDate(date) ?? DateTime.UtcNow.Date, service, ct),
-                ViewMode.Day => await RenderDayPageAsync(ParseDate(date) ?? DateTime.UtcNow.Date, service, ct),
-                _ => await RenderMonthPageAsync(ParseMonth(month) ?? DateTime.UtcNow.Date, service, ct),
+                ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, service, ct),
+                ViewMode.Day => await RenderDayPageAsync(ParseDate(date, today) ?? today, today, service, ct),
+                _ => await RenderMonthPageAsync(ParseMonth(month, today) ?? today, today, service, ct),
             };
             return Results.Content(html, "text/html; charset=utf-8");
         })
@@ -55,28 +56,30 @@ public static class PublicCalendarEndpoint
     // a new never-evicted cache entry. Unclamped, an anonymous client iterating months could burn
     // Graph quota and grow the cache without bound. A year back and two years forward covers every
     // legitimate use (members browsing the season) while capping the anonymous surface at ~37 keys.
-    private static DateTime? ParseMonth(string? month)
+    // "today" is facility-local (FacilityConfiguration.Today), not DateTime.UtcNow - passed in by the
+    // caller rather than read here, so this stays a pure function of its arguments.
+    private static DateTime? ParseMonth(string? month, DateTime today)
     {
         if (string.IsNullOrWhiteSpace(month) || !DateTime.TryParse(month + "-01", out var parsed))
         {
             return null;
         }
 
-        var min = new DateTime(DateTime.UtcNow.Year - 1, DateTime.UtcNow.Month, 1);
-        var max = new DateTime(DateTime.UtcNow.Year + 2, DateTime.UtcNow.Month, 1);
+        var min = new DateTime(today.Year - 1, today.Month, 1);
+        var max = new DateTime(today.Year + 2, today.Month, 1);
         return parsed < min ? min : parsed > max ? max : parsed;
     }
 
     // Same clamping rationale as ParseMonth, applied to Week/Day's ?date= parameter.
-    private static DateTime? ParseDate(string? date)
+    private static DateTime? ParseDate(string? date, DateTime today)
     {
         if (string.IsNullOrWhiteSpace(date) || !DateTime.TryParse(date, out var parsed))
         {
             return null;
         }
 
-        var min = DateTime.UtcNow.Date.AddYears(-1);
-        var max = DateTime.UtcNow.Date.AddYears(2);
+        var min = today.AddYears(-1);
+        var max = today.AddYears(2);
         return parsed.Date < min ? min : parsed.Date > max ? max : parsed.Date;
     }
 
@@ -189,14 +192,14 @@ public static class PublicCalendarEndpoint
 
     // ── Month view ──────────────────────────────────────────────────────────────────────────────
 
-    private static async Task<string> RenderMonthPageAsync(DateTime anchorMonth, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderMonthPageAsync(DateTime anchorMonth, DateTime today, PublicAvailabilityService service, CancellationToken ct)
     {
         var view = await service.GetMonthViewAsync(anchorMonth, ct);
         var sb = new StringBuilder();
         AppendPageOpen(sb);
 
         sb.Append(NavBar(anchorMonth.ToString("MMMM yyyy"),
-            MonthHref(anchorMonth.AddMonths(-1)), MonthHref(DateTime.UtcNow.Date), MonthHref(anchorMonth.AddMonths(1)),
+            MonthHref(anchorMonth.AddMonths(-1)), MonthHref(today), MonthHref(anchorMonth.AddMonths(1)),
             ViewMode.Month, anchorMonth));
 
         sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:10px">""");
@@ -275,7 +278,7 @@ public static class PublicCalendarEndpoint
     private const double AllDayChipHeightPx = 18;
     private const double AllDayChipGapPx = 2;
 
-    private static async Task<string> RenderWeekPageAsync(DateTime anchorDate, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderWeekPageAsync(DateTime anchorDate, DateTime today, PublicAvailabilityService service, CancellationToken ct)
     {
         var weekStart = anchorDate.AddDays(-(int)anchorDate.DayOfWeek);
         var view = await service.GetWeekViewAsync(weekStart, ct);
@@ -289,7 +292,7 @@ public static class PublicCalendarEndpoint
             ? $"{weekStart:MMM d} - {weekEnd:MMM d, yyyy}"
             : $"{weekStart:MMM d, yyyy} - {weekEnd:MMM d, yyyy}";
         sb.Append(NavBar(title,
-            WeekHref(weekStart.AddDays(-7)), WeekHref(DateTime.UtcNow.Date), WeekHref(weekStart.AddDays(7)),
+            WeekHref(weekStart.AddDays(-7)), WeekHref(today), WeekHref(weekStart.AddDays(7)),
             ViewMode.Week, weekStart));
 
         AppendHourlyGrid(sb, days, view, showDayHeaders: true);
@@ -298,7 +301,7 @@ public static class PublicCalendarEndpoint
         return sb.ToString();
     }
 
-    private static async Task<string> RenderDayPageAsync(DateTime day, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderDayPageAsync(DateTime day, DateTime today, PublicAvailabilityService service, CancellationToken ct)
     {
         var view = await service.GetDayViewAsync(day, ct);
 
@@ -306,7 +309,7 @@ public static class PublicCalendarEndpoint
         AppendPageOpen(sb);
 
         sb.Append(NavBar(day.ToString("dddd, MMMM d, yyyy"),
-            DayHref(day.AddDays(-1)), DayHref(DateTime.UtcNow.Date), DayHref(day.AddDays(1)),
+            DayHref(day.AddDays(-1)), DayHref(today), DayHref(day.AddDays(1)),
             ViewMode.Day, day));
 
         AppendHourlyGrid(sb, [day], view, showDayHeaders: false);

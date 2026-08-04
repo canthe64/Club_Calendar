@@ -132,7 +132,10 @@ else
 
 @code {
     private string SelectedSheet { get; set; } = string.Empty;
-    private DateTime SelectedDate { get; set; } = DateTime.UtcNow.Date;
+
+    // Placeholder only, overwritten in OnInitializedAsync - a field initializer runs before Blazor
+    // sets @inject properties, so Facility.Today isn't available here yet.
+    private DateTime SelectedDate { get; set; } = DateTime.MinValue;
     private List<SheetBooking>? _bookings;
     private bool _showCreateForm;
     private bool _createAsConfirmed;
@@ -142,6 +145,9 @@ else
     protected override async Task OnInitializedAsync()
     {
         SelectedSheet = Facility.SheetMailboxes[0];
+        SelectedDate = Facility.Today;
+        _newBooking.Start = Facility.Today.AddHours(18);
+        _newBooking.End = Facility.Today.AddHours(20);
         await LoadBookingsAsync();
     }
 
@@ -234,8 +240,10 @@ else
 
     private sealed class NewBookingModel
     {
-        public DateTime Start { get; set; } = DateTime.UtcNow.Date.AddHours(18);
-        public DateTime End { get; set; } = DateTime.UtcNow.Date.AddHours(20);
+        // Placeholders only - reset to facility-local defaults in OnInitializedAsync (this class has
+        // no DI access to the facility's time zone, same reasoning as BookingDraft.Date).
+        public DateTime Start { get; set; } = DateTime.MinValue;
+        public DateTime End { get; set; } = DateTime.MinValue;
         public BookingCategory Category { get; set; } = BookingCategory.GroupEvent;
         public string? RenterName { get; set; }
         public string? RenterPhone { get; set; }

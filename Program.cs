@@ -45,6 +45,11 @@ builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>
 // doc §6.4) - rate-limited and CORS-scoped to just that one route, not applied globally.
 builder.Services.AddRateLimiter(options =>
 {
+    // Default is 503 Service Unavailable - every doc/comment in this app describing rate-limit
+    // behavior says 429 Too Many Requests, which is the semantically correct code for this and what
+    // a well-behaved client (or Breely, on the webhook limiter) would actually check for.
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+
     options.AddFixedWindowLimiter("public-api", limiterOptions =>
     {
         limiterOptions.PermitLimit = 60;
@@ -128,6 +133,22 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
 app.UseHttpsRedirection();
+
+// Clickjacking/MIME-sniffing hardening - previously sent on no response at all. X-Frame-Options and
+// a frame-ancestors CSP are withheld only from /public/calendar, the one page deliberately built to
+// be iframed on the club's own site (architecture doc §5.4.2); the staff app (Calendar, Settings,
+// Diagnostics) and every other public surface (/public/search, the JSON API) has no reason to ever
+// run inside another site's frame. X-Content-Type-Options applies to every response regardless.
+app.Use(async (context, next) =>
+{
+    if (!context.Request.Path.StartsWithSegments("/public/calendar"))
+    {
+        context.Response.Headers.Append("X-Frame-Options", "DENY");
+        context.Response.Headers.Append("Content-Security-Policy", "frame-ancestors 'none'");
+    }
+    context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
+    await next();
+});
 
 app.UseCors();
 app.UseRateLimiter();

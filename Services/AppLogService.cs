@@ -63,7 +63,7 @@ public class AppLogService
     public AppLogLevel CurrentLevel => _level;
     public string LogDirectory => _logDirectory;
 
-    public async Task SetLevelAsync(AppLogLevel level, CancellationToken ct = default)
+    public async Task SetLevelAsync(AppLogLevel level, string actor, CancellationToken ct = default)
     {
         var previous = _level;
         _level = level;
@@ -84,7 +84,7 @@ public class AppLogService
 
         if (previous != level)
         {
-            await LogActionAsync("LoggingLevelChanged", actor: "staff", details: $"{previous} -> {level}", ct: ct);
+            await LogActionAsync("LoggingLevelChanged", actor, details: $"{previous} -> {level}", ct: ct);
         }
     }
 

@@ -14,8 +14,11 @@ public class ClubEventDraft
     public ClubEventCategory? Category { get; set; }
 
     public bool IsAllDay { get; set; } = true;
-    public DateTime StartDate { get; set; } = DateTime.UtcNow.Date.AddDays(1);
-    public DateTime EndDate { get; set; } = DateTime.UtcNow.Date.AddDays(1);
+
+    // Placeholders only - always overwritten by Reset()/LoadForEdit() before display; see
+    // BookingDraft.Date for why this doesn't default from DateTime.UtcNow.
+    public DateTime StartDate { get; set; } = DateTime.MinValue;
+    public DateTime EndDate { get; set; } = DateTime.MinValue;
 
     /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
     /// 1440 represents midnight at the end of the day, not the start of it. Only meaningful when
@@ -32,13 +35,14 @@ public class ClubEventDraft
     /// <summary>Non-null when editing an existing club event.</summary>
     public ClubEvent? EditingEvent { get; set; }
 
-    public void Reset()
+    /// <param name="today">The facility-local "today" (<see cref="FacilityConfiguration.Today"/>).</param>
+    public void Reset(DateTime today)
     {
         Title = null;
         Category = null;
         IsAllDay = true;
-        StartDate = DateTime.UtcNow.Date.AddDays(1);
-        EndDate = DateTime.UtcNow.Date.AddDays(1);
+        StartDate = today.AddDays(1);
+        EndDate = today.AddDays(1);
         StartMinutes = 9 * 60;
         EndMinutes = 17 * 60;
         MarksSheetsUnavailable = false;

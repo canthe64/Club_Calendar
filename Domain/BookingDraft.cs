@@ -18,7 +18,13 @@ public class BookingDraft
     /// one or the other on a new booking. Only meaningful while <see cref="Category"/> is GroupEvent;
     /// forced to true otherwise.</summary>
     public bool? CreateAsConfirmed { get; set; }
-    public DateTime Date { get; set; } = DateTime.UtcNow.Date;
+
+    // Placeholder only - always overwritten by Reset()/LoadForEdit() before this draft is ever
+    // shown (every construction site calls one or the other immediately). Deliberately not defaulted
+    // from DateTime.UtcNow here - this class has no DI access to the facility's time zone, and a
+    // domain object silently reaching for server-UTC "today" is exactly the bug class fixed elsewhere
+    // (FacilityConfiguration.Today).
+    public DateTime Date { get; set; } = DateTime.MinValue;
 
     /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
     /// 1440 represents midnight at the end of <see cref="Date"/>, not the start of it.</summary>
@@ -57,12 +63,15 @@ public class BookingDraft
         }
     }
 
-    public void Reset(IEnumerable<string>? initialSheets = null, DateTime? initialStart = null)
+    /// <param name="today">The facility-local "today" (<see cref="FacilityConfiguration.Today"/>) -
+    /// required, not defaulted internally, so this always reflects the facility's own time zone
+    /// rather than the server's UTC clock.</param>
+    public void Reset(DateTime today, IEnumerable<string>? initialSheets = null, DateTime? initialStart = null)
     {
         SelectedSheets = initialSheets is null ? [] : [.. initialSheets];
         Category = null;
         CreateAsConfirmed = null;
-        var effectiveStart = initialStart ?? DateTime.UtcNow.Date.AddDays(1);
+        var effectiveStart = initialStart ?? today.AddDays(1);
         Date = effectiveStart.Date;
         StartMinutes = initialStart.HasValue ? initialStart.Value.Hour * 60 + initialStart.Value.Minute : 18 * 60;
         EndMinutes = StartMinutes + 120;

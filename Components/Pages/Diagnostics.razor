@@ -330,7 +330,7 @@ else
 
     private async Task RunGetScheduleWindowSpike()
     {
-        var start = DateTime.UtcNow.Date;
+        var start = Facility.Today;
         var end = start.AddDays(90);
 
         try

@@ -164,14 +164,18 @@ switching views preserves your place (e.g. Week → Month lands on the month con
 first day).
 
 Every entry chip's visible text is its start time followed by its title (e.g. "7PM - League
-Practice") - renter name if present, else the category name; the one exception is a confirmed
-booking's renter name, which staff practice keeps private rather than the page stripping it.
-Clicking a chip reveals the full category + hold/confirmed state and exact date/time. No phone
-numbers, emails, notes, or resource mailbox addresses ever appear.
+Practice") - renter name if present, else the category name; for a staff-typed title, staff practice
+keeps a renter's identity private rather than the page stripping it programmatically. **One
+exception (fixed 2026-08-04):** a Breely-originated booking's title is always the category label,
+never the customer's real name - `RenterName` there is populated automatically from Breely's own
+data with no staff opportunity to redact it first, unlike a title staff type themselves. Clicking a
+chip reveals the full category + hold/confirmed state and exact date/time. No phone numbers, emails,
+notes, or resource mailbox addresses ever appear.
 
-Intended for direct browsing or `<iframe>` embedding on the club's own site. Note: this page has no
-`Content-Security-Policy: frame-ancestors` restriction today, so any site can iframe it, not just the
-club's own - a known, deliberately deferred hardening item (see
+Intended for direct browsing or `<iframe>` embedding on the club's own site. Note: this is the **one
+route in the whole app** that doesn't send `X-Frame-Options`/a `frame-ancestors` CSP (added
+2026-08-04 to every other route, architecture doc §6.4) - so any site can iframe this specific page,
+not just the club's own; a known, deliberately deferred hardening item (see
 [public-embed-instructions.md](public-embed-instructions.md)).
 
 ---
@@ -250,13 +254,19 @@ independently - each may create, reschedule, or cancel a booking depending on it
 flag and whether it's already been claimed before. All sheets resolved from one call that don't
 already belong to an existing group share one freshly-minted `BookingGroupId`; a sibling that's
 already been claimed (a reschedule, or a straggler picked up on a later call) reuses its existing
-group id instead. One event failing doesn't stop the others from being processed.
+group id instead. One event failing doesn't stop the others from being processed. A sibling id
+resolved only from `submission.events[]` (as opposed to the top-level `event`) can only ever
+*create* a never-before-seen booking - it can never reschedule or cancel one that's already claimed,
+since that array can be a stale snapshot from the original creation call (fixed 2026-08-04).
 
-**Response:** always `200 OK` once past the secret check, including on malformed JSON, an
-unrecognized shape, or an internal processing exception - a deliberate "dumb webhook" design
-(§4.8): the booking already happened in the real world, so this endpoint never rejects or signals
-failure back to the sender. Failures are surfaced via server logs and, for an unmatched booking,
-a non-blocking `⚠ Web booking needs review` Club Event marker for staff to reassign manually.
+**Response:** always `200 OK` once past the secret check, returned **immediately, before processing
+runs** (changed 2026-08-04 - previously awaited processing first, which risked an HTTP-timeout abort
+mid-write on a large multi-sheet batch; see architecture doc §4.8). A malformed JSON body, an
+unrecognized shape, or an internal processing exception never surfaces as anything other than `200`
+either way - a deliberate "dumb webhook" design (§4.8): the booking already happened in the real
+world, so this endpoint never rejects or signals failure back to the sender. Failures are surfaced
+via server logs and, for an unmatched booking, a non-blocking `⚠ Web booking needs review` Club
+Event marker for staff to reassign manually.
 
 ---
 
@@ -334,16 +344,16 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 | `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
 | `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId, string actingUser)` | Hard-deletes a single event. Tolerates a `404` from Graph as "already gone" (e.g. the Breely webhook already claimed/trimmed it) rather than throwing (architecture doc D37) - logged at Debug tier as a no-op in that case, `BookingCancelled` at Standard tier otherwise. |
 | `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state), and creates fresh events for any sheet in `newSheetMailboxes` that isn't already a member (added 2026-08-03 - a sheet added mid-edit previously had no existing event to update and was silently dropped). Re-checks conflicts against the new time before writing, for both existing and new sheets; all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched; new sheets join whichever group id the rest of the edit settles on. |
-| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it - and, as of 2026-08-03, first absorbs any Group Event hold on the same sheet immediately touching the reopened slot into one contiguous hold (`AbsorbAdjacentHoldsAsync`), rather than leaving separate back-to-back chips. Now locks per sheet (it didn't before), since that absorption reads other holds before writing. Same per-member 404-tolerance as `CancelAsync` (D37) - one member already being gone doesn't abort the rest of the group. |
+| `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it - and, as of 2026-08-03, first absorbs any Group Event hold on the same sheet immediately touching the reopened slot into one contiguous hold (`AbsorbAdjacentHoldsAsync`), rather than leaving separate back-to-back chips. Explicitly clears `BookedBy`/`ExternalBookingId` on the reopened hold rather than leaving the departed booking's values in place (fixed 2026-08-04 - see `ToGraphEvent`'s `clearUnsetOptionalProperties`, architecture doc D48). Now locks per sheet (it didn't before), since that absorption reads other holds before writing. Same per-member 404-tolerance as `CancelAsync` (D37) - one member already being gone doesn't abort the rest of the group. |
 | `PreviewSeriesConflictsAsync` | `Task<Dictionary<DateTime, List<SheetBooking>>> PreviewSeriesConflictsAsync(IEnumerable<string> sheetMailboxes, IReadOnlyCollection<DateTime> candidateDates, TimeSpan startTime, TimeSpan endTime)` | Informational only - reports conflicts per candidate date so staff can choose to skip that date. Never blocks anything itself. |
 | `CreateSeriesAsync` | `Task<List<SheetBooking>> CreateSeriesAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates, string actingUser)` | Creates one native weekly-recurring Graph event per sheet (sharing a `BookingGroupId`), then deletes the specific `excludedDates` occurrences staff chose to skip during review. Does not conflict-check - that's `PreviewSeriesConflictsAsync`'s job, expected to already have run. |
 | `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members, string actingUser)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. Already tolerated a missing series master (`404`) before Phase 10 - the pattern `CancelAsync`/`CancelGroupAsync` above now also follow. |
 | `GetBookingsAsync` | `Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end)` | Reads one sheet's bookings in a window. Always live (never cached) - used by every conflict check. |
 | `GetBookingsForAllSheetsAsync` | `Task<List<SheetBooking>> GetBookingsForAllSheetsAsync(DateTime start, DateTime end)` | Reads every configured sheet's bookings in a window, in parallel. View-rendering read path only (Calendar page, public availability) - cached for 30 seconds, invalidated on every write. |
-| `FindByExternalIdAsync` | `Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct)` | Added for the Breely webhook (architecture doc §4.8). Validates the id against a strict allow-list charset, then queries every configured sheet via a Graph `$filter` on the `ExternalBookingId` extended property. Returns the first match or `null` - not staff-facing, called only by `BreelyBookingProcessor`. |
+| `FindByExternalIdAsync` | `Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct)` | Added for the Breely webhook (architecture doc §4.8). Validates the id against a strict allow-list charset, then queries every configured sheet via a Graph `$filter` on the `ExternalBookingId` extended property. Returns `null` if nothing matches; if more than one result comes back on a sheet, prefers a Confirmed match over a Hold (added 2026-08-04, defense in depth alongside D48's fix) - not staff-facing, called only by `BreelyBookingProcessor`. |
 | `ClaimHoldAsync` | `Task<SheetBooking?> ClaimHoldAsync(DateTime start, DateTime end, SheetBooking template, Guid groupId, CancellationToken ct)` | Added for the Breely webhook. Tries sheets in configured order; on each, looks for a Group Event hold fully covering the window, converts it to Confirmed (tagged with the caller-supplied `groupId` rather than minting its own - added 2026-08-03 so multiple sheets from one Breely submission, or a sheet reclaimed on reschedule, can share/keep one `BookingGroupId`), and trims the remainder (delete/patch/split, dropping any remainder shorter than the Settings page's configured minimum interval, titled "Available for Group Events"). Returns the claimed booking, or `null` if no sheet had a covering hold. Unlike every other create path above, this treats an existing hold as claimable rather than a conflict. |
 | `ForceCreateConfirmedAsync` | `Task<SheetBooking> ForceCreateConfirmedAsync(string sheetMailbox, SheetBooking booking, CancellationToken ct)` | Added for the Breely webhook. Bypasses the conflict check entirely - the deliberate "never drop a real booking" fallback used only when `ClaimHoldAsync` finds no matching hold anywhere. Callers are expected to also flag the result for staff review, since it may land on the wrong sheet. Respects a `BookingGroupId` the caller already set on `booking` (used by the Breely processor to keep it in its submission's group) rather than always minting its own. |
-| `MinimumGroupEventBookingIntervalMinutes` / `SetMinimumGroupEventBookingIntervalAsync` | `int MinimumGroupEventBookingIntervalMinutes { get; }` / `Task SetMinimumGroupEventBookingIntervalAsync(int minutes, CancellationToken ct = default)` | Added 2026-08-03, backs the Settings page's "Minimum group event booking interval" field (default 60). Read once at construction from a small file next to the log files; `SetMinimumGroupEventBookingIntervalAsync` updates the in-memory value immediately and re-persists it, taking effect on the next `ClaimHoldAsync`/`TrimHoldAsync` call with no restart needed. |
+| `MinimumGroupEventBookingIntervalMinutes` / `SetMinimumGroupEventBookingIntervalAsync` | `int MinimumGroupEventBookingIntervalMinutes { get; }` / `Task SetMinimumGroupEventBookingIntervalAsync(int minutes, string actor, CancellationToken ct = default)` | Added 2026-08-03, backs the Settings page's "Minimum group event booking interval" field (default 60, a fixed 30/60/90/120-minute dropdown as of 2026-08-04). Read once at construction from a small file next to the log files; `SetMinimumGroupEventBookingIntervalAsync` updates the in-memory value immediately, re-persists it, and logs `MinimumGroupEventBookingIntervalChanged` (`actor`, added 2026-08-04) - taking effect on the next `ClaimHoldAsync`/`TrimHoldAsync` call with no restart needed. |
 
 ### `ClubEventService`
 
@@ -389,7 +399,7 @@ Graph calls into this one after a successful write.
 | `LogActionAsync` | `Task LogActionAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default)` | Standard tier - always written. Used for definitive actions (booking/series/club-event created, edited, canceled). |
 | `LogSecurityAsync` | `Task LogSecurityAsync(string action, string actor, string? details = null, CancellationToken ct = default)` | Standard tier - always written. Used for security-relevant events regardless of level, e.g. a failed webhook secret check. |
 | `LogDebugAsync` | `Task LogDebugAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default)` | Debug tier - a no-op unless the current level is Debug. |
-| `SetLevelAsync` | `Task SetLevelAsync(AppLogLevel level, CancellationToken ct = default)` | Called by the Settings page. Updates the in-memory level immediately and persists it to a marker file in the log directory, so it survives a restart without a redeploy. |
+| `SetLevelAsync` | `Task SetLevelAsync(AppLogLevel level, string actor, CancellationToken ct = default)` | Called by the Settings page. Updates the in-memory level immediately and persists it to a marker file in the log directory, so it survives a restart without a redeploy. `actor` (added 2026-08-04) is the real signed-in staff identity, not a hardcoded literal - logged on the resulting `LoggingLevelChanged` line. |
 | `TailAsync` | `Task<List<string>> TailAsync(int count, CancellationToken ct = default)` | Returns up to `count` of the most recent lines, oldest-to-newest, reading backward through older rotated files if the current day's file doesn't have enough on its own. Backs the Settings page's 500-line viewer. |
 | `ListLogFiles` | `List<string> ListLogFiles()` | Every rotated log file, newest first. Used by `GET /settings/logs/download` to build the zip. |
 | `CurrentLevel` / `LogDirectory` | `AppLogLevel CurrentLevel { get; }` / `string LogDirectory { get; }` | Current level and the resolved log directory path (after the `AppLog:LogDirectory` fallback, if unset - see the deployment guide). |

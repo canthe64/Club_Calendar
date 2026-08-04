@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using System.Text.Json.Serialization;
 using FacilityScheduler.Domain;
@@ -33,6 +34,14 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     private const string ExternalIdSourcePrefix = "breely";
     private const string BookedByLabel = "Breely webhook";
 
+    // Guards against two concurrent webhook deliveries for the same external id (Breely has been
+    // observed re-sending the same creation notification twice within minutes) racing through
+    // FindByExternalIdAsync before either has claimed anything - without this, both could see "no
+    // existing booking" and independently claim two different sheets for what's really one booking.
+    // Per-sheet locks in SheetBookingService don't cover this, since the race is in the lookup that
+    // happens *before* either request picks a sheet to lock.
+    private static readonly ConcurrentDictionary<string, SemaphoreSlim> ExternalIdLocks = new();
+
     /// <summary>
     /// Entry point for the endpoint - resolves which event(s) this webhook call is actually about,
     /// then processes each independently. Breely's payload always carries a top-level "event" (the
@@ -47,6 +56,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     /// </summary>
     public async Task ProcessAsync(BreelyWebhookPayload payload, CancellationToken ct = default)
     {
+        var primaryId = payload.Event?.Id;
         var eventsById = new Dictionary<long, BreelyEvent>();
         if (payload.Submission?.Events is { Count: > 0 } siblings)
         {
@@ -66,21 +76,24 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             return;
         }
 
+        // Resolved once per id and reused below for both the shared-group-id decision and each
+        // event's own processing - halves the Graph round-trips a multi-sheet batch needs (each id
+        // was previously looked up twice), which matters now that processing runs detached from the
+        // request (see the endpoint) but still has real wall-clock cost per Graph call.
+        var existingById = new Dictionary<long, SheetBooking?>();
+        foreach (var id in eventsById.Keys)
+        {
+            existingById[id] = await bookingService.FindByExternalIdAsync($"{ExternalIdSourcePrefix}:{id}", ct);
+        }
+
         // One shared BookingGroupId for the whole batch - reuse an existing sibling's group id if
         // any of these ids was already claimed before (so a straggler joins its group correctly,
         // and a reschedule keeps the booking in its original group instead of forking into a new
         // one), otherwise mint a fresh one for a genuinely new submission.
-        Guid? sharedGroupId = null;
-        foreach (var id in eventsById.Keys)
-        {
-            var existing = await bookingService.FindByExternalIdAsync($"{ExternalIdSourcePrefix}:{id}", ct);
-            if (existing is { BookingGroupId: var gid } && gid != Guid.Empty)
-            {
-                sharedGroupId = gid;
-                break;
-            }
-        }
-        sharedGroupId ??= Guid.NewGuid();
+        var sharedGroupId = existingById.Values
+            .Where(e => e is { BookingGroupId: var gid } && gid != Guid.Empty)
+            .Select(e => e!.BookingGroupId)
+            .FirstOrDefault(Guid.NewGuid());
 
         if (eventsById.Count > 1)
         {
@@ -88,20 +101,34 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 details: $"{eventsById.Count} sibling event(s) resolved for this submission: {string.Join(",", eventsById.Keys)}.", ct: ct);
         }
 
-        foreach (var evt in eventsById.Values)
+        var batchIndex = 0;
+        foreach (var (id, evt) in eventsById)
         {
             try
             {
-                await ProcessEventAsync(evt, sharedGroupId.Value, ct);
+                // batchIndex offsets which sheet a force-book fallback lands on (see
+                // ProcessEventAsync) - so siblings that all fail to match a hold in the same batch
+                // spread across sheets instead of stacking three overlapping bookings on sheet 1.
+                await ProcessEventAsync(evt, existingById[id], isPrimary: id == primaryId, sharedGroupId, batchIndex, ct);
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Breely webhook: failed to process event {Id}", evt.Id);
             }
+            batchIndex++;
         }
     }
 
-    private async Task ProcessEventAsync(BreelyEvent evt, Guid groupId, CancellationToken ct)
+    /// <summary>
+    /// <paramref name="existing"/> is resolved once by the caller, not looked up again here.
+    /// <paramref name="isPrimary"/> is true only for the top-level "event" this specific webhook
+    /// call is actually about - false for a sibling resolved purely from "submission.events[]",
+    /// which (per ProcessAsync's doc comment) can be a stale snapshot from the original creation
+    /// call. An already-claimed sibling is never mutated (cancelled or re-timed) from that
+    /// possibly-stale data; only a never-before-seen sibling is claimed from it, and only the
+    /// primary event can change an existing booking's state.
+    /// </summary>
+    private async Task ProcessEventAsync(BreelyEvent evt, SheetBooking? existing, bool isPrimary, Guid groupId, int batchIndex, CancellationToken ct)
     {
         var breelyId = evt.Id.ToString(CultureInfo.InvariantCulture);
 
@@ -130,81 +157,104 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             return;
         }
 
-        var existing = await bookingService.FindByExternalIdAsync(externalId, ct);
-        await appLog.LogDebugAsync("WebhookExternalIdLookup", BookedByLabel, breelyId, existing?.SheetMailbox,
-            details: existing is null ? "no existing booking found" : $"found existing eventId={existing.EventId}, {existing.Start:g}-{existing.End:g}", ct: ct);
-
-        if (evt.Canceled)
+        var sem = ExternalIdLocks.GetOrAdd(externalId, _ => new SemaphoreSlim(1, 1));
+        await sem.WaitAsync(ct);
+        try
         {
+            // Re-check fresh under the lock - the caller's pre-fetch (existingById in ProcessAsync)
+            // is only a hint for the shared-group-id decision; a concurrent duplicate delivery for
+            // this exact external id could have claimed or changed it between that pre-fetch and now.
+            existing = await bookingService.FindByExternalIdAsync(externalId, ct);
+
+            await appLog.LogDebugAsync("WebhookExternalIdLookup", BookedByLabel, breelyId, existing?.SheetMailbox,
+                details: existing is null ? "no existing booking found" : $"found existing eventId={existing.EventId}, {existing.Start:g}-{existing.End:g}", ct: ct);
+
+            if (existing is not null && !isPrimary)
+            {
+                await appLog.LogDebugAsync("WebhookSiblingAlreadyClaimed", BookedByLabel, breelyId, existing.SheetMailbox,
+                    "Resolved only from submission.events[] (possibly stale) and already claimed - not modified from this data.", ct);
+                return;
+            }
+
+            if (evt.Canceled)
+            {
+                if (existing is not null)
+                {
+                    await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, BookedByLabel, ct);
+                    logger.LogInformation("Breely webhook: event {Id} canceled - released sheet {Sheet}.", evt.Id, existing.SheetMailbox);
+                    await appLog.LogActionAsync("BreelyBookingCancelled", BookedByLabel, existing.EventId, existing.SheetMailbox, $"Breely event {breelyId}.", ct);
+                }
+                else
+                {
+                    logger.LogInformation("Breely webhook: event {Id} canceled, but no matching booking was found - nothing to release.", evt.Id);
+                    await appLog.LogDebugAsync("WebhookCancelNoMatch", BookedByLabel, breelyId, ct: ct);
+                }
+                return;
+            }
+
             if (existing is not null)
             {
+                if (existing.Start == start && existing.End == end)
+                {
+                    await appLog.LogDebugAsync("WebhookDuplicateIgnored", BookedByLabel, breelyId, existing.SheetMailbox, "Already correct - retry or duplicate notification.", ct);
+                    return; // retry or duplicate notification - already correct, nothing to do
+                }
+
+                // Reschedule: release the old slot back to an open hold, then claim fresh at the new
+                // time below (possibly landing on a different sheet than before, if the original one
+                // isn't free at the new time - that's expected and fine).
                 await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, BookedByLabel, ct);
-                logger.LogInformation("Breely webhook: event {Id} canceled - released sheet {Sheet}.", evt.Id, existing.SheetMailbox);
-                await appLog.LogActionAsync("BreelyBookingCancelled", BookedByLabel, existing.EventId, existing.SheetMailbox, $"Breely event {breelyId}.", ct);
+                logger.LogInformation("Breely webhook: event {Id} rescheduled from {OldStart} to {NewStart} - released old sheet {Sheet}, claiming new slot.",
+                    evt.Id, existing.Start, start, existing.SheetMailbox);
+                await appLog.LogActionAsync("BreelyBookingReleased", BookedByLabel, existing.EventId, existing.SheetMailbox,
+                    $"Rescheduling Breely event {breelyId}: {existing.Start:g}-{existing.End:g} -> {start:g}-{end:g}.", ct);
             }
-            else
+
+            var template = new SheetBooking
             {
-                logger.LogInformation("Breely webhook: event {Id} canceled, but no matching booking was found - nothing to release.", evt.Id);
-                await appLog.LogDebugAsync("WebhookCancelNoMatch", BookedByLabel, breelyId, ct: ct);
-            }
-            return;
-        }
+                SheetMailbox = "",
+                Start = start,
+                End = end,
+                Category = BookingCategory.GroupEvent,
+                State = BookingState.Confirmed,
+                RenterName = string.IsNullOrWhiteSpace(evt.ClientFullName) ? "Breely booking" : evt.ClientFullName,
+                RenterPhone = evt.ClientPhone,
+                RenterEmail = evt.ClientEmail,
+                Notes = BuildNotes(evt),
+                BookedBy = BookedByLabel,
+                ExternalBookingId = externalId,
+                BookingGroupId = groupId
+            };
 
-        if (existing is not null)
-        {
-            if (existing.Start == start && existing.End == end)
+            var claimed = await bookingService.ClaimHoldAsync(start, end, template, groupId, ct);
+            if (claimed is not null)
             {
-                await appLog.LogDebugAsync("WebhookDuplicateIgnored", BookedByLabel, breelyId, existing.SheetMailbox, "Already correct - retry or duplicate notification.", ct);
-                return; // retry or duplicate notification - already correct, nothing to do
+                logger.LogInformation("Breely webhook: event {Id} claimed hold on {Sheet} for {Start}-{End}.", evt.Id, claimed.SheetMailbox, start, end);
+                await appLog.LogActionAsync("BreelyBookingClaimed", BookedByLabel, claimed.EventId, claimed.SheetMailbox, $"Breely event {breelyId}, {start:g}-{end:g}.", ct);
+                return;
             }
 
-            // Reschedule: release the old slot back to an open hold, then claim fresh at the new
-            // time below (possibly landing on a different sheet than before, if the original one
-            // isn't free at the new time - that's expected and fine).
-            await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, BookedByLabel, ct);
-            logger.LogInformation("Breely webhook: event {Id} rescheduled from {OldStart} to {NewStart} - released old sheet {Sheet}, claiming new slot.",
-                evt.Id, existing.Start, start, existing.SheetMailbox);
-            await appLog.LogActionAsync("BreelyBookingReleased", BookedByLabel, existing.EventId, existing.SheetMailbox,
-                $"Rescheduling Breely event {breelyId}: {existing.Start:g}-{existing.End:g} -> {start:g}-{end:g}.", ct);
+            // No sheet had an open hold covering this window - write it anyway (a real booking is
+            // never dropped, per the standing design), and flag it for staff instead of guessing
+            // further. Offset by this event's position within the batch (0 for a standalone
+            // notification) so siblings that all fail to match a hold in one multi-sheet submission
+            // land on different sheets rather than stacking multiple overlapping force-bookings onto
+            // sheet 1 - found live 2026-08-04 alongside the multi-sheet fix (§4.8).
+            await appLog.LogDebugAsync("WebhookNoCoveringHold", BookedByLabel, breelyId, details: $"{start:g}-{end:g} - no sheet had a hold covering this window.", ct: ct);
+            var fallbackSheet = facility.SheetMailboxes[batchIndex % facility.SheetMailboxes.Length];
+            var forceBooked = await bookingService.ForceCreateConfirmedAsync(fallbackSheet, template, ct);
+            logger.LogWarning("Breely webhook: event {Id} didn't match any open hold - force-booked onto {Sheet}.", evt.Id, fallbackSheet);
+            await appLog.LogActionAsync("BreelyBookingForceBooked", BookedByLabel, forceBooked.EventId, fallbackSheet,
+                $"Breely event {breelyId} matched no open hold - force-booked, flagged for review.", ct);
+
+            await FlagNeedsTriageAsync(start,
+                $"Breely booking {evt.Id} ({template.RenterName}, {start:h:mmtt}-{end:h:mmtt}) didn't match any open hold on any sheet - booked directly onto {DisplaySheetLabel(fallbackSheet)}. Verify manually and reassign if needed. Admin: {evt.AdminUrl}",
+                ct);
         }
-
-        var template = new SheetBooking
+        finally
         {
-            SheetMailbox = "",
-            Start = start,
-            End = end,
-            Category = BookingCategory.GroupEvent,
-            State = BookingState.Confirmed,
-            RenterName = string.IsNullOrWhiteSpace(evt.ClientFullName) ? "Breely booking" : evt.ClientFullName,
-            RenterPhone = evt.ClientPhone,
-            RenterEmail = evt.ClientEmail,
-            Notes = BuildNotes(evt),
-            BookedBy = BookedByLabel,
-            ExternalBookingId = externalId,
-            BookingGroupId = groupId
-        };
-
-        var claimed = await bookingService.ClaimHoldAsync(start, end, template, groupId, ct);
-        if (claimed is not null)
-        {
-            logger.LogInformation("Breely webhook: event {Id} claimed hold on {Sheet} for {Start}-{End}.", evt.Id, claimed.SheetMailbox, start, end);
-            await appLog.LogActionAsync("BreelyBookingClaimed", BookedByLabel, claimed.EventId, claimed.SheetMailbox, $"Breely event {breelyId}, {start:g}-{end:g}.", ct);
-            return;
+            sem.Release();
         }
-
-        // No sheet had an open hold covering this window - write it anyway (a real booking is never
-        // dropped, per the standing design) onto the first sheet in configured order, and flag it
-        // for staff instead of guessing further.
-        await appLog.LogDebugAsync("WebhookNoCoveringHold", BookedByLabel, breelyId, details: $"{start:g}-{end:g} - no sheet had a hold covering this window.", ct: ct);
-        var fallbackSheet = facility.SheetMailboxes[0];
-        var forceBooked = await bookingService.ForceCreateConfirmedAsync(fallbackSheet, template, ct);
-        logger.LogWarning("Breely webhook: event {Id} didn't match any open hold - force-booked onto {Sheet}.", evt.Id, fallbackSheet);
-        await appLog.LogActionAsync("BreelyBookingForceBooked", BookedByLabel, forceBooked.EventId, fallbackSheet,
-            $"Breely event {breelyId} matched no open hold - force-booked, flagged for review.", ct);
-
-        await FlagNeedsTriageAsync(start,
-            $"Breely booking {evt.Id} ({template.RenterName}, {start:h:mmtt}-{end:h:mmtt}) didn't match any open hold on any sheet - booked directly onto {DisplaySheetLabel(fallbackSheet)}. Verify manually and reassign if needed. Admin: {evt.AdminUrl}",
-            ct);
     }
 
     // Debug-tier payload logging - everything Breely sent except the fields that identify a

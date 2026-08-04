@@ -67,23 +67,35 @@ public static class BreelyBookingWebhookEndpoint
                 return Results.Ok();
             }
 
-            try
-            {
-                // Resolves the top-level "event" plus any siblings in "submission.events" itself -
-                // see BreelyBookingProcessor's class doc for why this app can't just look at "event"
-                // alone. Per-event failures inside are already individually caught there, so nothing
-                // here can surface as a non-2xx to the sender either.
-                await processor.ProcessAsync(payload, ct);
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex, "Breely webhook: failed to process payload.");
-            }
+            // Acknowledge immediately rather than awaiting processing - a multi-sheet batch can mean
+            // dozens of sequential Graph calls (well past what "ack fast" implies), and awaiting on
+            // the request's own cancellation token meant an HTTP timeout on Breely's side could abort
+            // mid-write (e.g. between releasing an old slot and claiming the new one on a reschedule),
+            // leaving a booking missing from this calendar while it still exists in Breely. Processing
+            // now runs detached, on CancellationToken.None, so once started it always runs to
+            // completion; every service `processor` depends on is a singleton (Program.cs), so nothing
+            // here is tied to this request's (about-to-end) DI scope. Resolves the top-level "event"
+            // plus any siblings in "submission.events" itself - see BreelyBookingProcessor's class doc
+            // for why this app can't just look at "event" alone. Per-event failures inside are already
+            // individually caught there.
+            _ = ProcessInBackgroundAsync(processor, payload, logger);
 
             return Results.Ok();
         })
         .AllowAnonymous()
         .RequireRateLimiting("booking-webhook");
+    }
+
+    private static async Task ProcessInBackgroundAsync(BreelyBookingProcessor processor, BreelyWebhookPayload payload, ILogger logger)
+    {
+        try
+        {
+            await processor.ProcessAsync(payload, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Breely webhook: failed to process payload.");
+        }
     }
 
     private static bool SecretsMatch(string expected, string provided)

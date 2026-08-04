@@ -32,23 +32,29 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
 
     public int MinimumGroupEventBookingIntervalMinutes => _minimumGroupEventBookingIntervalMinutes;
 
-    public async Task SetMinimumGroupEventBookingIntervalAsync(int minutes, CancellationToken ct = default)
+    public async Task SetMinimumGroupEventBookingIntervalAsync(int minutes, string actor, CancellationToken ct = default)
     {
         if (minutes < 0)
         {
             throw new ArgumentOutOfRangeException(nameof(minutes), "Minimum interval cannot be negative.");
         }
 
+        var previous = _minimumGroupEventBookingIntervalMinutes;
         _minimumGroupEventBookingIntervalMinutes = minutes;
 
         try
         {
             await File.WriteAllTextAsync(Path.Combine(log.LogDirectory, MinimumIntervalFileName), minutes.ToString(CultureInfo.InvariantCulture), ct);
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Best-effort persistence - the in-memory value above is already updated and takes
             // effect immediately either way; a failed write just means it won't survive a restart.
+        }
+
+        if (previous != minutes)
+        {
+            await log.LogActionAsync("MinimumGroupEventBookingIntervalChanged", actor, details: $"{previous} -> {minutes} minutes", ct: ct);
         }
     }
 
@@ -62,7 +68,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 return minutes;
             }
         }
-        catch (IOException)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
         {
             // Fall through to the default - not worth failing startup over.
         }
@@ -458,11 +464,11 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                             // occurrence, same restriction TrimHoldAsync already works around. Delete
                             // this occurrence and create a standalone merged hold instead.
                             await graphClient.Users[member.SheetMailbox].Events[member.EventId].DeleteAsync(cancellationToken: ct);
-                            await graphClient.Users[member.SheetMailbox].Events.PostAsync(ToGraphEvent(reopened, titleOverride: AvailableForGroupEventsTitle), cancellationToken: ct);
+                            await graphClient.Users[member.SheetMailbox].Events.PostAsync(ToGraphEvent(reopened, titleOverride: AvailableForGroupEventsTitle, clearUnsetOptionalProperties: true), cancellationToken: ct);
                         }
                         else
                         {
-                            var graphEvent = ToGraphEvent(reopened, includeTime: merged, titleOverride: AvailableForGroupEventsTitle);
+                            var graphEvent = ToGraphEvent(reopened, includeTime: merged, titleOverride: AvailableForGroupEventsTitle, clearUnsetOptionalProperties: true);
                             await graphClient.Users[member.SheetMailbox].Events[member.EventId].PatchAsync(graphEvent, cancellationToken: ct);
                         }
                     }
@@ -765,10 +771,16 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
                 config.QueryParameters.Expand = ExtendedPropertiesExpand;
             }, ct);
 
-            var match = response?.Value?.FirstOrDefault();
-            if (match is not null)
+            var matches = response?.Value;
+            if (matches is { Count: > 0 })
             {
-                return FromGraphEvent(sheet, match);
+                // Defense in depth: this app's own writers always keep at most one live match per
+                // external id (ToGraphEvent's clearUnsetOptionalProperties clears it on reopen), but
+                // if that invariant is ever violated - or a stray match exists from data written
+                // outside the app - prefer a Confirmed booking over a Hold, since a released hold
+                // wrongly carrying a stale id is exactly the scenario that invariant guards against.
+                var booked = matches.Select(e => FromGraphEvent(sheet, e)).ToList();
+                return booked.FirstOrDefault(b => b.State == BookingState.Confirmed) ?? booked[0];
             }
         }
 
@@ -1030,7 +1042,7 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
         return allEvents;
     }
 
-    private Event ToGraphEvent(SheetBooking booking, bool includeTime = true, string? titleOverride = null)
+    private Event ToGraphEvent(SheetBooking booking, bool includeTime = true, string? titleOverride = null, bool clearUnsetOptionalProperties = false)
     {
         var subject = titleOverride ?? (string.IsNullOrWhiteSpace(booking.RenterName)
             ? CalendarStyles.CategoryLabel(booking.Category)
@@ -1050,14 +1062,31 @@ public class SheetBookingService(GraphServiceClient graphClient, IMemoryCache ca
             }
         };
 
+        // A PATCH only upserts the extended properties it includes - one omitted from the request
+        // keeps whatever value it already had on Graph, it is NOT cleared. clearUnsetOptionalProperties
+        // (used when reopening a booking as a hold, CancelGroupAsync) forces BookedBy/ExternalBookingId
+        // to an explicit empty string when the booking doesn't carry its own value, rather than
+        // silently leaving the previous occupant's identity in place. Live-found 2026-08-04: a
+        // reopened hold kept the ExternalBookingId of the Breely booking that had just been released
+        // from it, so the next notification for that same external id could match the leftover hold
+        // instead of the real (now-elsewhere) booking - FindByExternalIdAsync has no way to tell them
+        // apart once both carry the same value.
         if (!string.IsNullOrWhiteSpace(booking.BookedBy))
         {
             extendedProps.Add(new SingleValueLegacyExtendedProperty { Id = BookedByPropertyId, Value = booking.BookedBy });
+        }
+        else if (clearUnsetOptionalProperties)
+        {
+            extendedProps.Add(new SingleValueLegacyExtendedProperty { Id = BookedByPropertyId, Value = "" });
         }
 
         if (!string.IsNullOrWhiteSpace(booking.ExternalBookingId))
         {
             extendedProps.Add(new SingleValueLegacyExtendedProperty { Id = ExternalIdPropertyId, Value = booking.ExternalBookingId });
+        }
+        else if (clearUnsetOptionalProperties)
+        {
+            extendedProps.Add(new SingleValueLegacyExtendedProperty { Id = ExternalIdPropertyId, Value = "" });
         }
 
         var graphEvent = new Event

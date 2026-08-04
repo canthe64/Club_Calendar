@@ -4,6 +4,7 @@
 @using FacilityScheduler.Components.Calendar
 @inject ClubEventService EventService
 @inject AuthenticationStateProvider AuthProvider
+@inject FacilityConfiguration Facility
 
 <PageTitle>Club Events</PageTitle>
 
@@ -88,11 +89,10 @@
         _loading = true;
         StateHasChanged();
 
-        var start = DateTime.UtcNow.Date.AddDays(-30);
-        var end = DateTime.UtcNow.Date.AddDays(366);
+        var today = Facility.Today;
+        var start = today.AddDays(-30);
+        var end = today.AddDays(366);
         var events = await EventService.GetEventsAsync(start, end);
-
-        var today = DateTime.UtcNow.Date;
         _upcoming = events.Where(e => e.End.Date >= today).OrderBy(e => e.Start).ToList();
         _past = events.Where(e => e.End.Date < today).OrderByDescending(e => e.Start).ToList();
 
@@ -102,7 +102,7 @@
     private void OpenCreateForm()
     {
         _draft = new ClubEventDraft();
-        _draft.Reset();
+        _draft.Reset(Facility.Today);
         _formOpen = true;
     }
 

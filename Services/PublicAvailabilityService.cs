@@ -11,7 +11,7 @@ namespace FacilityScheduler.Services;
 /// than computing complementary free time, and more correct: unbooked League/Bonspiel/practice time
 /// isn't necessarily something staff want the public renting.
 /// </summary>
-public class PublicAvailabilityService(SheetBookingService bookingService, ClubEventService clubEventService, IMemoryCache cache)
+public class PublicAvailabilityService(SheetBookingService bookingService, ClubEventService clubEventService, IMemoryCache cache, FacilityConfiguration facility)
 {
     private const int DefaultDays = 30;
     private const int MaxDays = 60;
@@ -20,7 +20,10 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     public async Task<PublicAvailabilityResponse> GetAvailabilityAsync(int? requestedDays, CancellationToken ct = default)
     {
         var days = Math.Clamp(requestedDays ?? DefaultDays, 1, MaxDays);
-        var start = DateTime.UtcNow.Date;
+        // Facility-local "today", not DateTime.UtcNow.Date - live-found 2026-08-04: from ~5pm PDT
+        // onward this window was starting "tomorrow," silently dropping the rest of tonight's open
+        // ice from the public feed during the facility's own busiest hours (architecture doc §8).
+        var start = facility.Today;
         var cacheKey = $"public-availability:{start:yyyyMMdd}:{days}";
 
         if (cache.TryGetValue(cacheKey, out PublicAvailabilityResponse? cached) && cached is not null)
@@ -229,7 +232,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
         var bookingLabels = bookings
             .Select(b => new PublicMonthBooking(
-                string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName,
+                PublicTitle(b),
                 b.Category.ToString(),
                 b.Start,
                 b.End,
@@ -265,6 +268,19 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var closureEnd = closure.IsAllDay ? closure.End.Date.AddDays(1) : closure.End;
         return start < closureEnd && end > closure.Start;
     }
+
+    // Staff are trusted to keep renter PII out of a booking title they type themselves (§2.3) - but
+    // a Breely-originated booking's title (the customer's real name, RenterName = client_full_name)
+    // is populated automatically, with no staff opportunity to redact it, and this app's own privacy
+    // discipline (D11) says the public surface should never depend on staff remembering to do that.
+    // Found live 2026-08-04 while reviewing the Breely integration: the public calendar was showing
+    // real customer names for confirmed Breely bookings. A booking's ExternalBookingId is only ever
+    // set by the webhook (never by staff-facing UI), so it's a reliable signal to substitute a
+    // neutral label here without affecting the staff-facing calendar, which still shows the real name.
+    private static string PublicTitle(SheetBooking b) =>
+        !string.IsNullOrWhiteSpace(b.ExternalBookingId)
+            ? CalendarStyles.CategoryLabel(b.Category)
+            : (string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName);
 
     private static string SheetLabel(string sheetMailbox)
     {

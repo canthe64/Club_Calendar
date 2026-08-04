@@ -17,8 +17,11 @@ public class SeriesDraft
     /// one or the other. Only meaningful while <see cref="Category"/> is GroupEvent; forced to true
     /// otherwise.</summary>
     public bool? CreateAsConfirmed { get; set; }
-    public DateTime FirstDate { get; set; } = DateTime.UtcNow.Date.AddDays(7);
-    public DateTime LastDate { get; set; } = DateTime.UtcNow.Date.AddDays(7 * 8);
+
+    // Placeholders only - always overwritten by Reset() before display; see BookingDraft.Date for
+    // why this doesn't default from DateTime.UtcNow.
+    public DateTime FirstDate { get; set; } = DateTime.MinValue;
+    public DateTime LastDate { get; set; } = DateTime.MinValue;
 
     /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
     /// 1440 represents midnight at the end of the day, not the start of it.</summary>
@@ -48,13 +51,14 @@ public class SeriesDraft
         }
     }
 
-    public void Reset()
+    /// <param name="today">The facility-local "today" (<see cref="FacilityConfiguration.Today"/>).</param>
+    public void Reset(DateTime today)
     {
         SelectedSheets = [];
         Category = null;
         CreateAsConfirmed = null;
-        FirstDate = DateTime.UtcNow.Date.AddDays(7);
-        LastDate = DateTime.UtcNow.Date.AddDays(7 * 8);
+        FirstDate = today.AddDays(7);
+        LastDate = today.AddDays(7 * 8);
         StartMinutes = 19 * 60;
         EndMinutes = 21 * 60;
         RenterName = null;

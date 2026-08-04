@@ -176,8 +176,8 @@ happened in the app.
 When a Breely booking claims part of an open Group Event hold, whatever time is left over before
 and/or after it is normally offered as its own bookable slot (titled "Available for Group Events,"
 §3.2) — unless it's shorter than this many minutes, in which case that leftover time is dropped
-instead of offered as an unusably short sliver. Defaults to 60 minutes. Change the number and click
-**Save** — it takes effect immediately, no restart needed.
+instead of offered as an unusably short sliver. Choose 30, 60, 90, or 120 minutes and click **Save**
+— it takes effect immediately, no restart needed.
 
 ### Activity Log
 
@@ -195,6 +195,10 @@ much detail it captures.
   correctly?") — it's noisier, and there's no reason to leave it on day to day. Switch it back to
   Standard once you're done.
 
+**While Debug is selected or active, a warning banner appears on the page:** the Breely detail this
+level captures can include a customer's name, email, or phone number. There's no automatic timeout —
+switching back to Standard is on you, not the app.
+
 Pick a level and click **Save** — it takes effect immediately, no restart needed.
 
 **Recent Activity** shows the most recent 500 lines from the log. Click **Refresh** to pull in
@@ -205,3 +209,12 @@ did it.
 **Download full log archive (.zip)** downloads every log file the app currently has on hand, not
 just what's shown in the 500-line viewer — useful if you need to look further back or hand the file
 to whoever's helping troubleshoot something.
+
+---
+
+## 8. "Something went wrong" message
+
+If a page shows **"Something went wrong loading this page"** instead of its usual content, click
+**Try again**. This is usually a one-off (a transient Graph hiccup, a stale view) and clicking Try
+again reloads just that page in place - no need to sign in again or lose anything else you had open
+elsewhere. If it keeps happening on the same action, that's worth reporting.
