@@ -230,13 +230,22 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
         var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
 
+        // Consolidates a multi-sheet booking's sibling sheet-events into one label, same as the
+        // staff Week/Day grids (WeekGrid.razor/MonthGrid.razor's own DedupeKey) - the public
+        // calendar shouldn't show "League Practice" five times for one 5-sheet booking either.
+        // Unlike those two components (which group within a single already-selected day), this
+        // runs over a whole month/week range at once, so Start/End stays part of the key - grouping
+        // on DedupeKey alone would merge two different dates' occurrences of the same recurring
+        // series, which share one BookingGroupId across every occurrence.
         var bookingLabels = bookings
-            .Select(b => new PublicMonthBooking(
-                PublicTitle(b),
-                b.Category.ToString(),
-                b.Start,
-                b.End,
-                b.State == BookingState.Confirmed))
+            .GroupBy(b => (DedupeKey(b), b.Start, b.End))
+            .Select(g =>
+            {
+                var b = g.First();
+                var sheetCount = g.Count();
+                var title = sheetCount > 1 ? $"{PublicTitle(b)} · {sheetCount} sheets" : PublicTitle(b);
+                return new PublicMonthBooking(title, b.Category.ToString(), b.Start, b.End, b.State == BookingState.Confirmed);
+            })
             .ToList();
 
         var eventLabels = clubEvents
@@ -281,6 +290,13 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         !string.IsNullOrWhiteSpace(b.ExternalBookingId)
             ? CalendarStyles.CategoryLabel(b.Category)
             : (string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName);
+
+    // Mirrors MonthGrid.razor/WeekGrid.razor's own DedupeKey exactly: BookingGroupId when it's a
+    // real, persisted group id; falls back to (SheetMailbox, EventId) for Guid.Empty, since that's
+    // the default for an untouched occurrence of a recurring series - grouping on it directly would
+    // merge unrelated bookings that happen to share that same empty default.
+    private static string DedupeKey(SheetBooking b) =>
+        b.BookingGroupId != Guid.Empty ? b.BookingGroupId.ToString() : $"{b.SheetMailbox}|{b.EventId}";
 
     private static string SheetLabel(string sheetMailbox)
     {
