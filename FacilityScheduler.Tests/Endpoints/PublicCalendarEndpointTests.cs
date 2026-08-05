@@ -1,3 +1,4 @@
+using FacilityScheduler.Domain;
 using FacilityScheduler.Endpoints;
 
 namespace FacilityScheduler.Tests.Endpoints;
@@ -69,5 +70,100 @@ public class PublicCalendarEndpointTests
     {
         Assert.Equal(Today.AddYears(-1), PublicCalendarEndpoint.ParseDate("1999-01-01", Today));
         Assert.Equal(Today.AddYears(2), PublicCalendarEndpoint.ParseDate("2099-01-01", Today));
+    }
+
+    [Fact]
+    public void ParseFilter_NoFilterMarker_DefaultsToEverythingShown()
+    {
+        // A bare link (no ?filtered= at all) must behave exactly like it did before category
+        // filters existed - old bookmarks/embeds/shared links keep working unchanged.
+        var filter = PublicCalendarEndpoint.ParseFilter(filtered: null, categories: null, showClubEvents: null);
+
+        Assert.False(filter.IsFiltered);
+        Assert.True(filter.ShowClubEvents);
+        Assert.Equal(PublicCalendarEndpoint.AllCategories, filter.Categories);
+    }
+
+    [Fact]
+    public void ParseFilter_Submitted_OnlyIncludesCheckedCategories()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", ["League", "Bonspiel"], showClubEvents: null);
+
+        Assert.True(filter.IsFiltered);
+        Assert.Equal(new HashSet<BookingCategory> { BookingCategory.League, BookingCategory.Bonspiel }, filter.Categories);
+    }
+
+    [Fact]
+    public void ParseFilter_SubmittedWithNoCategoriesChecked_FallsBackToAll()
+    {
+        // Every category box unchecked (or none of the recognized values present at all) falls
+        // back to "all" rather than "none" - a blank calendar from a stray misclick isn't a real
+        // use case worth supporting, and "all" is a friendlier failure mode than an empty grid.
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: null);
+
+        Assert.True(filter.IsFiltered);
+        Assert.Equal(PublicCalendarEndpoint.AllCategories, filter.Categories);
+    }
+
+    [Fact]
+    public void ParseFilter_SubmittedWithoutClubEventsChecked_HidesClubEvents()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: null);
+
+        Assert.False(filter.ShowClubEvents);
+    }
+
+    [Fact]
+    public void ParseFilter_SubmittedWithClubEventsChecked_ShowsClubEvents()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: "1");
+
+        Assert.True(filter.ShowClubEvents);
+    }
+
+    [Fact]
+    public void ParseCategories_UnknownOrGarbageValues_AreIgnored()
+    {
+        var result = PublicCalendarEndpoint.ParseCategories(["League", "NotACategory", ""]);
+
+        Assert.Equal(new HashSet<BookingCategory> { BookingCategory.League }, result);
+    }
+
+    [Fact]
+    public void ParseCategories_EventCategory_IsExcludedEvenIfRequested()
+    {
+        // Event is reserved for Club Events (CalendarStyles.SheetCategories), never a sheet-booking
+        // category a member could filter by - a crafted/malformed query string naming it must not
+        // slip through.
+        var result = PublicCalendarEndpoint.ParseCategories(["Event", "League"]);
+
+        Assert.DoesNotContain(BookingCategory.Event, result);
+        Assert.Contains(BookingCategory.League, result);
+    }
+
+    [Fact]
+    public void FilterQuery_NotFiltered_ReturnsEmptyString()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter(filtered: null, categories: null, showClubEvents: null);
+
+        Assert.Equal("", PublicCalendarEndpoint.FilterQuery(filter));
+    }
+
+    [Fact]
+    public void FilterQuery_AllCategoriesSelected_OmitsCategoriesFromTheQueryString()
+    {
+        // The common case - a member only toggled Club Events, or hasn't excluded anything - should
+        // produce a short URL, since ParseFilter already treats "no categories present" as "all".
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: "1");
+
+        Assert.Equal("&filtered=1&showClubEvents=1", PublicCalendarEndpoint.FilterQuery(filter));
+    }
+
+    [Fact]
+    public void FilterQuery_PartialCategorySelection_ListsEachSelectedCategory()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: null);
+
+        Assert.Equal("&filtered=1&categories=League", PublicCalendarEndpoint.FilterQuery(filter));
     }
 }

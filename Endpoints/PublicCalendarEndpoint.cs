@@ -20,22 +20,42 @@ namespace FacilityScheduler.Endpoints;
 /// HTML documents - a view/nav change is a plain full-page navigation, not client-side routing, to
 /// keep this surface free of any framework. The Week/Day hourly grids reuse the exact same
 /// CalendarStyles hour-axis math and lane-layout algorithm as the staff Week/Day grids do.
+///
+/// Category filtering (added 2026-08-04) follows the same "no framework" rule: the SHOW row is a
+/// plain GET form, submitted via full page reload, matching the pattern /public/search's own
+/// date-range/sheets form already established rather than introducing client-side JS state.
 /// </summary>
 public static class PublicCalendarEndpoint
 {
     internal enum ViewMode { Month, Week, Day }
 
+    /// <summary>Which sheet categories are showing, and whether Club Events are showing - mirrors
+    /// the staff calendar's own SHOW row granularity exactly (6 sheet categories + one club-events
+    /// toggle, not finer-grained per-club-event-category filtering, since the staff calendar
+    /// doesn't have that either).</summary>
+    internal sealed record FilterState(bool IsFiltered, HashSet<BookingCategory> Categories, bool ShowClubEvents)
+    {
+        public static readonly FilterState Default = new(false, AllCategories, true);
+    }
+
+    // Event is reserved for Club Events (CalendarStyles.SheetCategories already excludes it) - not
+    // a sheet-booking category a member could filter by here.
+    internal static readonly HashSet<BookingCategory> AllCategories = [.. CalendarStyles.SheetCategories];
+
     public static void MapPublicCalendarEndpoint(this WebApplication app)
     {
-        app.MapGet("/public/calendar", async (string? view, string? month, string? date, PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
+        app.MapGet("/public/calendar", async (string? view, string? month, string? date,
+            string? filtered, string[]? categories, string? showClubEvents,
+            PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
         {
             var today = facility.Today;
             var mode = ParseView(view);
+            var filter = ParseFilter(filtered, categories, showClubEvents);
             var html = mode switch
             {
-                ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, service, ct),
-                ViewMode.Day => await RenderDayPageAsync(ParseDate(date, today) ?? today, today, service, ct),
-                _ => await RenderMonthPageAsync(ParseMonth(month, today) ?? today, today, service, ct),
+                ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
+                ViewMode.Day => await RenderDayPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
+                _ => await RenderMonthPageAsync(ParseMonth(month, today) ?? today, today, filter, service, ct),
             };
             return Results.Content(html, "text/html; charset=utf-8");
         })
@@ -83,9 +103,81 @@ public static class PublicCalendarEndpoint
         return parsed.Date < min ? min : parsed.Date > max ? max : parsed.Date;
     }
 
-    private static string MonthHref(DateTime month) => $"/public/calendar?view=month&month={month:yyyy-MM}";
-    private static string WeekHref(DateTime date) => $"/public/calendar?view=week&date={date:yyyy-MM-dd}";
-    private static string DayHref(DateTime date) => $"/public/calendar?view=day&date={date:yyyy-MM-dd}";
+    // A bare link (no ?filtered= at all) means "no filter has ever been applied" - show everything,
+    // exactly today's behavior, so existing bookmarks/embeds/shared links keep working unchanged.
+    // Once the SHOW form is submitted, it always includes a hidden filtered=1 marker alongside
+    // zero-or-more categories= values and showClubEvents - presence-based rather than parsing
+    // "true"/"1" strings, since an unchecked checkbox is simply absent from a GET submission and
+    // there's no other way to distinguish "unchecked" from "form never submitted".
+    //
+    // No recognized category present (whether none were ever listed, or every box was unchecked)
+    // falls back to "all categories" rather than "none" - showing a blank calendar because every
+    // box happened to be unchecked isn't a real use case worth supporting, and defaulting back to
+    // "all" is a friendlier failure mode than an empty grid. showClubEvents doesn't get the same
+    // fallback: unlike the multi-select category chips, it's a single on/off toggle where "off" is
+    // the entire point of unchecking it, so its absence has to reliably mean off once filtered=1 is
+    // present.
+    internal static FilterState ParseFilter(string? filtered, string[]? categories, string? showClubEvents)
+    {
+        if (string.IsNullOrEmpty(filtered))
+        {
+            return FilterState.Default;
+        }
+
+        var selected = ParseCategories(categories);
+        return new FilterState(true, selected.Count == 0 ? AllCategories : selected, !string.IsNullOrEmpty(showClubEvents));
+    }
+
+    internal static HashSet<BookingCategory> ParseCategories(string[]? categories)
+    {
+        if (categories is null || categories.Length == 0)
+        {
+            return [];
+        }
+
+        return [.. categories
+            .Select(c => Enum.TryParse<BookingCategory>(c, out var parsed) && AllCategories.Contains(parsed) ? (BookingCategory?)parsed : null)
+            .Where(c => c is not null)
+            .Select(c => c!.Value)];
+    }
+
+    // Appended to every nav/tab href so Prev/Today/Next and the Month/Week/Day toggle don't silently
+    // reset the filter on the next click. Empty for the unfiltered default, keeping those links exactly
+    // as clean as before this feature existed. Categories are omitted entirely when the full set is
+    // selected (the common case - a member only toggled Club Events, or hasn't excluded anything) since
+    // ParseFilter already treats "no categories present" as "all" - listing every one explicitly would
+    // just make the URL longer without changing what it means.
+    internal static string FilterQuery(FilterState filter)
+    {
+        if (!filter.IsFiltered)
+        {
+            return "";
+        }
+
+        var sb = new StringBuilder("&filtered=1");
+        if (!filter.Categories.SetEquals(AllCategories))
+        {
+            foreach (var category in filter.Categories)
+            {
+                sb.Append("&categories=").Append(category);
+            }
+        }
+        if (filter.ShowClubEvents)
+        {
+            sb.Append("&showClubEvents=1");
+        }
+        return sb.ToString();
+    }
+
+    private static PublicMonthView ApplyFilter(PublicMonthView view, FilterState filter) => view with
+    {
+        Bookings = [.. view.Bookings.Where(b => filter.Categories.Contains(ParseCategory(b.CategoryLabel)))],
+        ClubEvents = filter.ShowClubEvents ? view.ClubEvents : []
+    };
+
+    private static string MonthHref(DateTime month, string filterQuery) => $"/public/calendar?view=month&month={month:yyyy-MM}{filterQuery}";
+    private static string WeekHref(DateTime date, string filterQuery) => $"/public/calendar?view=week&date={date:yyyy-MM-dd}{filterQuery}";
+    private static string DayHref(DateTime date, string filterQuery) => $"/public/calendar?view=day&date={date:yyyy-MM-dd}{filterQuery}";
 
     // Every piece of dynamic text (titles, category labels) MUST go through this before landing in
     // the hand-built HTML - there's no Razor auto-escaping here to fall back on.
@@ -151,7 +243,7 @@ public static class PublicCalendarEndpoint
     // a Month/Week/Day toggle. representativeDate is the anchor used to translate the CURRENT view
     // into each toggle target's own query-param scheme, so switching views doesn't lose context
     // (e.g. switching from Month to Week lands on the week containing the displayed month's 1st).
-    private static string NavBar(string titleText, string prevHref, string todayHref, string nextHref, ViewMode current, DateTime representativeDate)
+    private static string NavBar(string titleText, string prevHref, string todayHref, string nextHref, ViewMode current, DateTime representativeDate, string filterQuery)
     {
         string Tab(string label, ViewMode mode, string href)
         {
@@ -170,12 +262,51 @@ public static class PublicCalendarEndpoint
                     <a href="{nextHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">&#8250;</a>
                 </span>
                 <span style="display:flex;gap:4px;margin-left:auto">
-                    {Tab("Month", ViewMode.Month, MonthHref(representativeDate))}
-                    {Tab("Week", ViewMode.Week, WeekHref(representativeDate))}
-                    {Tab("Day", ViewMode.Day, DayHref(representativeDate))}
+                    {Tab("Month", ViewMode.Month, MonthHref(representativeDate, filterQuery))}
+                    {Tab("Week", ViewMode.Week, WeekHref(representativeDate, filterQuery))}
+                    {Tab("Day", ViewMode.Day, DayHref(representativeDate, filterQuery))}
                 </span>
             </div>
             <div style="font-size:11px;color:#90a0ab;margin-bottom:12px">What's on the ice, at a glance - tap an entry to see its time.</div>
+            """;
+    }
+
+    // The SHOW row - a plain GET form (no client-side JS), same pattern /public/search's own filter
+    // form already uses. Hidden fields carry the current view/date so applying a filter doesn't also
+    // reset which page you're looking at. anchorHiddenField gives Month vs. Week/Day their own
+    // param name (month= vs date=), matching MonthHref/WeekHref/DayHref's own scheme.
+    private static string AppendCategoryFilterForm(ViewMode mode, DateTime anchor, FilterState filter)
+    {
+        var anchorField = mode == ViewMode.Month
+            ? $"""<input type="hidden" name="month" value="{anchor:yyyy-MM}">"""
+            : $"""<input type="hidden" name="date" value="{anchor:yyyy-MM-dd}">""";
+        var viewField = $"""<input type="hidden" name="view" value="{mode.ToString().ToLowerInvariant()}">""";
+
+        var categoryLabels = CalendarStyles.SheetCategories.Select(cat =>
+        {
+            var isOn = filter.Categories.Contains(cat);
+            return $"""
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
+                    <input type="checkbox" name="categories" value="{cat}"{(isOn ? " checked" : "")}>
+                    <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:{CalendarStyles.CategoryColor(cat)}"></span>
+                    {H(CalendarStyles.CategoryLabel(cat))}
+                </label>
+                """;
+        });
+
+        return $"""
+            <form method="get" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:11px">
+                <input type="hidden" name="filtered" value="1">
+                {viewField}
+                {anchorField}
+                <span style="font-weight:600;color:#90a0ab;font-size:10px;letter-spacing:.05em">SHOW</span>
+                {string.Join("", categoryLabels)}
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
+                    <input type="checkbox" name="showClubEvents" value="1"{(filter.ShowClubEvents ? " checked" : "")}>
+                    Club events
+                </label>
+                <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:11px;cursor:pointer">Apply</button>
+            </form>
             """;
     }
 
@@ -192,15 +323,17 @@ public static class PublicCalendarEndpoint
 
     // ── Month view ──────────────────────────────────────────────────────────────────────────────
 
-    private static async Task<string> RenderMonthPageAsync(DateTime anchorMonth, DateTime today, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderMonthPageAsync(DateTime anchorMonth, DateTime today, FilterState filter, PublicAvailabilityService service, CancellationToken ct)
     {
-        var view = await service.GetMonthViewAsync(anchorMonth, ct);
+        var view = ApplyFilter(await service.GetMonthViewAsync(anchorMonth, ct), filter);
+        var filterQuery = FilterQuery(filter);
         var sb = new StringBuilder();
         AppendPageOpen(sb);
 
         sb.Append(NavBar(anchorMonth.ToString("MMMM yyyy"),
-            MonthHref(anchorMonth.AddMonths(-1)), MonthHref(today), MonthHref(anchorMonth.AddMonths(1)),
-            ViewMode.Month, anchorMonth));
+            MonthHref(anchorMonth.AddMonths(-1), filterQuery), MonthHref(today, filterQuery), MonthHref(anchorMonth.AddMonths(1), filterQuery),
+            ViewMode.Month, anchorMonth, filterQuery));
+        sb.Append(AppendCategoryFilterForm(ViewMode.Month, anchorMonth, filter));
 
         sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:10px">""");
         foreach (var name in new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" })
@@ -278,11 +411,12 @@ public static class PublicCalendarEndpoint
     private const double AllDayChipHeightPx = 18;
     private const double AllDayChipGapPx = 2;
 
-    private static async Task<string> RenderWeekPageAsync(DateTime anchorDate, DateTime today, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderWeekPageAsync(DateTime anchorDate, DateTime today, FilterState filter, PublicAvailabilityService service, CancellationToken ct)
     {
         var weekStart = anchorDate.AddDays(-(int)anchorDate.DayOfWeek);
-        var view = await service.GetWeekViewAsync(weekStart, ct);
+        var view = ApplyFilter(await service.GetWeekViewAsync(weekStart, ct), filter);
         var days = Enumerable.Range(0, 7).Select(i => weekStart.AddDays(i)).ToList();
+        var filterQuery = FilterQuery(filter);
 
         var sb = new StringBuilder();
         AppendPageOpen(sb);
@@ -292,8 +426,9 @@ public static class PublicCalendarEndpoint
             ? $"{weekStart:MMM d} - {weekEnd:MMM d, yyyy}"
             : $"{weekStart:MMM d, yyyy} - {weekEnd:MMM d, yyyy}";
         sb.Append(NavBar(title,
-            WeekHref(weekStart.AddDays(-7)), WeekHref(today), WeekHref(weekStart.AddDays(7)),
-            ViewMode.Week, weekStart));
+            WeekHref(weekStart.AddDays(-7), filterQuery), WeekHref(today, filterQuery), WeekHref(weekStart.AddDays(7), filterQuery),
+            ViewMode.Week, weekStart, filterQuery));
+        sb.Append(AppendCategoryFilterForm(ViewMode.Week, weekStart, filter));
 
         AppendHourlyGrid(sb, days, view, showDayHeaders: true);
         AppendLegend(sb);
@@ -301,16 +436,18 @@ public static class PublicCalendarEndpoint
         return sb.ToString();
     }
 
-    private static async Task<string> RenderDayPageAsync(DateTime day, DateTime today, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderDayPageAsync(DateTime day, DateTime today, FilterState filter, PublicAvailabilityService service, CancellationToken ct)
     {
-        var view = await service.GetDayViewAsync(day, ct);
+        var view = ApplyFilter(await service.GetDayViewAsync(day, ct), filter);
+        var filterQuery = FilterQuery(filter);
 
         var sb = new StringBuilder();
         AppendPageOpen(sb);
 
         sb.Append(NavBar(day.ToString("dddd, MMMM d, yyyy"),
-            DayHref(day.AddDays(-1)), DayHref(today), DayHref(day.AddDays(1)),
-            ViewMode.Day, day));
+            DayHref(day.AddDays(-1), filterQuery), DayHref(today, filterQuery), DayHref(day.AddDays(1), filterQuery),
+            ViewMode.Day, day, filterQuery));
+        sb.Append(AppendCategoryFilterForm(ViewMode.Day, day, filter));
 
         AppendHourlyGrid(sb, [day], view, showDayHeaders: false);
         AppendLegend(sb);
