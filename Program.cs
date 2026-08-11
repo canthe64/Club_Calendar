@@ -19,6 +19,7 @@ builder.Services.AddRazorComponents()
 
 builder.Services.Configure<GraphOptions>(builder.Configuration.GetSection(GraphOptions.SectionName));
 builder.Services.Configure<FacilityOptions>(builder.Configuration.GetSection(FacilityOptions.SectionName));
+builder.Services.Configure<PracticeIceOptions>(builder.Configuration.GetSection(PracticeIceOptions.SectionName));
 builder.Services.Configure<AppLogOptions>(builder.Configuration.GetSection(AppLogOptions.SectionName));
 
 builder.Services.AddSingleton(sp =>
@@ -28,6 +29,7 @@ builder.Services.AddSingleton(sp =>
     return new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
 });
 builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphEventGateway, FacilityScheduler.Services.Graph.GraphEventGateway>();
+builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphMailGateway, FacilityScheduler.Services.Graph.GraphMailGateway>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
 builder.Services.AddSingleton<FacilityScheduler.Services.AppLogService>();
@@ -35,6 +37,7 @@ builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityService>();
+builder.Services.AddSingleton<FacilityScheduler.Services.PracticeIceRequestService>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>();
 
@@ -172,6 +175,7 @@ app.MapRazorComponents<App>()
 app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
 app.MapPublicSearchEndpoint();
+app.MapPracticeIcePublicEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
 app.MapSettingsLogsEndpoint();
 

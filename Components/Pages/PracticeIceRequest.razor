@@ -1,0 +1,159 @@
+@page "/practice-ice/request"
+@using System.Security.Claims
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject PublicAvailabilityService AvailabilityService
+@inject PracticeIceRequestService RequestService
+@inject FacilityConfiguration Facility
+@inject AuthenticationStateProvider AuthProvider
+
+@* No [Authorize]/[AllowAnonymous] needed here - Program.cs's fallback authorization policy already
+   requires sign-in on any page not explicitly marked anonymous, and this page deliberately isn't. *@
+
+<PageTitle>Request Practice Ice</PageTitle>
+
+<div style="padding:16px 24px;max-width:640px">
+    <h1 style="font-size:16px">Host Practice Ice</h1>
+
+    @if (_start is null)
+    {
+        <div style="padding:12px 16px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:8px;color:#a02c21;font-size:13px">
+            No valid start time was given. <a href="/public/practice-ice">Go back and pick a time</a>.
+        </div>
+    }
+    else if (_window is null)
+    {
+        <div style="padding:12px 16px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:8px;color:#a02c21;font-size:13px">
+            That slot is no longer available. <a href="/public/practice-ice">Go back and pick another time</a>.
+        </div>
+    }
+    else if (_result is { IsSuccess: true })
+    {
+        <div style="padding:12px 16px;border:1px solid #b8ddc0;background:#f0fbf3;border-radius:8px;color:#2d7a3f;font-size:13px">
+            Request submitted for @_start.Value.ToString("dddd, MMM d") @_start.Value.ToString("h:mmtt")-@_end.ToString("h:mmtt").
+            @if (_result.NotificationSent)
+            {
+                <text>Club approvers have been notified - you'll hear back once it's reviewed.</text>
+            }
+            else
+            {
+                <text>The automatic notification to approvers couldn't be sent, but your request was saved - please let a staff member know directly so it doesn't get missed.</text>
+            }
+        </div>
+    }
+    else
+    {
+        <p style="color:#5a7183;font-size:13px;margin-bottom:14px">
+            Requesting <strong>@_start.Value.ToString("dddd, MMM d")</strong> starting <strong>@_start.Value.ToString("h:mmtt")</strong>,
+            open to all @Facility.SheetMailboxes.Length sheets. Certified practice ice hosts run the
+            session on behalf of the whole club - anyone may attend.
+        </p>
+
+        <div style="margin-bottom:14px">
+            <label style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">Duration</label>
+            <select @bind="_durationMinutes" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:12px">
+                @foreach (var minutes in _durationOptions)
+                {
+                    <option value="@minutes">@FormatDuration(minutes)</option>
+                }
+            </select>
+        </div>
+
+        <div style="margin-bottom:14px">
+            <label style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">Notes (optional)</label>
+            <textarea @bind="_notes" rows="3" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:12px;width:100%;box-sizing:border-box"></textarea>
+        </div>
+
+        <label style="display:block;font-size:12px;margin-bottom:14px;cursor:pointer">
+            <input type="checkbox" @bind="_certified" /> I certify that I am qualified to host practice ice.
+        </label>
+
+        @if (_result is { IsSuccess: false })
+        {
+            <div style="margin-bottom:14px;padding:8px 12px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:6px;color:#a02c21;font-size:12px">@_result.Message</div>
+        }
+
+        <button class="btn btn-primary" @onclick="SubmitAsync" disabled="@_submitting">Submit request</button>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Start { get; set; }
+
+    private DateTime? _start;
+    private DateTime _end;
+    private PublicAvailabilityWindow? _window;
+    private List<int> _durationOptions = [];
+    private int _durationMinutes;
+    private string? _notes;
+    private bool _certified;
+    private bool _submitting;
+    private PracticeIceSubmitResult? _result;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // "yyyy-MM-ddTHH:mm" only, matching exactly how PracticeIcePublicEndpoint formats its links -
+        // this is facility-local wall-clock time with no offset, never meant to be parsed as UTC.
+        if (!DateTime.TryParseExact(Start, "yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var parsed))
+        {
+            return;
+        }
+
+        _start = parsed;
+        _window = await AvailabilityService.FindPracticeIceWindowContainingAsync(parsed);
+        if (_window is null)
+        {
+            return;
+        }
+
+        var maxMinutes = (int)(_window.End - parsed).TotalMinutes;
+        _durationOptions = PracticeIceRules.DurationOptionsMinutes(maxMinutes).ToList();
+        _durationMinutes = _durationOptions.FirstOrDefault();
+    }
+
+    private async Task SubmitAsync()
+    {
+        if (_start is null)
+        {
+            return;
+        }
+
+        _submitting = true;
+        try
+        {
+            var (name, email) = await GetHostIdentityAsync();
+            _end = _start.Value.AddMinutes(_durationMinutes);
+            _result = await RequestService.SubmitAsync(_start.Value, _durationMinutes, name, email, _certified, _notes);
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    // Identity always comes from the signed-in token, never from anything typed into this form - a
+    // typed email could be anyone's (docs/practice-ice-hosting-design.md §3.3). Live-confirmed
+    // 2026-08-09: for this tenant's actual token shape, Identity.Name (Microsoft.Identity.Web's
+    // NameClaimType) resolves to the UPN, not a display name - so the explicit "name" claim (the
+    // real "First Last" value) must be checked FIRST, with Identity.Name only as a last-resort
+    // fallback, not the other way around as originally written here.
+    private async Task<(string Name, string Email)> GetHostIdentityAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        var user = authState.User;
+
+        var name = user.FindFirst("name")?.Value ?? user.Identity?.Name ?? "Unknown";
+        var email = user.FindFirst("preferred_username")?.Value
+            ?? user.FindFirst(ClaimTypes.Email)?.Value
+            ?? user.FindFirst("email")?.Value
+            ?? user.Identity?.Name
+            ?? string.Empty;
+
+        return (name, email);
+    }
+
+    private static string FormatDuration(int minutes) =>
+        minutes % 60 == 0 ? $"{minutes / 60}h" : $"{minutes / 60}h {minutes % 60}m";
+}

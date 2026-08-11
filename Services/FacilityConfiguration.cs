@@ -18,7 +18,21 @@ public class FacilityConfiguration
     public string Name { get; }
     public string? LogoPath { get; }
 
-    public FacilityConfiguration(IOptions<FacilityOptions> options)
+    public int PracticeIceEligibleStartHour { get; }
+    public int PracticeIceEligibleEndHour { get; }
+    public int PracticeIceMinLeadHours { get; }
+    public int PracticeIceMaxHorizonDays { get; }
+    public string PracticeIceApproverEmail { get; }
+    public string PracticeIceMailerMailbox { get; }
+
+    /// <summary>False until both the approver distribution address and the mailer mailbox are set
+    /// (deployment-time config, deliberately left blank until then - see PracticeIceOptions). The
+    /// request flow checks this and blocks submission with an explicit message rather than silently
+    /// writing a hold nobody gets notified about.</summary>
+    public bool PracticeIceMailConfigured =>
+        !string.IsNullOrWhiteSpace(PracticeIceApproverEmail) && !string.IsNullOrWhiteSpace(PracticeIceMailerMailbox);
+
+    public FacilityConfiguration(IOptions<FacilityOptions> options, IOptions<PracticeIceOptions> practiceIceOptions)
     {
         var o = options.Value;
 
@@ -44,6 +58,36 @@ public class FacilityConfiguration
         ZoneInfo = TimeZoneInfo.FindSystemTimeZoneById(o.TimeZone);
         Name = o.Name;
         LogoPath = o.LogoPath;
+
+        var pi = practiceIceOptions.Value;
+
+        // Unlike TenantDomain/SheetMailboxLocalParts/TimeZone above, the approver email and mailer
+        // mailbox are allowed to be blank at startup (PracticeIceMailConfigured then gates the
+        // feature at request time) - an incremental feature shouldn't stop an already-running
+        // deployment from booting just because its notification path hasn't been configured yet.
+        // The hours/lead/horizon values ARE validated here, since a nonsensical value (start after
+        // end, negative lead time) would be a config mistake worth catching immediately rather than
+        // producing a silently-empty or silently-wrong availability window at request time.
+        if (pi.EligibleStartHour < 0 || pi.EligibleStartHour > 23 || pi.EligibleEndHour < 1 || pi.EligibleEndHour > 24
+            || pi.EligibleStartHour >= pi.EligibleEndHour)
+        {
+            throw new InvalidOperationException("PracticeIce:EligibleStartHour/EligibleEndHour must be a valid 0-24 range with Start < End.");
+        }
+        if (pi.MinLeadHours < 0)
+        {
+            throw new InvalidOperationException("PracticeIce:MinLeadHours cannot be negative.");
+        }
+        if (pi.MaxHorizonDays < 1)
+        {
+            throw new InvalidOperationException("PracticeIce:MaxHorizonDays must be at least 1.");
+        }
+
+        PracticeIceEligibleStartHour = pi.EligibleStartHour;
+        PracticeIceEligibleEndHour = pi.EligibleEndHour;
+        PracticeIceMinLeadHours = pi.MinLeadHours;
+        PracticeIceMaxHorizonDays = pi.MaxHorizonDays;
+        PracticeIceApproverEmail = pi.ApproverDistributionEmail;
+        PracticeIceMailerMailbox = pi.MailerMailbox;
     }
 
     // calendarView's startDateTime/endDateTime query parameters are interpreted as UTC by Graph

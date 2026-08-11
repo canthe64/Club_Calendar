@@ -76,8 +76,15 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Shared secret Breely must send in the `X-Webhook-Secret` header on every call to `/api/webhooks/breely` (architecture doc §4.8/§5.5) | **Yes** — this is the only thing gating a write-capable anonymous endpoint | user-secrets only, never committed | App Service Environment variables, marked as a "slot setting"/secret if the host supports it |
 | `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path where the app's rotating activity/debug log files live (architecture doc §4.9) | No | `App_Data/logs` (relative, under the project folder) is fine locally | **Must** be set to a path outside the deployed app folder — see §2.3 below |
 | `AppLog:RetentionDays` | `AppLog__RetentionDays` | How many days of rotated log files to keep before automatic deletion | No | optional, defaults to `30` | optional |
+| `PracticeIce:EligibleStartHour` / `EligibleEndHour` | `PracticeIce__EligibleStartHour` / `__EligibleEndHour` | Hours (0-24, Start < End) practice ice may be requested within, each day | No | optional, defaults to `6`/`22` | optional |
+| `PracticeIce:MinLeadHours` | `PracticeIce__MinLeadHours` | Minimum hours in advance a slot must be requested | No | optional, defaults to `48` | optional |
+| `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How many days out slots are offered | No | optional, defaults to `30` | optional |
+| `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Mail-enabled group notified when a member submits a request | No, but see below | not a secret, but keep out of the tracked `appsettings.json` regardless — see the note below the table | App Service Environment variables |
+| `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox the app sends practice ice notifications as, via Graph `Mail.Send` (application permission) | No, but see below | same | App Service Environment variables |
 
-**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below).
+**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below). `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` are the same shape again — the app boots fine blank, but practice ice submission is blocked outright (rather than silently accepting a hold nobody gets notified about) until both are set; see §2.4.
+
+**A note on the two `PracticeIce` mail addresses specifically:** neither is a secret the way a client secret is, but real values still don't belong committed into the tracked `appsettings.json` — that file is meant to carry only the blank placeholders shipped in the repo, same as every other section above. It's easy to forget this while iterating locally (live-hit 2026-08-11); double-check `git diff appsettings.json` before committing if you've been testing with real addresses filled in.
 
 ### 2.1 Representing the `SheetMailboxLocalParts` array as environment variables
 
@@ -117,6 +124,73 @@ The index (`__0`, `__1`, …) must be contiguous starting from `0` with no gaps,
 4. After deploying, sign in and open **Settings** (`/settings`) — confirm a log entry appears after taking any action (create/edit/cancel a booking), and that the level toggle saves and takes effect immediately.
 
 No action is needed for the app to function without this configured — the fallback just means log history won't survive a redeploy, which defeats the point of having it in production.
+
+### 2.4 Setting up practice ice hosting's notification email
+
+Practice ice hosting (architecture doc §5.4.4) sends email via Graph `Mail.Send` from the mailbox
+set as `PracticeIce:MailerMailbox`. This needs two things beyond the config table above, and the
+second one is the part actually worth reading carefully — it's what took the longest to diagnose the
+first time through.
+
+1. **Grant `Mail.Send`** as an **application** permission (not delegated) on the same Entra app
+   registration used for `Graph:ClientId`/`Calendars.ReadWrite` (§1.1), with admin consent. This app
+   only ever uses app-only Graph calls (§6.2 of the architecture doc), so there's no separate
+   delegated flow to configure.
+2. **Add the mailer mailbox to the same Application Access Policy scope group** that already
+   restricts `Calendars.ReadWrite` to the sheet + Club Events mailboxes (§7 step 2/6 of the
+   provisioning checklist). Application Access Policies scope by **app + group membership, not by
+   permission** — there's no way to grant `Mail.Send` on a narrower set of mailboxes than
+   `Calendars.ReadWrite` already covers without creating an entirely separate policy and group, and
+   for a single low-volume mailer that's not worth the extra moving part. The one real trade-off:
+   the app also technically gains `Calendars.ReadWrite` on the mailer mailbox itself once it joins
+   the group — harmless (the app has no reason to ever call it) but worth knowing rather than
+   discovering later.
+
+**Diagnosing it, if mail sends fail with an error like:**
+
+```
+Access to OData is disabled: [RAOP] : Blocked by tenant configured AppOnly AccessPolicy settings.
+```
+
+That's Exchange's Application Access Policy layer, not a `Mail.Send` consent problem (a missing
+consent grant fails earlier, before reaching Exchange, with a different error). First, confirm which
+group is actually in scope — the exact property name returned varies by Exchange Online Management
+module version, so ask for everything rather than guessing a specific one:
+
+```powershell
+Connect-ExchangeOnline
+Get-ApplicationAccessPolicy | Format-List *
+```
+
+Look for `ScopeName`/`ScopeIdentity` (or `PolicyScopeGroupId` on older module versions) matching the
+`AppId` equal to `Graph:ClientId`. Add the mailer mailbox as a member of that group:
+
+```powershell
+Add-DistributionGroupMember -Identity "<the group name>" -Member "<mailer mailbox address>"
+```
+
+(If that errors because the group is a Microsoft 365 Group rather than a distribution/mail-enabled
+security group, use `Add-UnifiedGroupLinks -Identity "<group>" -LinkType Members -Links "<mailer mailbox address>"` instead.)
+
+Then verify directly, rather than just retrying and guessing whether it worked:
+
+```powershell
+Test-ApplicationAccessPolicy -AppId <Graph:ClientId> -Identity "<mailer mailbox address>"
+```
+
+`AccessCheckResult: Granted` confirms the *current* directory/policy state is correct — but this is
+where the real gotcha is: **the live Graph/Exchange enforcement path that actually throws `[RAOP]`
+does not necessarily share a cache with this diagnostic cmdlet.** A real case (2026-08-11) showed
+`Granted` here well within Microsoft's quoted ~30-minute propagation window, while the actual
+`sendMail` call kept failing for some time afterward — group-*membership* changes to an existing
+policy appear to propagate on a slower, separate cache than the diagnostic check reflects. There is
+no customer-facing way to force that cache to flush. If `Test-ApplicationAccessPolicy` says
+`Granted` and it's still failing, the fix is already correct — just retry again later rather than
+re-diagnosing from scratch.
+
+No action is needed for the app to function without any of this configured — practice ice submission
+is blocked with an explicit "not accepted yet" message (`PracticeIceMailConfigured`, §2 above) rather
+than silently creating an unnotified hold.
 
 ---
 
@@ -319,8 +393,7 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 
 ## 6. Post-Deploy Verification Checklist
 
-- [ ] Visiting the app's root URL (`/`) shows the connectivity check page returning **OK** for every configured mailbox (sheet mailboxes + Club Events). A `FAILED` row here usually means either the Application Access Policy/RBAC scoping (architecture doc §6.3) or the `Facility` configuration is wrong.
-- [ ] Staff sign-in (Entra SSO) succeeds and the `/calendar` page loads real data.
+- [ ] Staff sign-in (Entra SSO) succeeds and the app's root URL (`/`, which routes directly to `/calendar` as of D63) loads real data for every configured mailbox. A blank calendar or a Graph error here usually means either the Application Access Policy/RBAC scoping (architecture doc §6.3) or the `Facility` configuration is wrong.
 - [ ] A non-assigned account is correctly blocked from signing in, if §1.2's Enterprise Application assignment restriction was configured.
 - [ ] `/public/calendar` loads without signing in, in a private/incognito browser window.
 - [ ] `/api/public/availability` returns JSON without signing in.
@@ -330,4 +403,6 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 - [ ] `Facility:TimeZone` is genuinely the facility's own zone, not left at a placeholder — every "today" in the app (the staff/public calendar's Today button, new-booking defaults, the public availability window) is computed from it (`FacilityConfiguration.Today`, architecture doc §4.6). A wrong zone here silently shifts what "today" means, most noticeably in the evening.
 - [ ] `curl -I https://<your-app>/calendar` (or any staff page) shows `X-Frame-Options: DENY` and a `Content-Security-Policy` header; the same check against `/public/calendar` should show neither — that page is the one deliberate exception (architecture doc §6.4).
 - [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.
+- [ ] `/public/practice-ice` loads without signing in; clicking an open slot and submitting a real request (§2.4) creates a `Practice Ice` hold visible on `/calendar` and sends the approver notification email — if it doesn't, see §2.4's diagnosis steps before assuming the code is wrong. Approve or decline it from `/practice-ice/approvals` and confirm the volunteer's confirmation/decline email arrives.
+- [ ] **Before inviting any member as a guest for practice ice hosting:** read the architecture doc §8's newest risk-register row. There is currently no role distinction in this app between "staff" and "any signed-in user" — a member guest-invited only to submit a practice ice request can reach the full staff Calendar, Settings, and the approvals queue itself. Decide how to handle this (an app-role/group-based restriction, or accepting it at low member counts) before this goes out at any real volume, not after.
 - [ ] (IIS only) The site is bound to 443 with a valid, non-expired certificate, and Windows Firewall shows only the expected inbound ports open.

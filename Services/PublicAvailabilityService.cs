@@ -199,6 +199,111 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     }
 
     /// <summary>
+    /// Windows, aligned to a 30-minute grid, where every sheet is simultaneously free of any booking
+    /// - any category, any state - and not covered by an ice-blocking club event: the pool of times
+    /// a member could volunteer to host practice ice (docs/practice-ice-hosting-design.md §3.1).
+    /// Deliberately different from GetOpenSlotsAsync above, which reports existing GroupEvent+Hold
+    /// rental inventory - group events, by policy, always take priority over practice ice, so
+    /// anything already on the calendar (sold or not) blocks a window here. Clipped to
+    /// [now + PracticeIceMinLeadHours, now + PracticeIceMaxHorizonDays] and floored at
+    /// PracticeIceRules.MinSessionMinutes so a sliver too short for any real session isn't offered.
+    /// </summary>
+    public async Task<List<PublicAvailabilityWindow>> GetPracticeIceWindowsAsync(CancellationToken ct = default)
+    {
+        var now = facility.Now;
+        var earliestStart = RoundUpToGrid(now.AddHours(facility.PracticeIceMinLeadHours), PracticeIceRules.SlotIntervalMinutes);
+        var latestEnd = RoundDownToGrid(now.AddDays(facility.PracticeIceMaxHorizonDays), PracticeIceRules.SlotIntervalMinutes);
+
+        var rangeStart = facility.Today;
+        var rangeEnd = latestEnd.Date.AddDays(1);
+        var cacheKey = $"practice-ice-windows:{rangeStart:yyyyMMdd}:{rangeEnd:yyyyMMdd}";
+
+        if (cache.TryGetValue(cacheKey, out List<PublicAvailabilityWindow>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var freeSlots = await GetFreeSlotsAsync(rangeStart, rangeEnd, ct);
+        var merged = FindConcurrentAvailability(freeSlots, facility.SheetMailboxes.Length);
+
+        var windows = merged
+            .Select(w => new PublicAvailabilityWindow(RoundUpToGrid(w.Start, PracticeIceRules.SlotIntervalMinutes), RoundDownToGrid(w.End, PracticeIceRules.SlotIntervalMinutes)))
+            .Select(w => new PublicAvailabilityWindow(w.Start < earliestStart ? earliestStart : w.Start, w.End > latestEnd ? latestEnd : w.End))
+            .Where(w => w.End - w.Start >= TimeSpan.FromMinutes(PracticeIceRules.MinSessionMinutes))
+            .OrderBy(w => w.Start)
+            .ToList();
+
+        cache.Set(cacheKey, windows, CacheTtl);
+        return windows;
+    }
+
+    /// <summary>The practice ice window (if any) that contains <paramref name="start"/> - used both
+    /// to populate the request page's duration options and to re-validate a submission server-side,
+    /// since the query string carrying the chosen start is untrusted and can be stale. This is a
+    /// courtesy check against a up-to-60s-cached view, not the safety mechanism - CreateAcrossSheetsAsync's
+    /// own live, locked conflict check is what actually prevents a double-booking (§4.3).</summary>
+    public async Task<PublicAvailabilityWindow?> FindPracticeIceWindowContainingAsync(DateTime start, CancellationToken ct = default)
+    {
+        var windows = await GetPracticeIceWindowsAsync(ct);
+        return windows.FirstOrDefault(w => start >= w.Start && start < w.End);
+    }
+
+    /// <summary>Every sheet's free time within eligible hours, per day, over [start,end) - the
+    /// complement of GetOpenSlotsAsync's "already-advertised rental inventory": here, ANY booking
+    /// (every category, every state) and any ice-blocking club event removes time from what's
+    /// offered, since practice ice is only allowed when nothing else is planned, confirmed or not.</summary>
+    private async Task<List<PublicSheetSlot>> GetFreeSlotsAsync(DateTime start, DateTime end, CancellationToken ct)
+    {
+        var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
+        var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
+        var closures = clubEvents
+            .Where(ce => ce.MarksSheetsUnavailable)
+            .Select(ce => (ce.Start, End: ce.IsAllDay ? ce.End.Date.AddDays(1) : ce.End))
+            .ToList();
+
+        var result = new List<PublicSheetSlot>();
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            var sheetBookings = bookings.Where(b => b.SheetMailbox == sheet).ToList();
+
+            for (var day = start.Date; day < end; day = day.AddDays(1))
+            {
+                var dayStart = day.AddHours(facility.PracticeIceEligibleStartHour);
+                var dayEnd = day.AddHours(facility.PracticeIceEligibleEndHour);
+
+                var blockers = sheetBookings
+                    .Where(b => b.Start < dayEnd && b.End > dayStart)
+                    .Select(b => (b.Start, b.End))
+                    .Concat(closures.Where(c => c.Start < dayEnd && c.End > dayStart))
+                    .ToList();
+
+                foreach (var (segStart, segEnd) in CalendarStyles.SubtractIntervals(dayStart, dayEnd, blockers))
+                {
+                    if (segEnd > segStart)
+                    {
+                        result.Add(new PublicSheetSlot(SheetLabel(sheet), segStart, segEnd));
+                    }
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static DateTime RoundUpToGrid(DateTime t, int minutes)
+    {
+        var gridTicks = TimeSpan.FromMinutes(minutes).Ticks;
+        var remainder = t.Ticks % gridTicks;
+        return remainder == 0 ? t : t.AddTicks(gridTicks - remainder);
+    }
+
+    private static DateTime RoundDownToGrid(DateTime t, int minutes)
+    {
+        var gridTicks = TimeSpan.FromMinutes(minutes).Ticks;
+        return t.AddTicks(-(t.Ticks % gridTicks));
+    }
+
+    /// <summary>
     /// The public month calendar's data - unlike GetAvailabilityAsync (GroupEvent+Hold "available for
     /// group event" slots only, a subordinate feature), this covers every category and state, reduced to
     /// just category+time+confirmed-state. The public calendar's primary purpose is letting members
@@ -286,10 +391,34 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     // real customer names for confirmed Breely bookings. A booking's ExternalBookingId is only ever
     // set by the webhook (never by staff-facing UI), so it's a reliable signal to substitute a
     // neutral label here without affecting the staff-facing calendar, which still shows the real name.
-    private static string PublicTitle(SheetBooking b) =>
-        !string.IsNullOrWhiteSpace(b.ExternalBookingId)
-            ? CalendarStyles.CategoryLabel(b.Category)
-            : (string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName);
+    private static string PublicTitle(SheetBooking b)
+    {
+        if (!string.IsNullOrWhiteSpace(b.ExternalBookingId))
+        {
+            return CalendarStyles.CategoryLabel(b.Category);
+        }
+
+        if (b.Category == BookingCategory.PracticeIce)
+        {
+            return PracticeIceTitle(b.RenterName);
+        }
+
+        return string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
+    }
+
+    // The host volunteers to run this session on behalf of the whole club, so naming them publicly
+    // is a deliberate, accepted use of PII (docs/practice-ice-hosting-design.md §3.6) - but the
+    // title must never be JUST the name (that's the generic RenterName-as-title behavior every other
+    // category uses above, and reads as anonymous/unlabeled for a session anyone should feel
+    // welcome at) and must never show a raw UPN/email if that's all a sign-in claim supplied instead
+    // of a real display name - "Practice Ice" alone is the safe fallback either way.
+    private static string PracticeIceTitle(string? renterName)
+    {
+        var label = CalendarStyles.CategoryLabel(BookingCategory.PracticeIce);
+        return !string.IsNullOrWhiteSpace(renterName) && !renterName.Contains('@')
+            ? $"{label} - Hosted by {renterName}"
+            : label;
+    }
 
     // Mirrors MonthGrid.razor/WeekGrid.razor's own DedupeKey exactly: BookingGroupId when it's a
     // real, persisted group id; falls back to (SheetMailbox, EventId) for Guid.Empty, since that's

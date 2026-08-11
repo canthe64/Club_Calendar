@@ -18,7 +18,7 @@ public static class TestFacility
     public static readonly string[] SheetMailboxes = [.. SheetLocalParts.Select(p => $"{p}@{TenantDomain}")];
     public static readonly string ClubEventsMailbox = $"{ClubEventsLocalPart}@{TenantDomain}";
 
-    public static FacilityConfiguration Create(string[]? sheetLocalParts = null, string timeZoneId = TimeZoneId) =>
+    public static FacilityConfiguration Create(string[]? sheetLocalParts = null, string timeZoneId = TimeZoneId, PracticeIceOptions? practiceIce = null) =>
         new(Options.Create(new FacilityOptions
         {
             TenantDomain = TenantDomain,
@@ -26,6 +26,12 @@ public static class TestFacility
             ClubEventsMailboxLocalPart = ClubEventsLocalPart,
             TimeZone = timeZoneId,
             Name = "Test Facility"
+        }), Options.Create(practiceIce ?? new PracticeIceOptions
+        {
+            // Filled in by default so most tests exercise the "mail configured" path; a test
+            // specifically covering the unconfigured/blocked path passes its own PracticeIceOptions.
+            ApproverDistributionEmail = "approvers@test.onmicrosoft.com",
+            MailerMailbox = "mailer@test.onmicrosoft.com"
         }));
 
     /// <summary>Builds a Graph DateTimeTimeZone the same way the app's own ToGraphEvent does -

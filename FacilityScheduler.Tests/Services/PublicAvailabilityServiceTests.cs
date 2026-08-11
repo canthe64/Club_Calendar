@@ -89,4 +89,64 @@ public class PublicAvailabilityServiceTests
         Assert.Contains(view.Bookings, b => b.Title == "Team A");
         Assert.Contains(view.Bookings, b => b.Title == "Team B");
     }
+
+    [Fact]
+    public async Task PracticeIceBooking_TitleNamesTheHost()
+    {
+        // The host is named publicly by design (docs/practice-ice-hosting-design.md §3.6), but
+        // never as a bare RenterName the way League/Bonspiel titles work - "Practice Ice" must
+        // always be part of the title so the session reads as open-to-everyone, not a private booking.
+        var (publicService, bookingService, facility) = Build();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
+            Category = BookingCategory.PracticeIce, State = BookingState.Hold, RenterName = "Jane Curler", RenterEmail = "jane@example.com"
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        var booking = Assert.Single(view.Bookings);
+        Assert.Equal("Practice Ice - Hosted by Jane Curler", booking.Title);
+    }
+
+    [Fact]
+    public async Task PracticeIceBooking_NoRenterName_TitleIsJustPracticeIce()
+    {
+        var (publicService, bookingService, facility) = Build();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
+            Category = BookingCategory.PracticeIce, State = BookingState.Hold
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        var booking = Assert.Single(view.Bookings);
+        Assert.Equal("Practice Ice", booking.Title);
+    }
+
+    [Fact]
+    public async Task PracticeIceBooking_RenterNameLooksLikeAnEmail_TitleNeverExposesTheRawAddress()
+    {
+        // Guards against a sign-in claim shape that supplies a UPN/email instead of a real display
+        // name (live-found 2026-08-09) - the public title must fall back to the safe label rather
+        // than publish what looks like an email address.
+        var (publicService, bookingService, facility) = Build();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
+            Category = BookingCategory.PracticeIce, State = BookingState.Hold, RenterName = "jane@example.com"
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        var booking = Assert.Single(view.Bookings);
+        Assert.Equal("Practice Ice", booking.Title);
+    }
 }

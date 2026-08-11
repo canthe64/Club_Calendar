@@ -1,0 +1,171 @@
+@page "/practice-ice/approvals"
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject PracticeIceRequestService RequestService
+@inject AuthenticationStateProvider AuthProvider
+
+<PageTitle>Practice Ice Requests</PageTitle>
+
+<div style="padding:16px 24px;max-width:800px">
+    <h1 style="font-size:16px">Practice Ice Requests</h1>
+    <p style="color:#5a7183;font-size:13px;margin-bottom:16px">
+        Pending requests, ordered by how soon the requested slot arrives - not by when the request
+        came in, since a request's own submission time isn't tracked. The soonest slot is the one
+        most likely to need a decision first.
+    </p>
+
+    @if (_actionMessage is not null)
+    {
+        <div style="margin-bottom:14px;padding:8px 12px;border-radius:6px;font-size:12px;@(_actionMessageIsWarning ? "border:1px solid #f0d58c;background:#fdf8ec;color:#8a6d1f" : "border:1px solid #b8ddc0;background:#f0fbf3;color:#2d7a3f")">
+            @_actionMessage
+        </div>
+    }
+
+    @if (_loading)
+    {
+        <div style="font-size:12px;color:#90a0ab;text-align:center;padding:20px">
+            Loading...
+        </div>
+    }
+    else if (_pending.Count == 0)
+    {
+        <div style="font-size:12px;color:#90a0ab;border:1px dashed #d7dfe5;border-radius:8px;padding:20px;text-align:center">
+            No pending requests.
+        </div>
+    }
+    else
+    {
+        <div style="display:flex;flex-direction:column;gap:10px">
+            @foreach (var request in _pending)
+            {
+                <div style="border:1px solid #e7ecef;border-radius:8px;padding:12px 16px">
+                    <div style="font-size:13px;font-weight:600;color:#1e2a33">
+                        @request.Start.ToString("dddd, MMM d") · @request.Start.ToString("h:mmtt")-@request.End.ToString("h:mmtt")
+                        <span style="color:#90a0ab;font-weight:400">(@request.SheetCount sheet@(request.SheetCount == 1 ? "" : "s"))</span>
+                    </div>
+                    <div style="font-size:12px;color:#5a7183;margin-top:2px">@request.HostName @(string.IsNullOrWhiteSpace(request.HostEmail) ? "" : $"· {request.HostEmail}")</div>
+                    @if (!string.IsNullOrWhiteSpace(request.Notes))
+                    {
+                        <div style="font-size:12px;color:#5a7183;margin-top:6px;font-style:italic">"@request.Notes"</div>
+                    }
+
+                    @if (_decliningId == request.BookingGroupId)
+                    {
+                        <div style="margin-top:10px">
+                            <textarea @bind="_declineReason" placeholder="Reason for declining (shared with the volunteer)" rows="2"
+                                      style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:12px;width:100%;box-sizing:border-box"></textarea>
+                            @if (_error is not null)
+                            {
+                                <div style="color:#a02c21;font-size:12px;margin-top:4px">@_error</div>
+                            }
+                            <div style="margin-top:6px">
+                                <button class="btn btn-primary" @onclick="() => ConfirmDeclineAsync(request.BookingGroupId)" disabled="@_busy">Confirm decline</button>
+                                <button class="btn btn-secondary" style="margin-left:8px" @onclick="CancelDecline" disabled="@_busy">Cancel</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div style="margin-top:10px">
+                            <button class="btn btn-primary" @onclick="() => ApproveAsync(request.BookingGroupId)" disabled="@_busy">Approve</button>
+                            <button class="btn btn-secondary" style="margin-left:8px" @onclick="() => StartDecline(request.BookingGroupId)" disabled="@_busy">Decline</button>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<PracticeIceRequestSummary> _pending = [];
+    private Guid? _decliningId;
+    private string _declineReason = "";
+    private string? _error;
+    private bool _busy;
+    private string? _actionMessage;
+    private bool _actionMessageIsWarning;
+
+    // Starts true so the initial synchronous render (before OnInitializedAsync's await completes)
+    // shows a loading state instead of momentarily flashing "No pending requests." - only ever
+    // cleared here, not before the later refreshes after Approve/Decline, since the list staying
+    // populated during those is correct (there's really no "loading" gap worth showing there).
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await RefreshAsync();
+        _loading = false;
+    }
+
+    private async Task RefreshAsync() => _pending = await RequestService.GetPendingAsync();
+
+    private void StartDecline(Guid bookingGroupId)
+    {
+        _decliningId = bookingGroupId;
+        _declineReason = "";
+        _error = null;
+    }
+
+    private void CancelDecline()
+    {
+        _decliningId = null;
+        _error = null;
+    }
+
+    private async Task ApproveAsync(Guid bookingGroupId)
+    {
+        _busy = true;
+        try
+        {
+            var actor = await GetCurrentUserNameAsync();
+            var result = await RequestService.ApproveAsync(bookingGroupId, actor);
+            SetActionMessage(result, "Approved.");
+            await RefreshAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private async Task ConfirmDeclineAsync(Guid bookingGroupId)
+    {
+        if (string.IsNullOrWhiteSpace(_declineReason))
+        {
+            _error = "A reason is required - it's shared with the volunteer.";
+            return;
+        }
+
+        _busy = true;
+        try
+        {
+            var actor = await GetCurrentUserNameAsync();
+            var result = await RequestService.DeclineAsync(bookingGroupId, _declineReason, actor);
+            SetActionMessage(result, "Declined.");
+            _decliningId = null;
+            await RefreshAsync();
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    // Surfaces whether the volunteer was actually notified - discarding this outcome entirely was
+    // the bug (live-found 2026-08-09): a mail failure was logged, but nothing on screen told the
+    // staff member who just clicked Approve/Decline that the volunteer never heard about it.
+    private void SetActionMessage(PracticeIceActionResult result, string verb)
+    {
+        _actionMessageIsWarning = !result.NotificationSent;
+        _actionMessage = result.NotificationSent
+            ? $"{verb} The volunteer has been notified."
+            : $"{verb} The notification email to the volunteer couldn't be sent - please contact them directly.";
+    }
+
+    private async Task<string> GetCurrentUserNameAsync()
+    {
+        var authState = await AuthProvider.GetAuthenticationStateAsync();
+        return authState.User.Identity?.Name ?? "Unknown";
+    }
+}

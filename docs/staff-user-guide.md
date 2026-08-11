@@ -1,8 +1,9 @@
 # GCC Ice & Event Calendar — Staff User Guide
 
 **Audience:** staff who create, edit, and cancel bookings through the app.
-**Scope:** everything on the staff-facing `/calendar`, `/club-events`, and `/settings` pages. The
-public calendar members see is read-only and needs no instructions.
+**Scope:** everything on the staff-facing `/calendar`, `/club-events`, `/settings`, and
+`/practice-ice/approvals` pages. The public calendar members see is read-only and needs no
+instructions.
 
 ---
 
@@ -218,3 +219,31 @@ If a page shows **"Something went wrong loading this page"** instead of its usua
 **Try again**. This is usually a one-off (a transient Graph hiccup, a stale view) and clicking Try
 again reloads just that page in place - no need to sign in again or lose anything else you had open
 elsewhere. If it keeps happening on the same action, that's worth reporting.
+
+---
+
+## 9. Practice Ice Requests
+
+Any properly-trained member can volunteer to host a practice ice session open to the whole club, at
+a time when nothing else is on the calendar. Members find open times and submit a request at
+`/public/practice-ice` (no sign-in needed to browse, sign-in required to actually submit); every
+request lands here for staff review before it's real.
+
+**Practice Ice Requests** (top nav bar, and also linked from Settings) lists every pending request,
+soonest first - a request whose slot is coming up soon is the one most likely to need a decision
+first, since (unlike a booking) there's no record of *when* a member actually submitted it. Each
+entry shows the requested time, the volunteer's name and email, and any notes they added.
+
+- **Approve** confirms the slot immediately - it becomes a real "Practice Ice" booking across every
+  sheet, and the volunteer gets an email letting them know.
+- **Decline** requires a short reason first (shown to the volunteer in their email, so they're not
+  left guessing) - type it, then **Confirm decline**. This removes the request entirely; there's no
+  record kept of a declined request once it's gone.
+
+**If the notification email couldn't be sent** (shown as a banner after either action, in amber
+rather than green), the approve or decline itself still went through - only the automatic email
+failed. Contact the volunteer directly in that case, since they won't have heard anything from the
+app.
+
+You can also get to the approval queue from an individual booking: opening any Practice Ice booking
+on the Calendar page that's still awaiting approval shows a link straight to this page.

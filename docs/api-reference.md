@@ -214,6 +214,24 @@ the same per-sheet-overlap-subtraction and closure-exclusion rules as `/api/publ
 booking or a `marksSheetsUnavailable` club event actually occupies part of it. Cross-linked with
 `/public/calendar` (a link each way in the header).
 
+### `GET /public/practice-ice`
+
+Returns a complete, self-contained HTML page (not JSON) - the anonymous half of practice ice hosting
+(architecture doc §5.4.4; full design rationale in `docs/practice-ice-hosting-design.md`). Lists
+upcoming windows where every sheet is genuinely free of any activity (a different, stricter
+"available" than every other endpoint on this page uses - see D68), each open half-hour linking to
+`/practice-ice/request?start=...`, an authenticated Blazor page (not part of this HTTP API - see
+[Staff-facing surface](#staff-facing-surface)) where a signed-in member actually submits the request.
+
+- **Auth:** none (anonymous) for this page; the linked request page requires sign-in.
+- **CORS:** not applicable (page navigation, not a cross-origin fetch).
+- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Cache:** server-side, 60 seconds, keyed by date range - the lead-time/horizon window itself
+  shifts continuously with the current time, so results reflect "now" within that cache window.
+
+**Response `200 OK`** — `text/html; charset=utf-8`. No query parameters; the eligible-hours/lead-time/
+horizon bounds come entirely from configuration (`PracticeIce:*`, deployment guide §2.4).
+
 ---
 
 ### `POST /api/webhooks/breely`
@@ -308,6 +326,15 @@ it would need to be built as its own set of Minimal API endpoints - following th
 public ones, but with `RequireAuthorization()` instead of `.AllowAnonymous()` - calling into the same
 service layer documented below rather than duplicating its logic.
 
+**Two pages added for practice ice hosting (§5.4.4) don't fit "staff-facing" cleanly.**
+`/practice-ice/request` and `/practice-ice/approvals` are ordinary authenticated Blazor pages, gated
+by the same default fallback policy as every staff page - but `/practice-ice/request` is meant for
+*members*, not staff, and this codebase has no role/group distinction between the two: any signed-in
+principal can reach every page listed above, including `/practice-ice/approvals` and the full staff
+Calendar. **This is a currently-unresolved access-control gap, not a documented design decision** -
+see the architecture doc §8's newest row for the full explanation before inviting members as guests
+at any real volume.
+
 ---
 
 ## Appendix: internal service-layer contract
@@ -353,11 +380,27 @@ all (neither against sheet bookings nor between club events).
 | `CancelAsync` | `Task CancelAsync(string eventId, string actingUser)` | Hard-deletes a club event. |
 | `GetEventsAsync` | `Task<List<ClubEvent>> GetEventsAsync(DateTime start, DateTime end)` | Reads club events in a window. Cached for 30 seconds, invalidated on every write. |
 
+### `PracticeIceRequestService`
+
+Added for practice ice hosting (architecture doc §5.4.4). The write path - `PublicAvailabilityService`
+(also new: `GetPracticeIceWindowsAsync`/`FindPracticeIceWindowContainingAsync`) stays read-only,
+matching the existing split between it and `SheetBookingService`.
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `SubmitAsync` | `Task<PracticeIceSubmitResult> SubmitAsync(DateTime start, int durationMinutes, string hostName, string hostEmail, bool certified, string? notes)` | Re-validates everything server-side against a fresh availability check (the query string/form inputs are untrusted), then writes a `PracticeIce`+`Hold` booking across every sheet via `SheetBookingService.CreateAcrossSheetsAsync` (same all-or-nothing guarantee, same live per-sheet-locked conflict check as every other write path). Blocks outright with `PracticeIceSubmitResult.Invalid` if `FacilityConfiguration.PracticeIceMailConfigured` is false, rather than silently creating an unnotified hold. On success, emails the approver group - a failed send doesn't undo the write or throw; it's reported via `NotificationSent` instead (D70). |
+| `GetPendingAsync` | `Task<List<PracticeIceRequestSummary>> GetPendingAsync()` | Every pending (`PracticeIce`+`Hold`) group, one row per `BookingGroupId`, ordered by upcoming start time (not submission age - `SheetBooking` has no created-at field). |
+| `ApproveAsync` | `Task<PracticeIceActionResult> ApproveAsync(Guid bookingGroupId, string actingUser)` | Confirms the group (`UpdateGroupAsync`) and emails the volunteer. `Success` reflects the confirm; `NotificationSent` is reported separately and independently (D70). |
+| `DeclineAsync` | `Task<PracticeIceActionResult> DeclineAsync(Guid bookingGroupId, string reason, string actingUser)` | Requires a non-empty `reason` (thrown as `ArgumentException` otherwise - the UI is expected to validate first). Cancels the group (`CancelGroupAsync`, hard delete per D9) and emails the volunteer with the reason. |
+
 ### Shared domain shapes
 
 | Type | Shape | Notes |
 |---|---|---|
 | `SheetBooking` | `EventId`, `ICalUId`, `SheetMailbox`, `Start`, `End`, `Category` (`BookingCategory`), `State` (`BookingState`), `RenterName`, `RenterPhone`, `RenterEmail`, `Notes`, `BookedBy`, `BookingGroupId` (Guid), `SeriesMasterId`, `ExternalBookingId` | `BookingGroupId` links every sheet's event belonging to one conceptual booking, even single-sheet ones. `SeriesMasterId` is set only on occurrences of a recurring series. `ExternalBookingId` (added for the Breely webhook, architecture doc §4.8) is non-null only for bookings that originated from an external platform's notification rather than staff entry - never set by staff-facing UI. |
+| `PracticeIceSubmitResult` | `IsSuccess`, `IsConflict`, `Message?`, `NotificationSent` | Result of `SubmitAsync`. `IsSuccess` reflects the booking write alone - `NotificationSent` is a separate flag so a mail failure never reads as a failed submission (D70). |
+| `PracticeIceRequestSummary` | `BookingGroupId`, `Start`, `End`, `HostName`, `HostEmail?`, `Notes?`, `SheetCount` | One pending request as shown on the approvals queue - the group's sheet-events collapsed into a single row. |
+| `PracticeIceActionResult` | `Success`, `NotificationSent` | Result of `ApproveAsync`/`DeclineAsync` - same split as `PracticeIceSubmitResult`, for the same reason. |
 | `ClubEvent` | `EventId`, `ICalUId`, `Title`, `Category` (`ClubEventCategory`), `Start`, `End`, `IsAllDay`, `MarksSheetsUnavailable`, `Notes`, `BookedBy` | Not tied to any sheet. |
 | `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `Other` | Display labels ("Group Event", "Practice Ice") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
 | `BookingState` | `Hold`, `Confirmed` | |
@@ -372,6 +415,13 @@ Singleton exposing the tenant's runtime configuration to every service above: `S
 `ToUtcQueryString(DateTime)`/`FromUtcResponseString(string)` helpers for Graph's UTC query-parameter
 and response conventions. Constructed eagerly at startup (`Program.cs:78-81`) so a misconfigured
 deployment fails immediately rather than on first request.
+
+Also exposes the practice ice settings (`PracticeIceEligibleStartHour`/`EligibleEndHour`,
+`PracticeIceMinLeadHours`/`MaxHorizonDays`, `PracticeIceApproverEmail`, `PracticeIceMailerMailbox`,
+`PracticeIceMailConfigured`). Unlike `Facility:TenantDomain`/`SheetMailboxLocalParts`/`TimeZone`,
+the two mail addresses are allowed to be blank at startup - `PracticeIceMailConfigured` gates the
+feature at request time instead, so an incremental feature rollout doesn't stop an already-running
+deployment from booting (deployment guide §2.4).
 
 ### `AppLogService`
 

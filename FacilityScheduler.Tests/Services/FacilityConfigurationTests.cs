@@ -1,5 +1,6 @@
 using System.Globalization;
 using FacilityScheduler.Tests.TestSupport;
+using FacilityScheduler;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -72,5 +73,60 @@ public class FacilityConfigurationTests
         Assert.Equal(new DateTime(2026, 8, 3), local.Date);
         Assert.Equal(18, local.Hour);
         Assert.Equal(30, local.Minute);
+    }
+
+    [Fact]
+    public void PracticeIceMailConfigured_FalseWhenEitherAddressIsBlank()
+    {
+        Assert.False(TestFacility.Create(practiceIce: new PracticeIceOptions()).PracticeIceMailConfigured);
+        Assert.False(TestFacility.Create(practiceIce: new PracticeIceOptions { ApproverDistributionEmail = "approvers@test.onmicrosoft.com" }).PracticeIceMailConfigured);
+        Assert.False(TestFacility.Create(practiceIce: new PracticeIceOptions { MailerMailbox = "mailer@test.onmicrosoft.com" }).PracticeIceMailConfigured);
+    }
+
+    [Fact]
+    public void PracticeIceMailConfigured_TrueWhenBothAddressesAreSet()
+    {
+        var facility = TestFacility.Create(practiceIce: new PracticeIceOptions
+        {
+            ApproverDistributionEmail = "approvers@test.onmicrosoft.com",
+            MailerMailbox = "mailer@test.onmicrosoft.com"
+        });
+
+        Assert.True(facility.PracticeIceMailConfigured);
+    }
+
+    // Deliberately allowed to boot with a blank mail config (unlike TenantDomain/SheetMailboxLocalParts/
+    // TimeZone below) - an incremental feature shouldn't stop an already-running deployment from
+    // starting just because its own notification path hasn't been configured yet.
+    [Fact]
+    public void Constructor_BlankPracticeIceMailAddresses_DoesNotThrow()
+    {
+        var ex = Record.Exception(() => TestFacility.Create(practiceIce: new PracticeIceOptions()));
+        Assert.Null(ex);
+    }
+
+    [Theory]
+    [InlineData(-1, 22)]
+    [InlineData(6, 25)]
+    [InlineData(22, 6)] // start >= end
+    public void Constructor_InvalidEligibleHours_Throws(int start, int end)
+    {
+        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(practiceIce: new PracticeIceOptions
+        {
+            EligibleStartHour = start,
+            EligibleEndHour = end
+        }));
+    }
+
+    [Fact]
+    public void Constructor_NegativeMinLeadHours_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(practiceIce: new PracticeIceOptions { MinLeadHours = -1 }));
+    }
+
+    [Fact]
+    public void Constructor_ZeroMaxHorizonDays_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(practiceIce: new PracticeIceOptions { MaxHorizonDays = 0 }));
     }
 }
