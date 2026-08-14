@@ -3,31 +3,29 @@
 ## Overview
 
 This app exposes **six** HTTP API endpoints. Staff functionality (creating and managing bookings,
-club events) is still built almost entirely as Blazor Server components rendered over an
-authenticated SignalR circuit, not called via HTTP - but as of Phase 10 that's no longer
-*absolute*: one endpoint below exists specifically because a file download doesn't fit the SignalR
-circuit (architecture doc §5.6).
+club events) is built almost entirely as Blazor Server components rendered over an authenticated
+SignalR circuit, not called via HTTP — the endpoints below are the deliberate exceptions.
 
-Five of the six are anonymous. Four of those five are read-only (three customer/member-facing, plus
-a staff-viewable diagnostic listener). The fifth anonymous endpoint, added in Phase 10, is the app's
-only anonymous **write** surface: a webhook that ingests booking notifications from the Breely
-booking platform (architecture doc §4.8/§5.5). It's a deliberate, bounded exception to "public
-surfaces are read-only," not a broadening of the general rule - see
-[`POST /api/webhooks/breely`](#post-apiwebhooksbreely).
+| Endpoint | Auth | Purpose |
+|---|---|---|
+| `GET /api/public/availability` | Anonymous | Minimized JSON availability feed for the CMS embed widget |
+| `GET /public/calendar` | Anonymous | Full public calendar page (Month/Week/Day) |
+| `GET /public/search` | Anonymous | "Find a window with ≥N sheets open" search page |
+| `GET /public/practice-ice` | Anonymous | Open times a member could volunteer to host practice ice |
+| `POST /api/webhooks/breely` | Shared secret | The one anonymous **write** surface — ingests Breely booking notifications (architecture doc §4.8/§5.5). A deliberate, bounded exception to "public surfaces are read-only," not a broadening of the rule. |
+| `GET /settings/logs/download` | Staff sign-in | Log archive download (architecture doc §5.6) |
 
-The sixth, also added in Phase 10, is the one **staff-authenticated** HTTP endpoint in the app: a
-log-file download (architecture doc §5.6) - see
-[`GET /settings/logs/download`](#get-settingslogsdownload). Every other staff action still happens
-as a method call inside the authenticated Blazor circuit, not a distinct HTTP request; this one
-endpoint exists only because Blazor Server's SignalR circuit isn't a good way to stream a file
-download, the same reasoning that keeps the anonymous endpoints below out of the Blazor component
-tree in the first place.
+**Why these are Minimal API endpoints rather than Blazor pages** — a hard rule (D15), confirmed by a
+live incident: `.AllowAnonymous()` was once tried on the shared Razor Components registration to
+carve out a public page, and it silently disabled authorization for *every* page in the app, because
+`MapRazorComponents<App>()` maps every routable component through one shared endpoint set. Any
+anonymous surface must live entirely outside the Blazor component tree. The staff-authenticated log
+download follows the same pattern for a different reason: streaming a file download doesn't fit the
+SignalR circuit.
 
-This is otherwise a deliberate architectural decision, confirmed by a live incident: at one point
-`.AllowAnonymous()` was tried on the shared Razor Components registration to carve out a public
-page, and it silently disabled authorization for *every* page in the app. The fix was to make the
-rule absolute - any anonymous surface must be a plain Minimal API endpoint living entirely outside
-the Blazor component tree, never a page inside it (`Program.cs:106-112`).
+Two authenticated Blazor **pages** also serve practice ice hosting (`/practice-ice/request`,
+`/practice-ice/approvals`) — they're pages, not API endpoints, so they aren't listed above; see
+[Staff-facing surface](#staff-facing-surface).
 
 This document covers:
 
@@ -44,17 +42,17 @@ This document covers:
 
 ## Public API
 
-The three read-only member/customer-facing endpoints below are all registered with
+The four read-only member/customer-facing endpoints below are all registered with
 `.AllowAnonymous()`, rate-limited via a shared fixed-window limiter (`public-api`: 60
 requests/minute per limiter instance, no queueing - excess requests get an immediate `429`), and
-never touch or expose renter-identifying data, resource mailbox addresses, or any booking category
-the club hasn't chosen to publish (architecture doc §5.4). Non-public categories (League, Bonspiel,
-Maintenance, Practice Ice, Other) are excluded from the availability feed entirely; the month
-calendar shows every category but strips nothing except the underlying mailbox address.
+never expose resource mailbox addresses. Renter-identifying data is governed by the three-case rule
+in the architecture doc §2.3: staff-typed titles shown as-is, Breely titles programmatically
+replaced, practice ice host names deliberately published. The JSON availability feed carries only
+open Group Event holds, so no other category appears in it at all; the calendar page shows every
+category.
 
-The booking webhook and the diagnostic capture listener (documented after the three read endpoints
-below) are also `.AllowAnonymous()`, but sit on their own separate `booking-webhook` rate limiter
-and carry their own secret-based auth on top of route isolation - see each endpoint's own section.
+The booking webhook is also `.AllowAnonymous()` but sits on its own separate `booking-webhook` rate
+limiter and carries secret-based auth on top of route isolation - see its own section below.
 
 ### `GET /api/public/availability`
 
@@ -328,12 +326,17 @@ service layer documented below rather than duplicating its logic.
 
 **Two pages added for practice ice hosting (§5.4.4) don't fit "staff-facing" cleanly.**
 `/practice-ice/request` is meant for *members*, not staff; `/practice-ice/approvals` is staff-only.
-As of Phase 11 (architecture doc §6.5/D74), the app's default authorization policy requires a `Staff`
-role claim (decided by live Entra group membership, not Entra's own App Role assignment - this
-tenant is Entra ID Free, which doesn't support the group-based version of that feature), applied to
-every page except `/practice-ice/request`'s own explicit `[Authorize(Policy="AnyAuthenticatedUser")]`
-carve-out. **Not yet live-verified against a real sign-in** - see the architecture doc §6.5/§8 before
-inviting members as guests at any real volume.
+Per architecture doc §6.5/D74, the app's default authorization policy requires the `facility:staff`
+claim (decided by live Entra group membership, not Entra's own App Role assignment - this tenant is
+Entra ID Free, which doesn't support the group-based version of that feature), applied to every page
+except `/practice-ice/request`'s own explicit
+`[Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]` carve-out.
+
+Note the claim type: an app-owned `facility:staff` matched with `RequireClaim`, deliberately **not**
+`ClaimTypes.Role` + `RequireRole` — that pairing silently never matches under Microsoft.Identity.Web's
+overridden `RoleClaimType` and caused a full staff lockout on first deploy (architecture doc §6.5/D75).
+The carve-out's interaction with the routing pipeline is **still not verified against a real non-staff
+sign-in** - see architecture doc §6.5/§8 before inviting members as guests at any real volume.
 
 ---
 
@@ -359,7 +362,7 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 | `CancelGroupAsync` | `Task CancelGroupAsync(IEnumerable<SheetBooking> members, bool reopenAsGroupEventHold, string actingUser)` | Cancels every event in a group. `reopenAsGroupEventHold: true` converts each slot back to an unclaimed open Group Event hold (publicly bookable again) instead of deleting it - and, as of 2026-08-03, first absorbs any Group Event hold on the same sheet immediately touching the reopened slot into one contiguous hold (`AbsorbAdjacentHoldsAsync`), rather than leaving separate back-to-back chips. Explicitly clears `BookedBy`/`ExternalBookingId` on the reopened hold rather than leaving the departed booking's values in place (fixed 2026-08-04 - see `ToGraphEvent`'s `clearUnsetOptionalProperties`, architecture doc D48). Now locks per sheet (it didn't before), since that absorption reads other holds before writing. Same per-member 404-tolerance as `CancelAsync` (D37) - one member already being gone doesn't abort the rest of the group. |
 | `PreviewSeriesConflictsAsync` | `Task<Dictionary<DateTime, List<SheetBooking>>> PreviewSeriesConflictsAsync(IEnumerable<string> sheetMailboxes, IReadOnlyCollection<DateTime> candidateDates, TimeSpan startTime, TimeSpan endTime)` | Informational only - reports conflicts per candidate date so staff can choose to skip that date. Never blocks anything itself. |
 | `CreateSeriesAsync` | `Task<List<SheetBooking>> CreateSeriesAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime lastOccurrenceDate, IEnumerable<DateTime> excludedDates, string actingUser)` | Creates one native weekly-recurring Graph event per sheet (sharing a `BookingGroupId`), then deletes the specific `excludedDates` occurrences staff chose to skip during review. Does not conflict-check - that's `PreviewSeriesConflictsAsync`'s job, expected to already have run. |
-| `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members, string actingUser)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. Already tolerated a missing series master (`404`) before Phase 10 - the pattern `CancelAsync`/`CancelGroupAsync` above now also follow. |
+| `CancelSeriesAsync` | `Task CancelSeriesAsync(IEnumerable<SheetBooking> members, string actingUser)` | Deletes an entire recurring series (all occurrences) for every sheet in the group - the "backdoor" for correcting a data-entry mistake at series creation, not a primary UX path. Tolerates a missing series master (`404`) as "already gone," the same pattern `CancelAsync`/`CancelGroupAsync` above follow (D37). |
 | `GetBookingsAsync` | `Task<List<SheetBooking>> GetBookingsAsync(string sheetMailbox, DateTime start, DateTime end)` | Reads one sheet's bookings in a window. Always live (never cached) - used by every conflict check. |
 | `GetBookingsForAllSheetsAsync` | `Task<List<SheetBooking>> GetBookingsForAllSheetsAsync(DateTime start, DateTime end)` | Reads every configured sheet's bookings in a window, in parallel. View-rendering read path only (Calendar page, public availability) - cached for 30 seconds, invalidated on every write. |
 | `FindByExternalIdAsync` | `Task<SheetBooking?> FindByExternalIdAsync(string externalBookingId, CancellationToken ct)` | Added for the Breely webhook (architecture doc §4.8). Validates the id against a strict allow-list charset, then queries every configured sheet via a Graph `$filter` on the `ExternalBookingId` extended property. Returns `null` if nothing matches; if more than one result comes back on a sheet, prefers a Confirmed match over a Hold (added 2026-08-04, defense in depth alongside D48's fix) - not staff-facing, called only by `BreelyBookingProcessor`. |
@@ -401,7 +404,22 @@ service layer the rest of this appendix documents, but included here for complet
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`) and treated as `false`, never propagated, so a transient outage degrades a sign-in to non-staff rather than risking an accidental grant. |
+| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`, Standard tier so it's visible without Debug on) and treated as `false`, never propagated, so a transient outage or a missing `GroupMember.Read.All` consent degrades a sign-in to non-staff rather than risking an accidental grant. |
+
+Also exposes `StaffClaimType` (`facility:staff`) and `StaffClaimValue`, the claim `Program.cs` adds at
+sign-in and the policies below match on.
+
+### `StaffAuthorizationPolicies`
+
+The app's authorization policies, in one place used by both `Program.cs` and the tests. Defined here
+rather than inline specifically so the policy objects are reachable from the test project — inline
+lambdas were not, which is how a full staff lockout reached production (architecture doc §6.5/D75).
+
+| Member | Purpose |
+|---|---|
+| `StaffOnly` (const) / `BuildStaffOnly()` | Signed in **and** carrying the `facility:staff` claim. Registered as both the `FallbackPolicy` (so every page/endpoint without explicit authorization metadata inherits it) and a named policy for endpoints that opt in explicitly, like `/settings/logs/download`. |
+| `AnyAuthenticatedUser` (const) / `BuildAnyAuthenticatedUser()` | Signed in, staff or not — the single deliberate carve-out, used only by `/practice-ice/request`. |
+| `Configure(AuthorizationOptions)` | Wires both policies plus the fallback. Called by `Program.cs`; called directly by `StaffAuthorizationPolicyTests` so what's asserted is exactly what runs. |
 
 ### Shared domain shapes
 
@@ -440,7 +458,7 @@ just disable one feature (deployment guide §2.5).
 
 ### `AppLogService`
 
-Added in Phase 10 (architecture doc §4.9) - the app-level activity/debug log backing the Settings
+The app-level activity/debug log (architecture doc §4.9) backing the Settings
 page, deliberately separate from the framework's own `ILogger`. Every service above that writes to
 Graph calls into this one after a successful write.
 

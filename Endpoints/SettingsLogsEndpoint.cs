@@ -38,6 +38,6 @@ public static class SettingsLogsEndpoint
 
             return Results.File(zipBytes, "application/zip", $"facility-scheduler-logs-{DateTime.UtcNow:yyyy-MM-dd}.zip");
         })
-        .RequireAuthorization("StaffOnly");
+        .RequireAuthorization(StaffAuthorizationPolicies.StaffOnly);
     }
 }

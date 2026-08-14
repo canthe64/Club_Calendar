@@ -32,7 +32,7 @@ public class FacilityConfiguration
     public bool PracticeIceMailConfigured =>
         !string.IsNullOrWhiteSpace(PracticeIceApproverEmail) && !string.IsNullOrWhiteSpace(PracticeIceMailerMailbox);
 
-    /// <summary>Entra object id of the security group whose members get the Staff role claim
+    /// <summary>Entra object id of the security group whose members get the staff claim
     /// (Services/StaffAccessService.cs). Load-bearing, unlike the PracticeIce mail addresses above -
     /// leaving it unset wouldn't just disable a feature, it would lock everyone (including real
     /// staff) out of every staff page under the app's Staff-only fallback authorization policy.</summary>

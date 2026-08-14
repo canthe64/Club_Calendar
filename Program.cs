@@ -94,7 +94,7 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
 // etc.) rather than replacing it, so this only adds a log line and never interferes with sign-in
 // itself. A no-op unless the Settings page's logging level is currently set to Debug.
 //
-// Also where the Staff role claim gets added (added for practice ice hosting, architecture doc
+// Also where the staff claim gets added (added for practice ice hosting, architecture doc
 // D74/§5.4.4) - this app has no Entra-native way to do that without an Entra ID P1 license (group-
 // based app-role assignment) or an Entra admin action per staff change (individual assignment), so
 // StaffAccessService checks live Entra group membership here instead, at sign-in, and the ownership
@@ -123,33 +123,21 @@ builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.Authentic
             var staffAccess = ctx.HttpContext.RequestServices.GetRequiredService<FacilityScheduler.Services.StaffAccessService>();
             if (await staffAccess.IsStaffAsync(objectId))
             {
-                identity.AddClaim(new Claim(ClaimTypes.Role, FacilityScheduler.Services.StaffAccessService.StaffRoleClaim));
+                // An app-owned claim type, NOT ClaimTypes.Role - see StaffAccessService.StaffClaimType
+                // for why (RequireRole would silently never match here).
+                identity.AddClaim(new Claim(
+                    FacilityScheduler.Services.StaffAccessService.StaffClaimType,
+                    FacilityScheduler.Services.StaffAccessService.StaffClaimValue));
             }
         }
     };
 });
 
-builder.Services.AddAuthorization(options =>
-{
-    // Secure by default, tightened from "any authenticated user" to "authenticated AND staff" once
-    // practice ice hosting (§5.4.4) introduced member (non-staff) guest sign-in for the first time -
-    // previously every guest in the tenant was staff/committee by the club's own existing process,
-    // so "authenticated" and "staff" were the same set. They no longer are (architecture doc D74).
-    var staffOnly = new AuthorizationPolicyBuilder()
-        .RequireAuthenticatedUser()
-        .RequireRole(FacilityScheduler.Services.StaffAccessService.StaffRoleClaim)
-        .Build();
-    options.FallbackPolicy = staffOnly;
-    // Named so SettingsLogsEndpoint (a Minimal API endpoint, not covered by FallbackPolicy since it
-    // already opts into authorization explicitly) can require the same thing without the two
-    // definitions drifting apart.
-    options.AddPolicy("StaffOnly", staffOnly);
-
-    // The one deliberate carve-out: any signed-in user (staff or member) may submit a practice ice
-    // request - the Staff-only default above would otherwise lock members out of the one page
-    // meant for them (Components/Pages/PracticeIceRequest.razor).
-    options.AddPolicy("AnyAuthenticatedUser", policy => policy.RequireAuthenticatedUser());
-});
+// Secure by default: the fallback policy requires signed-in AND staff, with a single named
+// carve-out for the practice ice request page members need to reach. Defined in
+// StaffAuthorizationPolicies (not inline here) so tests evaluate the exact policy objects that run
+// in production - the inline version shipped a bug that no test could reach (architecture doc D74).
+builder.Services.AddAuthorization(FacilityScheduler.Services.StaffAuthorizationPolicies.Configure);
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddRazorPages()
     .AddMicrosoftIdentityUI();

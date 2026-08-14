@@ -1,5 +1,5 @@
 @page "/practice-ice/request"
-@attribute [Authorize(Policy = "AnyAuthenticatedUser")]
+@attribute [Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]
 @using System.Security.Claims
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services

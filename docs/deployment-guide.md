@@ -17,16 +17,23 @@ In the target M365 tenant's Entra admin center (entra.microsoft.com → **Applic
 - **Application** Graph calendar scopes (e.g. `Calendars.ReadWrite`), admin-consented, for the service identity that does all actual Graph work.
 - A client secret (or certificate) generated for the application credential (**Certificates & secrets** tab → **New client secret** → copy the value immediately, it's shown only once).
 
-### 1.2 Restrict staff sign-in to approved users
+### 1.2 Leave "Assignment required?" off
 
-By default, this app authorizes **any account that can complete Entra sign-in** for the tenant — there's no staff/role check in the code itself (see the architecture doc §6.2, and the security-review discussion this section came out of). If the tenant has other members or guests with accounts for unrelated reasons, they'd get full booking-management access unless you restrict sign-in at the Entra level:
+On the **Enterprise application** (Entra admin center → Identity → Applications → Enterprise
+applications — *not* App registrations; these are two separate linked objects and this toggle only
+exists on the Enterprise Application's Properties tab), leave **Assignment required?** set to **No**.
 
-1. In the Entra admin center, go to **Identity → Applications → Enterprise applications**, find the app registration from §1.1 (same name, same Application ID).
-2. Open **Properties** and set **"Assignment required?"** to **Yes**. This is the actual switch — with it off (the default), any account in the tenant can sign in; with it on, only accounts or groups you explicitly assign below can.
-3. Go to **Users and groups** on the same Enterprise Application → **Add user/group** → select the specific staff accounts (or a security group containing them) → **Assign**.
-4. Test: have a non-assigned account attempt sign-in — it should be blocked with an "AADSTS50105" / "not assigned to a role" error, confirming the restriction is live.
+Access control happens in the app, not at the sign-in gate: the staff claim (§2.5, architecture
+doc §6.5) checks per page, so a signed-in non-staff member reaches only `/practice-ice/request` and
+nothing else. Turning this on would mean **every member wanting to host practice ice needs an
+individual Entra admin action just to sign in** — because on Entra ID Free, assignment only accepts
+individual users, not security groups (live-confirmed 2026-08-12; group assignment to an Enterprise
+Application is a P1+ feature, on this screen and on App Roles alike).
 
-Anyone assigned this way still gets full staff access (no finer-grained role split exists yet) — this controls *who can sign in at all*, not what they can do once signed in.
+**Accepted exposure:** anyone already in the tenant for an unrelated reason could also reach
+`/practice-ice/request` and submit a request. That request is reversible, staff-visible, and requires
+approval before it means anything (architecture doc §5.4.4) — not worth the per-member admin
+bottleneck the alternative creates.
 
 ### 1.3 Resource mailboxes provisioned
 
@@ -81,9 +88,9 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How many days out slots are offered | No | optional, defaults to `30` | optional |
 | `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Mail-enabled group notified when a member submits a request | No, but see below | not a secret, but keep out of the tracked `appsettings.json` regardless — see the note below the table | App Service Environment variables |
 | `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox the app sends practice ice notifications as, via Graph `Mail.Send` (application permission) | No, but see below | same | App Service Environment variables |
-| `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Entra object id of the security group whose members get the `Staff` role claim (architecture doc §6.5) | No, but **load-bearing** — the app refuses to start without it, same tier as `Facility:TenantDomain` | `appsettings.Development.json` is fine (not a secret — an object id, not a credential) | App Service Environment variables |
+| `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Entra object id of the security group whose members get the staff claim (architecture doc §6.5) | No, but **load-bearing** — the app refuses to start without it, same tier as `Facility:TenantDomain` | `appsettings.Development.json` is fine (not a secret — an object id, not a credential) | App Service Environment variables |
 
-**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, `Facility:TimeZone`, and `StaffAccess:StaffGroupId` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `StaffAccess:StaffGroupId` joined this tier in Phase 11 (§2.5) — unlike a feature-level setting, leaving it blank would lock everyone, including real staff, out of every staff page. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below). `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` are the same shape again — the app boots fine blank, but practice ice submission is blocked outright (rather than silently accepting a hold nobody gets notified about) until both are set; see §2.4.
+**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, `Facility:TimeZone`, and `StaffAccess:StaffGroupId` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. For `StaffAccess:StaffGroupId` (§2.5) the reason is specific: unlike a feature-level setting, leaving it blank would lock everyone, including real staff, out of every staff page. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below). `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` are the same shape again — the app boots fine blank, but practice ice submission is blocked outright (rather than silently accepting a hold nobody gets notified about) until both are set; see §2.4.
 
 **A note on the two `PracticeIce` mail addresses specifically:** neither is a secret the way a client secret is, but real values still don't belong committed into the tracked `appsettings.json` — that file is meant to carry only the blank placeholders shipped in the repo, same as every other section above. It's easy to forget this while iterating locally (live-hit 2026-08-11); double-check `git diff appsettings.json` before committing if you've been testing with real addresses filled in.
 
@@ -195,8 +202,8 @@ than silently creating an unnotified hold.
 
 ### 2.5 Setting up staff vs. member authorization
 
-**This one is not optional the way §2.4 was.** As of Phase 11 (architecture doc §6.5), every page
-except `/practice-ice/request` requires a `Staff` role claim, decided by live Entra group membership
+**This one is not optional the way §2.4 was.** Per architecture doc §6.5, every page
+except `/practice-ice/request` requires the staff claim, decided by live Entra group membership
 at sign-in — and `StaffAccess:StaffGroupId` is load-bearing (§2 above): the app will not start until
 it's set to a real group.
 
@@ -434,7 +441,7 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 
 ## 6. Post-Deploy Verification Checklist
 
-- [ ] Staff sign-in (Entra SSO) succeeds and the app's root URL (`/`, which routes directly to `/calendar` as of D63) loads real data for every configured mailbox. A blank calendar or a Graph error here usually means either the Application Access Policy/RBAC scoping (architecture doc §6.3) or the `Facility` configuration is wrong.
+- [ ] Staff sign-in (Entra SSO) succeeds and the app's root URL (`/`, which routes directly to the staff Calendar) loads real data for every configured mailbox. A blank calendar or a Graph error here usually means either the Application Access Policy/RBAC scoping (architecture doc §6.3) or the `Facility` configuration is wrong.
 - [ ] A non-assigned account is correctly blocked from signing in, if §1.2's Enterprise Application assignment restriction was configured.
 - [ ] `/public/calendar` loads without signing in, in a private/incognito browser window.
 - [ ] `/api/public/availability` returns JSON without signing in.
