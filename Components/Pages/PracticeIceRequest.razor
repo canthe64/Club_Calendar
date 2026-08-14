@@ -1,4 +1,5 @@
 @page "/practice-ice/request"
+@attribute [Authorize(Policy = "AnyAuthenticatedUser")]
 @using System.Security.Claims
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services
@@ -7,8 +8,8 @@
 @inject FacilityConfiguration Facility
 @inject AuthenticationStateProvider AuthProvider
 
-@* No [Authorize]/[AllowAnonymous] needed here - Program.cs's fallback authorization policy already
-   requires sign-in on any page not explicitly marked anonymous, and this page deliberately isn't. *@
+@* The Staff-only default (Program.cs's FallbackPolicy) would otherwise lock members out of the one
+   page meant for them - this is the app's single deliberate carve-out to "any signed-in user." *@
 
 <PageTitle>Request Practice Ice</PageTitle>
 

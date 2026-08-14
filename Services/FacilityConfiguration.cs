@@ -32,7 +32,13 @@ public class FacilityConfiguration
     public bool PracticeIceMailConfigured =>
         !string.IsNullOrWhiteSpace(PracticeIceApproverEmail) && !string.IsNullOrWhiteSpace(PracticeIceMailerMailbox);
 
-    public FacilityConfiguration(IOptions<FacilityOptions> options, IOptions<PracticeIceOptions> practiceIceOptions)
+    /// <summary>Entra object id of the security group whose members get the Staff role claim
+    /// (Services/StaffAccessService.cs). Load-bearing, unlike the PracticeIce mail addresses above -
+    /// leaving it unset wouldn't just disable a feature, it would lock everyone (including real
+    /// staff) out of every staff page under the app's Staff-only fallback authorization policy.</summary>
+    public string StaffGroupId { get; }
+
+    public FacilityConfiguration(IOptions<FacilityOptions> options, IOptions<PracticeIceOptions> practiceIceOptions, IOptions<StaffAccessOptions> staffAccessOptions)
     {
         var o = options.Value;
 
@@ -51,6 +57,12 @@ public class FacilityConfiguration
         {
             throw new InvalidOperationException("Facility:TimeZone is not configured.");
         }
+        if (string.IsNullOrWhiteSpace(staffAccessOptions.Value.StaffGroupId))
+        {
+            throw new InvalidOperationException("StaffAccess:StaffGroupId is not configured.");
+        }
+
+        StaffGroupId = staffAccessOptions.Value.StaffGroupId;
 
         SheetMailboxes = o.SheetMailboxLocalParts.Select(p => $"{p}@{o.TenantDomain}").ToArray();
         ClubEventsMailbox = $"{o.ClubEventsMailboxLocalPart}@{o.TenantDomain}";

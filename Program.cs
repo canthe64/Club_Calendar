@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Azure.Identity;
 using FacilityScheduler;
@@ -20,6 +21,7 @@ builder.Services.AddRazorComponents()
 builder.Services.Configure<GraphOptions>(builder.Configuration.GetSection(GraphOptions.SectionName));
 builder.Services.Configure<FacilityOptions>(builder.Configuration.GetSection(FacilityOptions.SectionName));
 builder.Services.Configure<PracticeIceOptions>(builder.Configuration.GetSection(PracticeIceOptions.SectionName));
+builder.Services.Configure<StaffAccessOptions>(builder.Configuration.GetSection(StaffAccessOptions.SectionName));
 builder.Services.Configure<AppLogOptions>(builder.Configuration.GetSection(AppLogOptions.SectionName));
 
 builder.Services.AddSingleton(sp =>
@@ -30,9 +32,11 @@ builder.Services.AddSingleton(sp =>
 });
 builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphEventGateway, FacilityScheduler.Services.Graph.GraphEventGateway>();
 builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphMailGateway, FacilityScheduler.Services.Graph.GraphMailGateway>();
+builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphGroupGateway, FacilityScheduler.Services.Graph.GraphGroupGateway>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
 builder.Services.AddSingleton<FacilityScheduler.Services.AppLogService>();
+builder.Services.AddSingleton<FacilityScheduler.Services.StaffAccessService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
@@ -89,6 +93,12 @@ builder.Services.AddAuthentication(OpenIdConnectDefaults.AuthenticationScheme)
 // OnTokenValidated handler Microsoft.Identity.Web already wired up above (token cache population,
 // etc.) rather than replacing it, so this only adds a log line and never interferes with sign-in
 // itself. A no-op unless the Settings page's logging level is currently set to Debug.
+//
+// Also where the Staff role claim gets added (added for practice ice hosting, architecture doc
+// D74/§5.4.4) - this app has no Entra-native way to do that without an Entra ID P1 license (group-
+// based app-role assignment) or an Entra admin action per staff change (individual assignment), so
+// StaffAccessService checks live Entra group membership here instead, at sign-in, and the ownership
+// of that group can be delegated to non-admins.
 builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.AuthenticationScheme, options =>
 {
     var inner = options.Events.OnTokenValidated;
@@ -102,16 +112,43 @@ builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.Authentic
         var appLog = ctx.HttpContext.RequestServices.GetRequiredService<FacilityScheduler.Services.AppLogService>();
         var name = ctx.Principal?.Identity?.Name ?? "unknown";
         await appLog.LogDebugAsync("StaffSignIn", name);
+
+        // GetObjectId() is Microsoft.Identity.Web's own blessed helper for this - deliberately not
+        // hand-rolling a claim-type lookup here the way the practice ice request page's host-name
+        // resolution originally did, since that exact class of mistake (checking the wrong claim
+        // first) already caused a live bug this session (D71).
+        var objectId = ctx.Principal?.GetObjectId();
+        if (!string.IsNullOrWhiteSpace(objectId) && ctx.Principal?.Identity is ClaimsIdentity identity)
+        {
+            var staffAccess = ctx.HttpContext.RequestServices.GetRequiredService<FacilityScheduler.Services.StaffAccessService>();
+            if (await staffAccess.IsStaffAsync(objectId))
+            {
+                identity.AddClaim(new Claim(ClaimTypes.Role, FacilityScheduler.Services.StaffAccessService.StaffRoleClaim));
+            }
+        }
     };
 });
 
 builder.Services.AddAuthorization(options =>
 {
-    // Secure by default: every page requires sign-in unless explicitly marked [AllowAnonymous].
-    // The Phase 8 public availability endpoint will be that deliberate, explicit exception.
-    options.FallbackPolicy = new AuthorizationPolicyBuilder()
+    // Secure by default, tightened from "any authenticated user" to "authenticated AND staff" once
+    // practice ice hosting (§5.4.4) introduced member (non-staff) guest sign-in for the first time -
+    // previously every guest in the tenant was staff/committee by the club's own existing process,
+    // so "authenticated" and "staff" were the same set. They no longer are (architecture doc D74).
+    var staffOnly = new AuthorizationPolicyBuilder()
         .RequireAuthenticatedUser()
+        .RequireRole(FacilityScheduler.Services.StaffAccessService.StaffRoleClaim)
         .Build();
+    options.FallbackPolicy = staffOnly;
+    // Named so SettingsLogsEndpoint (a Minimal API endpoint, not covered by FallbackPolicy since it
+    // already opts into authorization explicitly) can require the same thing without the two
+    // definitions drifting apart.
+    options.AddPolicy("StaffOnly", staffOnly);
+
+    // The one deliberate carve-out: any signed-in user (staff or member) may submit a practice ice
+    // request - the Staff-only default above would otherwise lock members out of the one page
+    // meant for them (Components/Pages/PracticeIceRequest.razor).
+    options.AddPolicy("AnyAuthenticatedUser", policy => policy.RequireAuthenticatedUser());
 });
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddRazorPages()

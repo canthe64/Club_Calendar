@@ -327,13 +327,13 @@ public ones, but with `RequireAuthorization()` instead of `.AllowAnonymous()` - 
 service layer documented below rather than duplicating its logic.
 
 **Two pages added for practice ice hosting (§5.4.4) don't fit "staff-facing" cleanly.**
-`/practice-ice/request` and `/practice-ice/approvals` are ordinary authenticated Blazor pages, gated
-by the same default fallback policy as every staff page - but `/practice-ice/request` is meant for
-*members*, not staff, and this codebase has no role/group distinction between the two: any signed-in
-principal can reach every page listed above, including `/practice-ice/approvals` and the full staff
-Calendar. **This is a currently-unresolved access-control gap, not a documented design decision** -
-see the architecture doc §8's newest row for the full explanation before inviting members as guests
-at any real volume.
+`/practice-ice/request` is meant for *members*, not staff; `/practice-ice/approvals` is staff-only.
+As of Phase 11 (architecture doc §6.5/D74), the app's default authorization policy requires a `Staff`
+role claim (decided by live Entra group membership, not Entra's own App Role assignment - this
+tenant is Entra ID Free, which doesn't support the group-based version of that feature), applied to
+every page except `/practice-ice/request`'s own explicit `[Authorize(Policy="AnyAuthenticatedUser")]`
+carve-out. **Not yet live-verified against a real sign-in** - see the architecture doc §6.5/§8 before
+inviting members as guests at any real volume.
 
 ---
 
@@ -393,6 +393,16 @@ matching the existing split between it and `SheetBookingService`.
 | `ApproveAsync` | `Task<PracticeIceActionResult> ApproveAsync(Guid bookingGroupId, string actingUser)` | Confirms the group (`UpdateGroupAsync`) and emails the volunteer. `Success` reflects the confirm; `NotificationSent` is reported separately and independently (D70). |
 | `DeclineAsync` | `Task<PracticeIceActionResult> DeclineAsync(Guid bookingGroupId, string reason, string actingUser)` | Requires a non-empty `reason` (thrown as `ArgumentException` otherwise - the UI is expected to validate first). Cancels the group (`CancelGroupAsync`, hard delete per D9) and emails the volunteer with the reason. |
 
+### `StaffAccessService`
+
+Added for staff vs. member authorization (architecture doc §6.5/D74). Called from `Program.cs`'s
+`OnTokenValidated` hook at sign-in, not from any Blazor component - not part of the request-handling
+service layer the rest of this appendix documents, but included here for completeness.
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`) and treated as `false`, never propagated, so a transient outage degrades a sign-in to non-staff rather than risking an accidental grant. |
+
 ### Shared domain shapes
 
 | Type | Shape | Notes |
@@ -422,6 +432,11 @@ Also exposes the practice ice settings (`PracticeIceEligibleStartHour`/`Eligible
 the two mail addresses are allowed to be blank at startup - `PracticeIceMailConfigured` gates the
 feature at request time instead, so an incremental feature rollout doesn't stop an already-running
 deployment from booting (deployment guide §2.4).
+
+`StaffGroupId` (architecture doc §6.5/D74) is **not** treated leniently like the practice ice mail
+addresses - it's validated in the same required-field block as `Facility:TenantDomain` above and
+throws at construction if blank, since an unset value would lock every staff page for everyone, not
+just disable one feature (deployment guide §2.5).
 
 ### `AppLogService`
 

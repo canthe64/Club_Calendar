@@ -129,4 +129,22 @@ public class FacilityConfigurationTests
     {
         Assert.Throws<InvalidOperationException>(() => TestFacility.Create(practiceIce: new PracticeIceOptions { MaxHorizonDays = 0 }));
     }
+
+    // Unlike the PracticeIce mail addresses above, StaffGroupId IS load-bearing (same tier as
+    // TenantDomain/SheetMailboxLocalParts/TimeZone) - leaving it blank wouldn't just disable a
+    // feature, it would lock everyone, including real staff, out of every staff page under the
+    // app's Staff-only fallback authorization policy.
+    [Fact]
+    public void Constructor_BlankStaffGroupId_Throws()
+    {
+        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(staffAccess: new StaffAccessOptions()));
+    }
+
+    [Fact]
+    public void StaffGroupId_ExposesTheConfiguredValue()
+    {
+        var facility = TestFacility.Create(staffAccess: new StaffAccessOptions { StaffGroupId = "a-real-group-id" });
+
+        Assert.Equal("a-real-group-id", facility.StaffGroupId);
+    }
 }

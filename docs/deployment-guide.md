@@ -81,8 +81,9 @@ Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as
 | `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How many days out slots are offered | No | optional, defaults to `30` | optional |
 | `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Mail-enabled group notified when a member submits a request | No, but see below | not a secret, but keep out of the tracked `appsettings.json` regardless — see the note below the table | App Service Environment variables |
 | `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox the app sends practice ice notifications as, via Graph `Mail.Send` (application permission) | No, but see below | same | App Service Environment variables |
+| `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Entra object id of the security group whose members get the `Staff` role claim (architecture doc §6.5) | No, but **load-bearing** — the app refuses to start without it, same tier as `Facility:TenantDomain` | `appsettings.Development.json` is fine (not a secret — an object id, not a credential) | App Service Environment variables |
 
-**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, and `Facility:TimeZone` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below). `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` are the same shape again — the app boots fine blank, but practice ice submission is blocked outright (rather than silently accepting a hold nobody gets notified about) until both are set; see §2.4.
+**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, `Facility:TimeZone`, and `StaffAccess:StaffGroupId` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. `StaffAccess:StaffGroupId` joined this tier in Phase 11 (§2.5) — unlike a feature-level setting, leaving it blank would lock everyone, including real staff, out of every staff page. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below). `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` are the same shape again — the app boots fine blank, but practice ice submission is blocked outright (rather than silently accepting a hold nobody gets notified about) until both are set; see §2.4.
 
 **A note on the two `PracticeIce` mail addresses specifically:** neither is a secret the way a client secret is, but real values still don't belong committed into the tracked `appsettings.json` — that file is meant to carry only the blank placeholders shipped in the repo, same as every other section above. It's easy to forget this while iterating locally (live-hit 2026-08-11); double-check `git diff appsettings.json` before committing if you've been testing with real addresses filled in.
 
@@ -191,6 +192,46 @@ re-diagnosing from scratch.
 No action is needed for the app to function without any of this configured — practice ice submission
 is blocked with an explicit "not accepted yet" message (`PracticeIceMailConfigured`, §2 above) rather
 than silently creating an unnotified hold.
+
+### 2.5 Setting up staff vs. member authorization
+
+**This one is not optional the way §2.4 was.** As of Phase 11 (architecture doc §6.5), every page
+except `/practice-ice/request` requires a `Staff` role claim, decided by live Entra group membership
+at sign-in — and `StaffAccess:StaffGroupId` is load-bearing (§2 above): the app will not start until
+it's set to a real group.
+
+1. **Create a security group for staff** — a *separate* group from the mailbox-scoping one in the
+   provisioning checklist §7 step 2 (that one governs mailbox access; this one governs app
+   authorization — don't reuse it, or every mailbox in the scoping group would need to double as a
+   staff account). Add every current staff/committee member.
+2. **Delegate Ownership** of that group to at least one person who isn't one of the tenant's Entra
+   admins — Owners can add/remove Members with no Entra admin role at all, which is the entire point:
+   this tenant is Entra ID Free, so the native alternative (assigning a group to an Entra App Role)
+   isn't available, and the fallback (assigning individual users to a role directly) would put every
+   staff change back on the tenant's two Entra admins.
+3. **Grant `GroupMember.Read.All`** as an application permission on the same app registration used
+   for `Graph:ClientId` (§1.1), with admin consent. This is a directory (Entra ID) permission, not an
+   Exchange Online one — it is **not** subject to Application Access Policy scoping the way
+   `Calendars.ReadWrite`/`Mail.Send` are (§2.4), so there's no group-membership step to add it to.
+4. **Set `StaffAccess:StaffGroupId`** to the group's object id from step 1 (`Get-MgGroup` /
+   Entra admin center → Groups → the group → Object Id). Not a secret — safe to set directly in
+   `appsettings.Development.json` locally, same as `Facility:TenantDomain`.
+
+**Ongoing staff changes are just group membership from here on** — add or remove someone from the
+group (Exchange/Entra admin center, or PowerShell), and their access changes on their next sign-in.
+No further app configuration, redeploy, or Entra admin action needed for a routine staff change.
+
+**Verify before relying on this in production**, with a real non-staff test account (a guest who is
+signed in but deliberately *not* in the staff group): confirm `/practice-ice/request` works, and that
+`/calendar`, `/settings`, `/club-events`, and `/practice-ice/approvals` all correctly deny access. The
+mechanism that makes `/practice-ice/request` reachable while everything else isn't (a per-page
+authorization policy overriding the app's stricter default) has not been confirmed against a real
+sign-in as of this writing — architecture doc §6.5/§8 has the full explanation of why this specific
+check matters more than most.
+
+**Known, deliberately deferred:** the top staff nav currently shows links to Calendar/Settings/
+Practice Ice Requests to every signed-in user, including non-staff members — clicking correctly
+denies them, but a visibly dead link is poor UX. Not yet built.
 
 ---
 
@@ -404,5 +445,5 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 - [ ] `curl -I https://<your-app>/calendar` (or any staff page) shows `X-Frame-Options: DENY` and a `Content-Security-Policy` header; the same check against `/public/calendar` should show neither — that page is the one deliberate exception (architecture doc §6.4).
 - [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.
 - [ ] `/public/practice-ice` loads without signing in; clicking an open slot and submitting a real request (§2.4) creates a `Practice Ice` hold visible on `/calendar` and sends the approver notification email — if it doesn't, see §2.4's diagnosis steps before assuming the code is wrong. Approve or decline it from `/practice-ice/approvals` and confirm the volunteer's confirmation/decline email arrives.
-- [ ] **Before inviting any member as a guest for practice ice hosting:** read the architecture doc §8's newest risk-register row. There is currently no role distinction in this app between "staff" and "any signed-in user" — a member guest-invited only to submit a practice ice request can reach the full staff Calendar, Settings, and the approvals queue itself. Decide how to handle this (an app-role/group-based restriction, or accepting it at low member counts) before this goes out at any real volume, not after.
+- [ ] **Before inviting any member as a guest for practice ice hosting:** complete §2.5's setup (staff security group, delegated Ownership, `GroupMember.Read.All`, `StaffAccess:StaffGroupId`), then **sign in as a real non-staff test account** and confirm `/practice-ice/request` works while `/calendar`, `/settings`, `/club-events`, and `/practice-ice/approvals` all correctly deny access. This specific check has not been performed against a real tenant as of this writing (architecture doc §6.5/§8) — don't skip it on the assumption the code is obviously right.
 - [ ] (IIS only) The site is bound to 443 with a valid, non-expired certificate, and Windows Firewall shows only the expected inbound ports open.
