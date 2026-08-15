@@ -11,15 +11,19 @@ public class PracticeIceRequestServiceTests
     private const string HostEmail = "jane@example.com";
 
     private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail)
-        Build(PracticeIceOptions? practiceIce = null)
+        Build(PracticeIceOptions? practiceIce = null) => Build(out _, practiceIce);
+
+    private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail)
+        Build(out FakeGraphEventGateway gateway, PracticeIceOptions? practiceIce = null)
     {
         var facility = TestFacility.Create(practiceIce: practiceIce);
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
+        gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create();
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog);
-        var availability = new PublicAvailabilityService(bookingService, clubEventService, cache, facility);
+        var appLog = TestAppLog.Create(facility);
+        var viewCache = new ViewCacheRegistry(cache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache);
+        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
+        var availability = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache);
         var mail = new FakeGraphMailGateway();
         var requestService = new PracticeIceRequestService(bookingService, availability, mail, facility, appLog);
         return (requestService, bookingService, availability, facility, mail);
@@ -89,6 +93,55 @@ public class PracticeIceRequestServiceTests
     }
 
     [Fact]
+    public async Task Submit_NotesLongerThanTheCap_IsRejectedBeforeAnythingIsWritten()
+    {
+        // The one free-text field a non-staff member can write into the system of record. Unbounded,
+        // it can overflow the extended-property blob and fail the Graph write partway through a
+        // five-sheet create - rejecting up front is both a better message and avoids that path.
+        var (requestService, bookingService, _, facility, mail) = Build();
+        var day = facility.Today.AddDays(5);
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail,
+            certified: true, notes: new string('x', PracticeIceRules.MaxNotesLength + 1));
+
+        Assert.False(result.IsSuccess);
+        Assert.False(result.IsConflict);
+        Assert.Empty(mail.Sent);
+        Assert.Empty(await bookingService.GetBookingsForAllSheetsAsync(day, day.AddDays(1)));
+    }
+
+    [Fact]
+    public async Task Submit_NotesExactlyAtTheCap_IsAccepted()
+    {
+        var (requestService, _, _, facility, _) = Build();
+        var day = facility.Today.AddDays(5);
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail,
+            certified: true, notes: new string('x', PracticeIceRules.MaxNotesLength));
+
+        Assert.True(result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task Submit_InvalidatesThePublicWindowCache_SoTheSlotStopsBeingOffered()
+    {
+        // The public cache used to expire on TTL only, on the reasoning that nothing wrote through
+        // it - practice ice made that false, so a just-claimed slot kept showing as free.
+        var (requestService, _, availability, facility, _) = Build();
+        var day = facility.Today.AddDays(5);
+        var start = day.AddHours(10);
+
+        // Prime the cache while the slot is genuinely free.
+        Assert.NotNull(await availability.FindPracticeIceWindowContainingAsync(start));
+
+        Assert.True((await requestService.SubmitAsync(start, 60, HostName, HostEmail, certified: true, notes: null)).IsSuccess);
+
+        // Without invalidation this still returns the pre-submit window covering 10:00.
+        var windows = await availability.GetPracticeIceWindowsAsync();
+        Assert.DoesNotContain(windows, w => w.Start <= start && w.End > start);
+    }
+
+    [Fact]
     public async Task Submit_Success_CreatesHoldAcrossEverySheetAndNotifiesApprovers()
     {
         var (requestService, bookingService, _, facility, mail) = Build();
@@ -119,20 +172,27 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_LosesARaceToAConflictingBooking_ReturnsConflictAndSendsNoMail()
     {
-        var (requestService, bookingService, availability, facility, mail) = Build();
+        // The courtesy availability check reads a cached view; CreateAcrossSheetsAsync's own live,
+        // per-sheet-locked check is what actually guarantees no double-booking (§4.3). To exercise
+        // that second line of defence the conflicting event is written straight into the fake
+        // gateway - an out-of-band write the app never saw, exactly the case §5.4.3 already had to
+        // harden the public open-slot computation against. (Writing it through bookingService would
+        // now invalidate the public cache, so the courtesy check would catch it first and this path
+        // would never be reached.)
+        var (requestService, _, availability, facility, mail) = Build(out var gateway);
         var day = facility.Today.AddDays(5);
         var start = day.AddHours(10);
 
-        // Primes the 60s availability cache as "free" before the conflicting booking exists -
-        // the same staleness CreateAcrossSheetsAsync's own live, locked check (never cached) is
-        // relied on to catch (§4.3).
         Assert.NotNull(await availability.FindPracticeIceWindowContainingAsync(start));
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        gateway.Seed(TestFacility.SheetMailboxes[0], new Microsoft.Graph.Models.Event
         {
-            SheetMailbox = TestFacility.SheetMailboxes[0], Start = start, End = start.AddHours(1),
-            Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Late add"
-        }, "tester");
+            Subject = "Late add",
+            Start = TestFacility.Dtz(start),
+            End = TestFacility.Dtz(start.AddHours(1)),
+            ShowAs = Microsoft.Graph.Models.FreeBusyStatus.Busy,
+            Categories = [BookingCategory.League.ToString()]
+        });
 
         var result = await requestService.SubmitAsync(start, 60, HostName, HostEmail, certified: true, notes: null);
 

@@ -27,15 +27,17 @@ public class AppLogService
     private readonly string _logDirectory;
     private readonly int _retentionDays;
     private readonly ILogger<AppLogService> _fallbackLogger;
+    private readonly FacilityConfiguration _facility;
     private readonly SemaphoreSlim _writeLock = new(1, 1);
 
     private volatile AppLogLevel _level;
     private DateOnly _currentFileDate;
     private string _currentFilePath;
 
-    public AppLogService(IOptions<AppLogOptions> options, IHostEnvironment env, ILogger<AppLogService> fallbackLogger)
+    public AppLogService(IOptions<AppLogOptions> options, IHostEnvironment env, ILogger<AppLogService> fallbackLogger, FacilityConfiguration facility)
     {
         _fallbackLogger = fallbackLogger;
+        _facility = facility;
         var o = options.Value;
         _retentionDays = o.RetentionDays > 0 ? o.RetentionDays : 30;
 
@@ -56,7 +58,7 @@ public class AppLogService
         Directory.CreateDirectory(_logDirectory);
 
         _level = LoadPersistedLevel();
-        _currentFileDate = DateOnly.FromDateTime(DateTime.UtcNow);
+        _currentFileDate = DateOnly.FromDateTime(_facility.Today);
         _currentFilePath = BuildFilePath(_currentFileDate);
     }
 
@@ -68,9 +70,13 @@ public class AppLogService
         var previous = _level;
         _level = level;
 
-        await _writeLock.WaitAsync(ct);
+        // Same acquired-flag pattern as WriteAsync below, for the same reason.
+        var acquired = false;
         try
         {
+            await _writeLock.WaitAsync(ct);
+            acquired = true;
+
             await File.WriteAllTextAsync(Path.Combine(_logDirectory, LevelFileName), level.ToString(), ct);
         }
         catch (Exception ex)
@@ -79,7 +85,10 @@ public class AppLogService
         }
         finally
         {
-            _writeLock.Release();
+            if (acquired)
+            {
+                _writeLock.Release();
+            }
         }
 
         if (previous != level)
@@ -112,9 +121,16 @@ public class AppLogService
     {
         var line = FormatLine(tier, action, actor, eventId, sheet, details);
 
-        await _writeLock.WaitAsync(ct);
+        // The lock acquisition is inside the try, not before it: an already-cancelled token makes
+        // WaitAsync throw, and outside the try that exception escaped straight to the caller -
+        // exactly what the guarantee below says must never happen. `acquired` keeps Release() honest
+        // in that case, since a throw from WaitAsync means the semaphore was never taken.
+        var acquired = false;
         try
         {
+            await _writeLock.WaitAsync(ct);
+            acquired = true;
+
             RotateIfNeeded();
             await File.AppendAllTextAsync(_currentFilePath, line + Environment.NewLine, ct);
         }
@@ -127,14 +143,18 @@ public class AppLogService
         }
         finally
         {
-            _writeLock.Release();
+            if (acquired)
+            {
+                _writeLock.Release();
+            }
         }
     }
 
-    // Caller must hold _writeLock.
+    // Caller must hold _writeLock. Rolls on facility-local midnight, not UTC - a log file named
+    // for a given date should contain that facility's day, not a day that ends at 4-5pm local.
     private void RotateIfNeeded()
     {
-        var today = DateOnly.FromDateTime(DateTime.UtcNow);
+        var today = DateOnly.FromDateTime(_facility.Today);
         if (today == _currentFileDate)
         {
             return;
@@ -147,7 +167,7 @@ public class AppLogService
 
     private void CleanUpOldFiles()
     {
-        var cutoff = DateOnly.FromDateTime(DateTime.UtcNow).AddDays(-_retentionDays);
+        var cutoff = DateOnly.FromDateTime(_facility.Today).AddDays(-_retentionDays);
         foreach (var file in Directory.EnumerateFiles(_logDirectory, $"{FilePrefix}*{FileExtension}"))
         {
             var name = Path.GetFileNameWithoutExtension(file);
@@ -179,11 +199,18 @@ public class AppLogService
         return AppLogLevel.Standard;
     }
 
-    private static string FormatLine(string tier, string action, string actor, string? eventId, string? sheet, string? details)
+    // Facility-local wall clock with an explicit UTC offset (e.g. 2026-08-12T18:30:00.000-07:00),
+    // not UTC-with-Z. Staff read this log while troubleshooting something that just happened at the
+    // rink; UTC timestamps meant mentally subtracting 7-8 hours from every line, and during the
+    // facility's own evening hours the date was a day ahead too - the same class of confusion D47
+    // fixed everywhere else in the app. The offset is kept so a line is still unambiguous.
+    private string FormatLine(string tier, string action, string actor, string? eventId, string? sheet, string? details)
     {
+        var stamp = new DateTimeOffset(_facility.Now, _facility.ZoneInfo.GetUtcOffset(DateTime.UtcNow));
+
         var parts = new List<string>
         {
-            DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ss.fffZ", CultureInfo.InvariantCulture),
+            stamp.ToString("yyyy-MM-ddTHH:mm:ss.fffzzz", CultureInfo.InvariantCulture),
             $"[{tier}]",
             $"action={action}",
             $"actor={Escape(actor)}"

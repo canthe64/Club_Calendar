@@ -1,5 +1,11 @@
 ﻿@page "/Error"
+@attribute [AllowAnonymous]
 @using System.Diagnostics
+
+@* Anonymous for the same reason as NotFound.razor: UseExceptionHandler re-executes to this route
+   through authorization, so behind the staff-only fallback an unhandled error on any public
+   endpoint produced a sign-in redirect rather than an error page. Per-component attribute only -
+   see NotFound.razor's note on why that is not the D15 footgun. *@
 
 <PageTitle>Error</PageTitle>
 

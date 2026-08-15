@@ -11,7 +11,7 @@ namespace FacilityScheduler.Services;
 /// than computing complementary free time, and more correct: unbooked League/Bonspiel/practice time
 /// isn't necessarily something staff want the public renting.
 /// </summary>
-public class PublicAvailabilityService(SheetBookingService bookingService, ClubEventService clubEventService, IMemoryCache cache, FacilityConfiguration facility)
+public class PublicAvailabilityService(SheetBookingService bookingService, ClubEventService clubEventService, IMemoryCache cache, FacilityConfiguration facility, ViewCacheRegistry viewCache)
 {
     private const int DefaultDays = 30;
     private const int MaxDays = 60;
@@ -33,6 +33,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
         var response = await ComputeAvailabilityAsync(start, start.AddDays(days), ct);
         cache.Set(cacheKey, response, CacheTtl);
+        viewCache.Track(cacheKey);
         return response;
     }
 
@@ -124,6 +125,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var slots = await GetOpenSlotsAsync(start, end, ct);
         var windows = FindConcurrentAvailability(slots, minSheets);
         cache.Set(cacheKey, windows, CacheTtl);
+        viewCache.Track(cacheKey);
         return windows;
     }
 
@@ -234,6 +236,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             .ToList();
 
         cache.Set(cacheKey, windows, CacheTtl);
+        viewCache.Track(cacheKey);
         return windows;
     }
 
@@ -359,6 +362,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
         var view = new PublicMonthView(bookingLabels, eventLabels);
         cache.Set(cacheKey, view, CacheTtl);
+        viewCache.Track(cacheKey);
         return view;
     }
 

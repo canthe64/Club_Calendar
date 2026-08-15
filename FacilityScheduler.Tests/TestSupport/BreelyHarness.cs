@@ -17,9 +17,10 @@ public static class BreelyHarness
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo) { DelayDuringFindEvents = delayDuringFindEvents };
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create();
-        var sheetBookings = new SheetBookingService(gateway, cache, facility, appLog);
-        var clubEvents = new ClubEventService(gateway, cache, facility, appLog);
+        var appLog = TestAppLog.Create(facility);
+        var viewCache = new ViewCacheRegistry(cache);
+        var sheetBookings = new SheetBookingService(gateway, cache, facility, appLog, viewCache);
+        var clubEvents = new ClubEventService(gateway, cache, facility, appLog, viewCache);
         var processor = new BreelyBookingProcessor(sheetBookings, clubEvents, facility, appLog, NullLogger<BreelyBookingProcessor>.Instance);
         return (processor, gateway, facility, sheetBookings);
     }

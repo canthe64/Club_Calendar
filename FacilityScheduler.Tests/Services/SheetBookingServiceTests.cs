@@ -12,7 +12,8 @@ public class SheetBookingServiceTests
     {
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var service = new SheetBookingService(gateway, new MemoryCache(new MemoryCacheOptions()), facility, TestAppLog.Create());
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var service = new SheetBookingService(gateway, cache, facility, TestAppLog.Create(), new ViewCacheRegistry(cache));
         return (service, gateway, facility);
     }
 

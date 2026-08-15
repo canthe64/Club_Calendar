@@ -35,6 +35,7 @@ builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphMailGateway
 builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphGroupGateway, FacilityScheduler.Services.Graph.GraphGroupGateway>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
+builder.Services.AddSingleton<FacilityScheduler.Services.ViewCacheRegistry>();
 builder.Services.AddSingleton<FacilityScheduler.Services.AppLogService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.StaffAccessService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();

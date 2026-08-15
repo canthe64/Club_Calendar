@@ -20,10 +20,11 @@ public class PracticeIceAvailabilityTests
         var facility = TestFacility.Create(practiceIce: practiceIce);
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create();
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog);
-        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility);
+        var appLog = TestAppLog.Create(facility);
+        var viewCache = new ViewCacheRegistry(cache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache);
+        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
+        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache);
         return (publicService, bookingService, clubEventService, facility);
     }
 

@@ -1,5 +1,13 @@
 ﻿@page "/not-found"
+@attribute [AllowAnonymous]
 @layout MainLayout
+
+@* Anonymous by necessity: UseStatusCodePagesWithReExecute re-executes to this route through the
+   full pipeline, including authorization. Behind the staff-only fallback policy (§6.5), an
+   anonymous visitor who mistyped a /public/* URL got bounced to a Microsoft sign-in page instead of
+   this one, and a signed-in non-staff member got access denied. Note this is a per-component
+   attribute - NOT .AllowAnonymous() on the shared MapRazorComponents registration, which is the
+   thing D15 forbids because it would expose every staff page. *@
 
 <h3>Not Found</h3>
 <p>Sorry, the content you are looking for does not exist.</p>

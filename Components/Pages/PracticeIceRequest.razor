@@ -62,7 +62,7 @@
 
         <div style="margin-bottom:14px">
             <label style="display:block;font-weight:600;font-size:12px;margin-bottom:4px">Notes (optional)</label>
-            <textarea @bind="_notes" rows="3" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:12px;width:100%;box-sizing:border-box"></textarea>
+            <textarea @bind="_notes" rows="3" maxlength="@PracticeIceRules.MaxNotesLength" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:12px;width:100%;box-sizing:border-box"></textarea>
         </div>
 
         <label style="display:block;font-size:12px;margin-bottom:14px;cursor:pointer">

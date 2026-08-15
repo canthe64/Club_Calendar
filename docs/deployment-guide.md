@@ -216,10 +216,21 @@ it's set to a real group.
    this tenant is Entra ID Free, so the native alternative (assigning a group to an Entra App Role)
    isn't available, and the fallback (assigning individual users to a role directly) would put every
    staff change back on the tenant's two Entra admins.
-3. **Grant `GroupMember.Read.All`** as an application permission on the same app registration used
-   for `Graph:ClientId` (§1.1), with admin consent. This is a directory (Entra ID) permission, not an
-   Exchange Online one — it is **not** subject to Application Access Policy scoping the way
-   `Calendars.ReadWrite`/`Mail.Send` are (§2.4), so there's no group-membership step to add it to.
+3. **Grant both `GroupMember.Read.All` and `User.Read.All`** as **application** permissions on the
+   same app registration used for `Graph:ClientId` (§1.1), then click **Grant admin consent**.
+   **Both are required** — live-verified 2026-08-15. `POST /users/{id}/checkMemberGroups` has to
+   resolve the user object as well as its group memberships, so `GroupMember.Read.All` alone returns
+   `403 Insufficient privileges to complete the operation`. `Directory.Read.All` would also cover it
+   but is a much broader grant than this feature needs; prefer the pair.
+
+   These are directory (Entra ID) permissions, not Exchange Online ones — they are **not** subject to
+   Application Access Policy scoping the way `Calendars.ReadWrite`/`Mail.Send` are (§2.4), so there's
+   no group to add them to and no propagation delay to wait out. Consent takes effect on the next
+   sign-in.
+
+   **A permission that's been added but not consented fails identically to one that was never added
+   at all** — same 403, same message. If sign-in still denies after granting, re-open the API
+   permissions blade and confirm every row reads "Granted for &lt;tenant&gt;" rather than a warning icon.
 4. **Set `StaffAccess:StaffGroupId`** to the group's object id from step 1 (`Get-MgGroup` /
    Entra admin center → Groups → the group → Object Id). Not a secret — safe to set directly in
    `appsettings.Development.json` locally, same as `Facility:TenantDomain`.
@@ -239,6 +250,31 @@ check matters more than most.
 **Known, deliberately deferred:** the top staff nav currently shows links to Calendar/Settings/
 Practice Ice Requests to every signed-in user, including non-staff members — clicking correctly
 denies them, but a visibly dead link is poor UX. Not yet built.
+
+#### Troubleshooting: signed in successfully but denied every page
+
+This is the expected symptom of a failed group check, since the check fails *closed* by design — a
+Graph error means "not staff," never "staff." Sign-in itself completes normally, which makes it look
+like an authentication problem when it isn't.
+
+**The platform log stream will not tell you why.** Nothing on this path writes to `ILogger`, so an
+Azure log stream showing a clean token validation (`IDX10242`/`IDX10239`/`IDX10234`/`IDX10245`) and
+then nothing is exactly what both success and failure look like. The answer is in the app's own log
+file (§2.3), and — the awkward part — the Settings page that would show it to you is itself behind
+the staff-only policy you're locked out of. Read the file directly instead, over SSH or Kudu
+(`https://<yourapp>.scm.azurewebsites.net`):
+
+```bash
+tail -50 <AppLog:LogDirectory>/app-*.log
+```
+
+Then match what you find:
+
+| Log line | Cause |
+|---|---|
+| `StaffGroupCheckFailed` with `Insufficient privileges to complete the operation` | The Graph permissions in step 3 above — missing, or added without admin consent. The single most common cause. |
+| `StaffGroupCheckFailed` with anything else | Read the `details=` value; it's the raw Graph error. |
+| No `StaffGroupCheckFailed` at all | The check *worked* and returned "not a member." Either the account genuinely isn't in the group, or `StaffAccess:StaffGroupId` holds the wrong value — it must be the group's **object ID (a GUID)**, not its display name. A display name there produces no error at all, just a silent permanent "not staff." |
 
 ---
 
@@ -452,5 +488,6 @@ If deploying somewhere other than Azure App Service or IIS (a Linux VM, a contai
 - [ ] `curl -I https://<your-app>/calendar` (or any staff page) shows `X-Frame-Options: DENY` and a `Content-Security-Policy` header; the same check against `/public/calendar` should show neither — that page is the one deliberate exception (architecture doc §6.4).
 - [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.
 - [ ] `/public/practice-ice` loads without signing in; clicking an open slot and submitting a real request (§2.4) creates a `Practice Ice` hold visible on `/calendar` and sends the approver notification email — if it doesn't, see §2.4's diagnosis steps before assuming the code is wrong. Approve or decline it from `/practice-ice/approvals` and confirm the volunteer's confirmation/decline email arrives.
-- [ ] **Before inviting any member as a guest for practice ice hosting:** complete §2.5's setup (staff security group, delegated Ownership, `GroupMember.Read.All`, `StaffAccess:StaffGroupId`), then **sign in as a real non-staff test account** and confirm `/practice-ice/request` works while `/calendar`, `/settings`, `/club-events`, and `/practice-ice/approvals` all correctly deny access. This specific check has not been performed against a real tenant as of this writing (architecture doc §6.5/§8) — don't skip it on the assumption the code is obviously right.
+- [ ] **A staff account signs in and can reach `/calendar`.** If sign-in completes but every page denies, the group check is failing closed — see §2.5's troubleshooting table, and check the Graph permissions first (both `GroupMember.Read.All` *and* `User.Read.All`, both consented; this exact gap caused a production lockout on 2026-08-15).
+- [ ] **Before inviting any member as a guest for practice ice hosting:** complete §2.5's setup, then **sign in as a real non-staff test account** and confirm `/practice-ice/request` works while `/calendar`, `/settings`, `/club-events`, and `/practice-ice/approvals` all correctly deny access. This specific check has not been performed against a real tenant as of this writing (architecture doc §6.5/§8) — don't skip it on the assumption the code is obviously right.
 - [ ] (IIS only) The site is bound to 443 with a valid, non-expired certificate, and Windows Firewall shows only the expected inbound ports open.

@@ -13,7 +13,7 @@ namespace FacilityScheduler.Services;
 /// sheet bookings nor between club events themselves) - build-simplicity is the explicit design
 /// choice here, not an oversight.
 /// </summary>
-public class ClubEventService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
+public class ClubEventService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log, ViewCacheRegistry viewCache)
 {
     private const string PropertyGuid = FacilityGraphConventions.PropertyGuid;
     private const string BookedByPropertyId = $"String {{{PropertyGuid}}} Name ClubEventBookedBy";
@@ -37,6 +37,10 @@ public class ClubEventService(IGraphEventGateway graph, IMemoryCache cache, Faci
             cache.Remove(key);
         }
         _viewCacheKeys.Clear();
+
+        // Same reasoning as SheetBookingService's - a closure club event changes what the public
+        // availability and practice ice views should show, so clear that layer too.
+        viewCache.InvalidateAll();
     }
 
     public async Task<ClubEvent> CreateAsync(ClubEvent clubEvent, string actingUser, CancellationToken ct = default)

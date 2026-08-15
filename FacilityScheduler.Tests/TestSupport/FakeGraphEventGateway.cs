@@ -94,8 +94,20 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
             .ToList();
     }
 
+    /// <summary>When set, the (n+1)th CreateEventAsync call throws - simulates a Graph write failing
+    /// partway through a multi-sheet create (a 429, a 5xx, an over-size extended property) so the
+    /// rollback path can be tested. Null disables it.</summary>
+    public int? FailCreateAfter { get; set; }
+
+    private int _createCount;
+
     public Task<Event?> CreateEventAsync(string mailbox, Event graphEvent, CancellationToken ct = default)
     {
+        if (FailCreateAfter is int limit && _createCount++ >= limit)
+        {
+            throw new InvalidOperationException($"Simulated Graph create failure on call {_createCount}.");
+        }
+
         var created = Clone(graphEvent);
         created.Id = $"evt-{_nextId++}";
         created.ICalUId = $"ical-{created.Id}";

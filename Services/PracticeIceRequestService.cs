@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services.Graph;
 
@@ -18,6 +19,13 @@ public class PracticeIceRequestService(
     FacilityConfiguration facility,
     AppLogService log)
 {
+    // Serializes approve/decline per booking group - the same read-then-act race the Breely path
+    // closes with its own per-external-id lock. Without it, two approvers acting on the same request
+    // simultaneously (or one approving while another declines) both read the group and both act on
+    // it. The per-sheet locks inside SheetBookingService don't cover this: the race is in the lookup
+    // that happens before either call picks a sheet to lock.
+    private static readonly ConcurrentDictionary<Guid, SemaphoreSlim> GroupLocks = new();
+
     /// <summary>Writes the hold immediately on submission (D7 - there is nowhere else a pending
     /// request could live) and notifies the approver group. Blocks outright, rather than silently
     /// creating an unnoticed hold, when the notification mailbox isn't configured yet - visibility
@@ -35,6 +43,12 @@ public class PracticeIceRequestService(
         if (string.IsNullOrWhiteSpace(hostName) || string.IsNullOrWhiteSpace(hostEmail))
         {
             return PracticeIceSubmitResult.Invalid("Your sign-in didn't provide a name and email address - please contact staff.");
+        }
+        // The one free-text field a non-staff member can write into the system of record. Server-side
+        // because the page's own maxlength is a client-side courtesy, not a control.
+        if (notes is { Length: > PracticeIceRules.MaxNotesLength })
+        {
+            return PracticeIceSubmitResult.Invalid($"Notes are limited to {PracticeIceRules.MaxNotesLength} characters.");
         }
 
         var window = await availability.FindPracticeIceWindowContainingAsync(start, ct);
@@ -111,6 +125,10 @@ public class PracticeIceRequestService(
 
     public async Task<PracticeIceActionResult> ApproveAsync(Guid bookingGroupId, string actingUser, CancellationToken ct = default)
     {
+        var gate = GroupLocks.GetOrAdd(bookingGroupId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
         var members = await GetGroupMembersAsync(bookingGroupId, ct);
         if (members.Count == 0)
         {
@@ -149,6 +167,11 @@ public class PracticeIceRequestService(
                 "PracticeIceApprovalNotificationFailed", actingUser, ct);
 
         return PracticeIceActionResult.Done(notified);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     public async Task<PracticeIceActionResult> DeclineAsync(Guid bookingGroupId, string reason, string actingUser, CancellationToken ct = default)
@@ -158,6 +181,10 @@ public class PracticeIceRequestService(
             throw new ArgumentException("A decline reason is required.", nameof(reason));
         }
 
+        var gate = GroupLocks.GetOrAdd(bookingGroupId, _ => new SemaphoreSlim(1, 1));
+        await gate.WaitAsync(ct);
+        try
+        {
         var members = await GetGroupMembersAsync(bookingGroupId, ct);
         if (members.Count == 0)
         {
@@ -174,6 +201,11 @@ public class PracticeIceRequestService(
                 "PracticeIceDeclineNotificationFailed", actingUser, ct);
 
         return PracticeIceActionResult.Done(notified);
+        }
+        finally
+        {
+            gate.Release();
+        }
     }
 
     private Task<List<SheetBooking>> GetHorizonBookingsAsync(CancellationToken ct) =>

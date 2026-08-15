@@ -16,6 +16,14 @@ public static class PracticeIceRules
     /// practice ice in.</summary>
     public const int MinSessionMinutes = 60;
 
+    /// <summary>Cap on the member-supplied notes field. Nothing else bounded it, and it lands in the
+    /// booking's JSON extended property alongside the host's name and email - the only size the
+    /// original Graph spike established as safe is 4000 characters for a single extended property
+    /// value (architecture doc §8), and exceeding it would fail the Graph write partway through a
+    /// five-sheet create. Generous for "first time hosting, bringing spare brooms" while leaving
+    /// ample headroom in the blob.</summary>
+    public const int MaxNotesLength = 1000;
+
     /// <summary>Every selectable duration (in minutes), from MinSessionMinutes up to
     /// <paramref name="maxMinutes"/> in SlotIntervalMinutes steps - empty if even the shortest
     /// session doesn't fit.</summary>

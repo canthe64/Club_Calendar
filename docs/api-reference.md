@@ -404,7 +404,7 @@ service layer the rest of this appendix documents, but included here for complet
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`, Standard tier so it's visible without Debug on) and treated as `false`, never propagated, so a transient outage or a missing `GroupMember.Read.All` consent degrades a sign-in to non-staff rather than risking an accidental grant. |
+| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`, Standard tier so it's visible without Debug on) and treated as `false`, never propagated, so a transient outage or a missing/unconsented Graph permission degrades a sign-in to non-staff rather than risking an accidental grant. Requires **both** `GroupMember.Read.All` and `User.Read.All` (application) - see deployment guide §2.5. |
 
 Also exposes `StaffClaimType` (`facility:staff`) and `StaffClaimValue`, the claim `Program.cs` adds at
 sign-in and the policies below match on.

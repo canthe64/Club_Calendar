@@ -15,7 +15,7 @@ namespace FacilityScheduler.Services;
 /// Booking Attendant (confirmed via spike, architecture doc D3/S6.1), so this service is the
 /// only thing standing between two overlapping bookings on the same sheet.
 /// </summary>
-public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log)
+public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log, ViewCacheRegistry viewCache)
 {
     // Title given to a leftover Group Event hold created/kept by TrimHoldAsync when claiming a
     // Breely booking (architecture doc §4.8) - distinguishes an app-generated "the rest of this slot
@@ -104,6 +104,12 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
             cache.Remove(key);
         }
         _viewCacheKeys.Clear();
+
+        // Also clear the public-facing layer that sits on top of these reads. It used to expire on
+        // its own TTL only, on the reasoning that nothing wrote through it - practice ice hosting
+        // made that false, and a staff booking equally ought not leave the public calendar showing
+        // ice as free for another minute (ViewCacheRegistry).
+        viewCache.InvalidateAll();
     }
 
     // Fixed GUID namespace for this app's custom extended properties. BookedBy and
@@ -209,28 +215,44 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
 
             var groupId = Guid.NewGuid();
             var created = new List<SheetBooking>();
-            foreach (var sheet in orderedSheets)
-            {
-                var booking = new SheetBooking
-                {
-                    SheetMailbox = sheet,
-                    Start = template.Start,
-                    End = template.End,
-                    Category = template.Category,
-                    State = template.State,
-                    RenterName = template.RenterName,
-                    RenterPhone = template.RenterPhone,
-                    RenterEmail = template.RenterEmail,
-                    Notes = template.Notes,
-                    BookedBy = template.BookedBy,
-                    BookingGroupId = groupId
-                };
 
-                var graphEvent = ToGraphEvent(booking);
-                var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
-                booking.EventId = result?.Id;
-                booking.ICalUId = result?.ICalUId;
-                created.Add(booking);
+            // The conflict check above makes this all-or-nothing against *existing* bookings, but
+            // the writes themselves are separate Graph calls with no transaction behind them. A
+            // failure partway through (a 429, a 5xx, a timeout, an over-size extended property) used
+            // to leave the sheets already written in place while the caller saw an error - a
+            // half-created booking carrying a BookingGroupId nobody holds a reference to, which
+            // reads as a real booking on the calendar and blocks that ice. Roll them back instead,
+            // then rethrow so the caller still surfaces the failure.
+            try
+            {
+                foreach (var sheet in orderedSheets)
+                {
+                    var booking = new SheetBooking
+                    {
+                        SheetMailbox = sheet,
+                        Start = template.Start,
+                        End = template.End,
+                        Category = template.Category,
+                        State = template.State,
+                        RenterName = template.RenterName,
+                        RenterPhone = template.RenterPhone,
+                        RenterEmail = template.RenterEmail,
+                        Notes = template.Notes,
+                        BookedBy = template.BookedBy,
+                        BookingGroupId = groupId
+                    };
+
+                    var graphEvent = ToGraphEvent(booking);
+                    var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
+                    booking.EventId = result?.Id;
+                    booking.ICalUId = result?.ICalUId;
+                    created.Add(booking);
+                }
+            }
+            catch (Exception ex)
+            {
+                await RollbackCreatedAsync(created, actingUser, ex, ct);
+                throw;
             }
 
             InvalidateViewCache();
@@ -369,28 +391,44 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
             // Guid.NewGuid() only applies if there were no existing members at all (every sheet in
             // this "edit" is brand new).
             var targetGroupId = newBookingGroupId ?? memberList.FirstOrDefault()?.BookingGroupId ?? Guid.NewGuid();
-            foreach (var sheet in newSheets)
-            {
-                var created = new SheetBooking
-                {
-                    SheetMailbox = sheet,
-                    Start = updatedFields.Start,
-                    End = updatedFields.End,
-                    Category = updatedFields.Category,
-                    State = updatedFields.State,
-                    RenterName = updatedFields.RenterName,
-                    RenterPhone = updatedFields.RenterPhone,
-                    RenterEmail = updatedFields.RenterEmail,
-                    Notes = updatedFields.Notes,
-                    BookedBy = updatedFields.BookedBy,
-                    BookingGroupId = targetGroupId
-                };
 
-                var graphEvent = ToGraphEvent(created);
-                var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
-                created.EventId = result?.Id;
-                created.ICalUId = result?.ICalUId;
-                updated.Add(created);
+            // Same partial-write rollback as CreateAcrossSheetsAsync, scoped to the sheets newly
+            // *created* here. The PATCHes above are deliberately not rolled back: restoring them
+            // would mean replaying each member's prior state, and a half-applied edit still leaves
+            // real bookings on real sheets, whereas a half-created new sheet leaves a phantom event
+            // in a group the caller was told didn't save. See §8 for the residual on PATCH.
+            var newlyCreated = new List<SheetBooking>();
+            try
+            {
+                foreach (var sheet in newSheets)
+                {
+                    var created = new SheetBooking
+                    {
+                        SheetMailbox = sheet,
+                        Start = updatedFields.Start,
+                        End = updatedFields.End,
+                        Category = updatedFields.Category,
+                        State = updatedFields.State,
+                        RenterName = updatedFields.RenterName,
+                        RenterPhone = updatedFields.RenterPhone,
+                        RenterEmail = updatedFields.RenterEmail,
+                        Notes = updatedFields.Notes,
+                        BookedBy = updatedFields.BookedBy,
+                        BookingGroupId = targetGroupId
+                    };
+
+                    var graphEvent = ToGraphEvent(created);
+                    var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
+                    created.EventId = result?.Id;
+                    created.ICalUId = result?.ICalUId;
+                    newlyCreated.Add(created);
+                    updated.Add(created);
+                }
+            }
+            catch (Exception ex)
+            {
+                await RollbackCreatedAsync(newlyCreated, actingUser, ex, ct);
+                throw;
             }
 
             InvalidateViewCache();
@@ -624,6 +662,12 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
         var excluded = excludedDates.Select(d => d.Date).ToHashSet();
         var created = new List<SheetBooking>();
 
+        // Same partial-write rollback as CreateAcrossSheetsAsync - a failure on sheet 3 of 5 would
+        // otherwise leave two orphaned recurring series (every occurrence of each) on the calendar
+        // while the caller sees an error. Worse here than for a one-off booking, since a leftover
+        // series blocks its slot every week until someone finds and cancels it.
+        try
+        {
         foreach (var sheet in orderedSheets)
         {
             var booking = new SheetBooking
@@ -683,6 +727,12 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
                     }
                 }
             }
+        }
+        }
+        catch (Exception ex)
+        {
+            await RollbackCreatedAsync(created, actingUser, ex, ct);
+            throw;
         }
 
         InvalidateViewCache();
@@ -992,6 +1042,51 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
 
     private Task<List<Event>> GetEventsInRangeAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct) =>
         graph.GetCalendarViewAsync(sheetMailbox, facility.ToUtcQueryString(start), facility.ToUtcQueryString(end), ExtendedPropertiesExpand, ct: ct);
+
+    /// <summary>
+    /// Best-effort compensation for a multi-sheet write that failed partway through: deletes the
+    /// events already created so the caller's "this failed" is actually true on the calendar too.
+    /// Runs on <see cref="CancellationToken.None"/> deliberately - if the original failure was a
+    /// cancelled request, the already-written events still need removing, and inheriting the
+    /// cancelled token would skip exactly the cleanup that matters. A delete that itself fails is
+    /// logged at Standard tier rather than thrown: the caller is already receiving the original
+    /// exception, and a leftover event a human has to remove is worth a visible log line.
+    /// </summary>
+    private async Task RollbackCreatedAsync(List<SheetBooking> created, string actingUser, Exception cause, CancellationToken ct)
+    {
+        if (created.Count == 0)
+        {
+            return;
+        }
+
+        var orphaned = new List<string>();
+        foreach (var booking in created)
+        {
+            if (booking.EventId is null)
+            {
+                continue;
+            }
+
+            try
+            {
+                await graph.DeleteEventAsync(booking.SheetMailbox, booking.EventId, CancellationToken.None);
+            }
+            catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+            {
+                // Already gone - nothing to undo.
+            }
+            catch (Exception)
+            {
+                orphaned.Add($"{booking.SheetMailbox}:{booking.EventId}");
+            }
+        }
+
+        InvalidateViewCache();
+
+        var detail = $"Rolled back {created.Count} sheet(s) after: {cause.Message}"
+            + (orphaned.Count > 0 ? $". MANUAL CLEANUP REQUIRED, could not delete: {string.Join(",", orphaned)}" : "");
+        await log.LogActionAsync("MultiSheetCreateRolledBack", actingUser, details: detail, ct: ct);
+    }
 
     private Event ToGraphEvent(SheetBooking booking, bool includeTime = true, string? titleOverride = null, bool clearUnsetOptionalProperties = false)
     {

@@ -17,7 +17,8 @@ public class SettingsTests : BunitContext
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var logService = TestAppLog.Create();
-        var bookingService = new SheetBookingService(gateway, new MemoryCache(new MemoryCacheOptions()), facility, logService);
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var bookingService = new SheetBookingService(gateway, cache, facility, logService, new ViewCacheRegistry(cache));
 
         Services.AddSingleton(logService);
         Services.AddSingleton(bookingService);

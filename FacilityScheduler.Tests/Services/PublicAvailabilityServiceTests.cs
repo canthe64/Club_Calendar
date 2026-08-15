@@ -12,10 +12,11 @@ public class PublicAvailabilityServiceTests
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create();
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog);
-        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility);
+        var appLog = TestAppLog.Create(facility);
+        var viewCache = new ViewCacheRegistry(cache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache);
+        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
+        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache);
         return (publicService, bookingService, facility);
     }
 
