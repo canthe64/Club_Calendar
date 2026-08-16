@@ -9,9 +9,29 @@ instructions.
 
 ## 1. Signing In
 
-Navigate to the app's URL and sign in with your normal club Microsoft account when prompted. Sign-in
-is used for identity/audit purposes — it doesn't change what you can do in the app, just who shows
-up as "Booked by" on a booking.
+Navigate to the app's URL and sign in with your normal club Microsoft account when prompted. Once
+you're in, the header greets you by name — that's how you can tell which account you're signed in as.
+
+Sign-in identifies you for audit purposes (you're recorded as "Booked by" on bookings you create),
+and it determines whether you get staff access at all: that comes from membership in the club's staff
+security group, checked each time you sign in. If you can reach the Calendar page, you have it.
+
+### Getting around
+
+Everything is behind the **menu button** (the three-line icon at the top left):
+
+| | |
+|---|---|
+| **Staff Calendar** | The main working page (§2) |
+| **Public Calendar** | What members see — opens in a new tab |
+| **Club Events** | Whole-club events and closures (§5) |
+| **Practice Ice** | The member-facing page showing open practice ice times — opens in a new tab |
+| **Practice Ice Approvals** | Pending member requests to host (§9) |
+| **Settings** | Booking rules and the activity log (§7) |
+| **Sign out** | |
+
+The two "opens in a new tab" items are the member-facing views, so you can check what members are
+seeing without losing your place in the app.
 
 ---
 
@@ -169,7 +189,7 @@ choose per date whether to skip it or include it anyway.
 
 ## 7. Settings
 
-The **Settings** page (top nav bar) controls booking behavior and shows a record of what's actually
+The **Settings** page (menu button, top left) controls booking behavior and shows a record of what's actually
 happened in the app.
 
 ### Minimum group event booking interval
@@ -229,7 +249,7 @@ a time when nothing else is on the calendar. Members find open times and submit 
 `/public/practice-ice` (no sign-in needed to browse, sign-in required to actually submit); every
 request lands here for staff review before it's real.
 
-**Practice Ice Requests** (top nav bar, and also linked from Settings) lists every pending request,
+**Practice Ice Approvals** (menu button, top left; also linked from Settings) lists every pending request,
 soonest first - a request whose slot is coming up soon is the one most likely to need a decision
 first, since (unlike a booking) there's no record of *when* a member actually submitted it. Each
 entry shows the requested time, the volunteer's name and email, and any notes they added.

@@ -23,17 +23,29 @@ $tokenResponse = Invoke-RestMethod -Method Post -Uri "https://login.microsoftonl
 }
 $headers = @{ Authorization = "Bearer $($tokenResponse.access_token)" }
 
+# Mirrors CalendarStyles.CategoryColor / ClubEventCategoryColor as closely as Exchange's fixed
+# preset palette allows, so the Outlook read-only fallback view (architecture doc D2) doesn't show a
+# different color scheme than the web UI. Preset names are Outlook's own: preset0 Red, preset1
+# Orange, preset3 Yellow, preset4 Green, preset5 Teal, preset7 Blue, preset8 Purple, preset9
+# Cranberry, preset10 Steel, preset12 Gray, preset13 DarkGray.
+#
+# Every BookingCategory / ClubEventCategory value is listed. Bonspiel and Maintenance were missing
+# from the sheet list, and the club list still said "Tournament" - renamed to "Activities" during the
+# build (architecture doc §4.4) - so both were provisioning an incomplete/stale palette.
 $sheetCategories = @(
-    @{ displayName = "GroupEvent";  color = "preset4"  },  # Green
-    @{ displayName = "League";      color = "preset7"  },  # Blue
-    @{ displayName = "Event";       color = "preset9"  },  # Cranberry
-    @{ displayName = "PracticeIce"; color = "preset11" },  # Teal
-    @{ displayName = "Other";       color = "preset8"  }   # Purple
+    @{ displayName = "GroupEvent";  color = "preset7"  },  # Blue      - app #2d5f8a
+    @{ displayName = "League";      color = "preset4"  },  # Green     - app #4a8a5f
+    @{ displayName = "Event";       color = "preset9"  },  # Cranberry - app #a05fa8 (reserved for club events, kept in the palette so a stray value still renders)
+    @{ displayName = "Bonspiel";    color = "preset1"  },  # Orange    - app #c2622f
+    @{ displayName = "Maintenance"; color = "preset12" },  # Gray      - app #8a97a3
+    @{ displayName = "PracticeIce"; color = "preset8"  },  # Purple    - app #7a6acb (closest preset to the app's lavender)
+    @{ displayName = "Other";       color = "preset0"  }   # Red       - app #c0392b
 )
 $clubEventCategories = @(
     @{ displayName = "Bonspiel";   color = "preset1"  },  # Orange
-    @{ displayName = "Tournament"; color = "preset3"  },  # Yellow
-    @{ displayName = "Closure";    color = "preset12" }   # Gray
+    @{ displayName = "Activities"; color = "preset3"  },  # Yellow
+    @{ displayName = "Closure";    color = "preset12" },  # Gray
+    @{ displayName = "Other";      color = "preset10" }   # Steel
 )
 
 $results = @()

@@ -80,7 +80,7 @@ public static class PublicSearchEndpoint
 
         sb.Append($"""
             <div style="font-size:16px;font-weight:600;color:#1e2a33;margin-bottom:4px">Search Available Ice</div>
-            <div style="font-size:11px;color:#90a0ab;margin-bottom:16px">Find dates and times with enough open sheets for a group event.</div>
+            <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">Find dates and times with enough open sheets for a group event.</div>
 
             <form method="get" style="display:flex;gap:12px;align-items:end;flex-wrap:wrap;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;padding:14px;margin-bottom:20px;font-size:12px">
                 <div>
@@ -134,7 +134,7 @@ public static class PublicSearchEndpoint
 
         var sb = new StringBuilder();
         sb.Append($"""
-            <div style="font-size:11px;color:#5a7183;margin-bottom:8px;font-weight:600">{windows.Count} window{(windows.Count == 1 ? "" : "s")} found with at least {minSheets} {H(sheetWord)} available:</div>
+            <div style="font-size:13px;color:#5a7183;margin-bottom:8px;font-weight:600">{windows.Count} window{(windows.Count == 1 ? "" : "s")} found with at least {minSheets} {H(sheetWord)} available:</div>
             <div style="display:flex;flex-direction:column;gap:6px">
             """);
 

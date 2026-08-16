@@ -5,9 +5,15 @@ namespace FacilityScheduler;
 /// <summary>
 /// The app's own color/border mapping for categories and hold-vs-confirmed state, independent
 /// of Exchange's category colors (architecture doc S4.1 design rule). Blue=group event, green=league,
-/// purple=event, orange=bonspiel, grey=maintenance, teal=practice ice, a distinct lighter neutral=other
-/// (deliberately neutral rather than colorful, same as maintenance, but a different shade so the two
-/// remain visually distinguishable). Dashed border = hold (not yet confirmed), solid = confirmed.
+/// magenta-purple=event, orange=bonspiel, grey=maintenance, lavender=practice ice, red=other.
+/// Dashed border = hold (not yet confirmed), solid = confirmed.
+///
+/// Practice Ice's lavender is deliberately blue-leaning (hue ~250) rather than a true light lavender:
+/// it has to sit next to Event's magenta-leaning purple (hue ~294) on the same grid and stay
+/// distinguishable, and a confirmed booking uses this color as a chip background with white text, so
+/// it also has to stay dark enough to read - the whole palette sits around a 4:1 contrast ratio.
+/// `docs/provision-categories.ps1` mirrors these choices onto Exchange's own master category list so
+/// the Outlook read-only fallback view (D2) doesn't show a different color scheme than the web UI.
 /// </summary>
 public static class CalendarStyles
 {
@@ -18,9 +24,9 @@ public static class CalendarStyles
         BookingCategory.Event => "#a05fa8",
         BookingCategory.Bonspiel => "#c2622f",
         BookingCategory.Maintenance => "#8a97a3",
-        BookingCategory.PracticeIce => "#1e8a8a",
-        BookingCategory.Other => "#9c9690",
-        _ => "#9c9690"
+        BookingCategory.PracticeIce => "#7a6acb",
+        BookingCategory.Other => "#c0392b",
+        _ => "#c0392b"
     };
 
     public static string CategoryLightBg(BookingCategory category) => category switch
@@ -30,9 +36,9 @@ public static class CalendarStyles
         BookingCategory.Event => "#f3e8f5",
         BookingCategory.Bonspiel => "#f7e8e0",
         BookingCategory.Maintenance => "#eef1f3",
-        BookingCategory.PracticeIce => "#e3f3f2",
-        BookingCategory.Other => "#f1efec",
-        _ => "#f1efec"
+        BookingCategory.PracticeIce => "#edeaf9",
+        BookingCategory.Other => "#fbeae8",
+        _ => "#fbeae8"
     };
 
     /// <summary>
@@ -136,7 +142,13 @@ public static class CalendarStyles
     /// own copy that could drift out of sync.
     /// </summary>
     public static readonly int[] HourRows = Enumerable.Range(0, 24).ToArray();
-    public const double RowHeightPx = 34;
+
+    // Raised from 34px alongside the cell font-size increase. The binding constraint is a
+    // half-hour booking, whose chip is only half a row tall: at 34px that's ~17px of box for ~13.5px
+    // of text plus padding, which clips. 38px gives it room without stretching the day out further
+    // than the text increase warrants. Both the staff and public Week/Day grids read this, so they
+    // stay in lockstep by construction.
+    public const double RowHeightPx = 38;
     public const double RowGapPx = 3;
     public static readonly int FirstHour = HourRows[0];
     public static readonly int LastHour = HourRows[^1] + 1; // exclusive upper bound (midnight cap)

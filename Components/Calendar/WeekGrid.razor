@@ -1,7 +1,7 @@
 @using FacilityScheduler.Domain
 
 <div style="min-width:900px;border:1px solid #e7ecef;border-radius:8px;padding:10px;background:#fff">
-    <div style="display:flex;gap:3px;font-size:11px">
+    <div style="display:flex;gap:3px;font-size:13px">
         <div style="width:56px;flex-shrink:0">
             <div style="height:@(HeaderRowHeightPx)px"></div>
             @if (WeekAllDayRowHeightPx > 0)
@@ -10,7 +10,7 @@
             }
             @foreach (var hour in CalendarStyles.HourRows)
             {
-                <div style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;color:#90a0ab;font-size:10.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">@CalendarStyles.FormatHour(hour)</div>
+                <div style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;color:#90a0ab;font-size:12.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">@CalendarStyles.FormatHour(hour)</div>
                 <div style="height:@(CalendarStyles.RowGapPx)px"></div>
             }
         </div>
@@ -21,7 +21,7 @@
             <div style="flex:1;min-width:0">
                 <div @onclick="() => OnDayClick.InvokeAsync(day)" style="box-sizing:border-box;height:@(HeaderRowHeightPx)px;text-align:center;cursor:pointer;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
                     <div style="font-weight:600;color:#1e2a33;font-size:12.5px">@day.ToString("ddd")</div>
-                    <div style="color:#90a0ab;font-size:10.5px">@day.ToString("MMM d")</div>
+                    <div style="color:#90a0ab;font-size:12.5px">@day.ToString("MMM d")</div>
                 </div>
                 @if (WeekAllDayRowHeightPx > 0)
                 {
@@ -29,7 +29,7 @@
                         @foreach (var ce in dayAllDayEvents)
                         {
                             <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
-                                 style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:10px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
+                                 style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
                                 @(ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title)
                             </div>
                         }
@@ -47,7 +47,7 @@
                         @if (laid.Item.ClubEvent is { } ce)
                         {
                             <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
-                                 style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:10px;font-weight:600">
+                                 style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:12px;font-weight:600">
                                 @($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {ce.Title}")
                             </div>
                         }
@@ -55,7 +55,7 @@
                         {
                             <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
                                  style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(b);border:@CalendarStyles.BorderStyle(b);color:@CalendarStyles.TextColorStyle(b);padding:2px 5px;overflow:hidden;cursor:pointer">
-                                <div style="font-size:10px;font-weight:600">@($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}")</div>
+                                <div style="font-size:12px;font-weight:600">@($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}")</div>
                             </div>
                         }
                     }

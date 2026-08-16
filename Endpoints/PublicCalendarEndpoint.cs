@@ -251,7 +251,7 @@ public static class PublicCalendarEndpoint
             var style = mode == current
                 ? "background:#2d5f8a;color:#fff;border:1px solid #2d5f8a"
                 : "background:#fff;color:#2d5f8a;border:1px solid #d7dfe5";
-            return $"""<a href="{href}" class="pub-cal-nav-link" style="padding:4px 12px;border-radius:6px;font-weight:600;font-size:11px;text-decoration:none;{style}">{label}</a>""";
+            return $"""<a href="{href}" class="pub-cal-nav-link" style="padding:4px 12px;border-radius:6px;font-weight:600;font-size:13px;text-decoration:none;{style}">{label}</a>""";
         }
 
         return $"""
@@ -268,7 +268,7 @@ public static class PublicCalendarEndpoint
                     {Tab("Day", ViewMode.Day, DayHref(representativeDate, filterQuery))}
                 </span>
             </div>
-            <div style="font-size:11px;color:#90a0ab;margin-bottom:12px">What's on the ice, at a glance - tap an entry to see its time.</div>
+            <div style="font-size:13px;color:#90a0ab;margin-bottom:12px">What's on the ice, at a glance - tap an entry to see its time.</div>
             """;
     }
 
@@ -296,17 +296,17 @@ public static class PublicCalendarEndpoint
         });
 
         return $"""
-            <form method="get" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:11px">
+            <form method="get" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:13px">
                 <input type="hidden" name="filtered" value="1">
                 {viewField}
                 {anchorField}
-                <span style="font-weight:600;color:#90a0ab;font-size:10px;letter-spacing:.05em">SHOW</span>
+                <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em">SHOW</span>
                 {string.Join("", categoryLabels)}
                 <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
                     <input type="checkbox" name="showClubEvents" value="1"{(filter.ShowClubEvents ? " checked" : "")}>
                     Club events
                 </label>
-                <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:11px;cursor:pointer">Apply</button>
+                <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
             </form>
             """;
     }
@@ -314,7 +314,7 @@ public static class PublicCalendarEndpoint
     private static void AppendLegend(StringBuilder sb)
     {
         sb.Append($"""
-            <div style="display:flex;gap:16px;margin-top:12px;font-size:11px;color:#5a7183;flex-wrap:wrap">
+            <div style="display:flex;gap:16px;margin-top:12px;font-size:13px;color:#5a7183;flex-wrap:wrap">
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#2d5f8a;vertical-align:-2px"></span> Confirmed</span>
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#eaf1f8;border:1.5px dashed #2d5f8a;vertical-align:-2px"></span> Hold (not yet confirmed)</span>
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#c2622f;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;vertical-align:-2px"></span> Club event — dotted outline</span>
@@ -336,7 +336,7 @@ public static class PublicCalendarEndpoint
             ViewMode.Month, anchorMonth, filterQuery));
         sb.Append(AppendCategoryFilterForm(ViewMode.Month, anchorMonth, filter));
 
-        sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:10px">""");
+        sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:12px">""");
         foreach (var name in new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" })
         {
             sb.Append($"""<div style="text-align:center;color:#90a0ab;font-weight:600;padding:2px 0">{name}</div>""");
@@ -365,7 +365,7 @@ public static class PublicCalendarEndpoint
         var visibleBookingCount = Math.Max(0, 3 - dayClubEvents.Count);
 
         sb.Append($"""<div class="pub-cal-day" style="border:1px solid #e7ecef;border-radius:6px;min-height:92px;padding:3px 4px;background:{(inMonth ? "#fff" : "#fafbfc")}">""");
-        sb.Append($"""<div style="font-size:10px;color:{(inMonth ? "#90a0ab" : "#c1ccd4")};font-weight:600;padding:1px 2px">{cell.Day}</div>""");
+        sb.Append($"""<div style="font-size:12px;color:{(inMonth ? "#90a0ab" : "#c1ccd4")};font-weight:600;padding:1px 2px">{cell.Day}</div>""");
 
         foreach (var ce in dayClubEvents)
         {
@@ -373,7 +373,7 @@ public static class PublicCalendarEndpoint
             var cellTitle = ce.IsAllDay ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
             sb.Append($"""
                 <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(ce.Category.ToString())}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(note)}"
-                     style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
+                     style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
                 """);
         }
 
@@ -394,7 +394,7 @@ public static class PublicCalendarEndpoint
             var cellTitle = $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {b.Title}";
             sb.Append($"""
                 <div class="pub-cal-chip{extraClass}" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(time)}" data-note=""
-                     style="display:{display};background:{bg};color:{textColor};border:{border};border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:9px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
+                     style="display:{display};background:{bg};color:{textColor};border:{border};border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
                 """);
         }
 
@@ -463,7 +463,7 @@ public static class PublicCalendarEndpoint
         var isMultiDay = days.Count > 1;
 
         sb.Append("""<div style="border:1px solid #e7ecef;border-radius:8px;padding:10px;background:#fff;overflow-x:auto">""");
-        sb.Append("""<div style="display:flex;gap:3px;font-size:10px">""");
+        sb.Append("""<div style="display:flex;gap:3px;font-size:12px">""");
 
         sb.Append("""<div style="width:52px;flex-shrink:0">""");
         if (showDayHeaders)
@@ -476,7 +476,7 @@ public static class PublicCalendarEndpoint
         }
         foreach (var hour in CalendarStyles.HourRows)
         {
-            sb.Append($"""<div style="box-sizing:border-box;height:{CalendarStyles.RowHeightPx}px;color:#90a0ab;font-size:9.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">{CalendarStyles.FormatHour(hour)}</div>""");
+            sb.Append($"""<div style="box-sizing:border-box;height:{CalendarStyles.RowHeightPx}px;color:#90a0ab;font-size:11.5px;text-align:right;padding:2px 8px 0 0;font-weight:600">{CalendarStyles.FormatHour(hour)}</div>""");
             sb.Append($"""<div style="height:{CalendarStyles.RowGapPx}px"></div>""");
         }
         sb.Append("</div>");
@@ -498,8 +498,8 @@ public static class PublicCalendarEndpoint
         {
             sb.Append($"""
                 <div style="box-sizing:border-box;height:{HourlyHeaderRowHeightPx}px;text-align:center;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
-                    <div style="font-weight:600;color:#1e2a33;font-size:11.5px">{day:ddd}</div>
-                    <div style="color:#90a0ab;font-size:9.5px">{day:MMM d}</div>
+                    <div style="font-weight:600;color:#1e2a33;font-size:13.5px">{day:ddd}</div>
+                    <div style="color:#90a0ab;font-size:11.5px">{day:MMM d}</div>
                 </div>
                 """);
         }
@@ -513,7 +513,7 @@ public static class PublicCalendarEndpoint
                 var text = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title;
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(ce.Category.ToString())}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets reserved" : "")}"
-                         style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:9px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(text)}</div>
+                         style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(text)}</div>
                     """);
             }
             sb.Append("</div>");
@@ -539,7 +539,7 @@ public static class PublicCalendarEndpoint
                 var title = $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {ce.Title}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(ce.Category.ToString())}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets reserved" : "")}"
-                         style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:{CalendarStyles.ClubEventBorderStyle};color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:9px;font-weight:600">{H(title)}</div>
+                         style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:{CalendarStyles.ClubEventBorderStyle};color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
                     """);
             }
             else if (laid.Item.Booking is { } b)
@@ -554,7 +554,7 @@ public static class PublicCalendarEndpoint
                 var title = $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {b.Title}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(timeText)}" data-note=""
-                         style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:1;border-radius:5px;background:{bg};border:{border};color:{textColor};padding:2px 5px;overflow:hidden;cursor:pointer;font-size:9px;font-weight:600">{H(title)}</div>
+                         style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:1;border-radius:5px;background:{bg};border:{border};color:{textColor};padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
                     """);
             }
         }
@@ -599,9 +599,9 @@ public static class PublicCalendarEndpoint
         <div id="pub-cal-overlay" style="display:none;position:fixed;inset:0;background:rgba(30,42,51,.45);align-items:center;justify-content:center;z-index:50">
             <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:340px">
                 <div id="pub-cal-overlay-title" style="font-size:15px;font-weight:600;color:#1e2a33;margin-bottom:2px"></div>
-                <div id="pub-cal-overlay-subtitle" style="font-size:11px;color:#90a0ab;margin-bottom:10px"></div>
+                <div id="pub-cal-overlay-subtitle" style="font-size:13px;color:#90a0ab;margin-bottom:10px"></div>
                 <div id="pub-cal-overlay-time" style="font-size:12px;color:#1e2a33"></div>
-                <div id="pub-cal-overlay-note" style="font-size:11px;color:#a02c21;font-weight:600;margin-top:6px"></div>
+                <div id="pub-cal-overlay-note" style="font-size:13px;color:#a02c21;font-weight:600;margin-top:6px"></div>
                 <div style="text-align:center;margin-top:14px">
                     <span id="pub-cal-overlay-close" style="border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 20px;cursor:pointer;font-size:12px;font-weight:600">Close</span>
                 </div>

@@ -48,7 +48,7 @@ public static class PracticeIcePublicEndpoint
             </header>
             <div style="padding:16px 24px;max-width:800px">
                 <div style="font-size:16px;font-weight:600;color:#1e2a33;margin-bottom:4px">Host Practice Ice</div>
-                <div style="font-size:11px;color:#90a0ab;margin-bottom:16px">
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">
                     Any properly trained member can volunteer to host a practice ice session, open to all
                     members, at a time when no other activity is planned on any sheet. Sessions must be
                     requested at least {facility.PracticeIceMinLeadHours} hours in advance and are subject

@@ -1,3 +1,116 @@
+/* The app header. These classes were referenced by the markup but never actually defined anywhere
+   (no Bootstrap, and wwwroot/app.css only carries leftover template rules), so the header rendered
+   as unstyled text until now. Scoped CSS, so it can't leak into the hand-built public pages. */
+
+.app-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    background: #1e2a33;
+    color: #fff;
+    padding: 10px 24px;
+}
+
+.app-heading {
+    display: flex;
+    flex-direction: column;
+    line-height: 1.2;
+}
+
+.app-title {
+    font-size: 21px;
+    font-weight: 700;
+    letter-spacing: 0.2px;
+}
+
+.app-greeting {
+    font-size: 12px;
+    font-weight: 400;
+    color: #a9c7e4;
+    margin-top: 2px;
+}
+
+/* Menu trigger + panel */
+
+.app-menu {
+    position: relative;
+    flex: none;
+}
+
+.app-menu-button {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+    width: 38px;
+    height: 38px;
+    padding: 0 8px;
+    background: transparent;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    border-radius: 6px;
+    cursor: pointer;
+}
+
+    .app-menu-button:hover {
+        background: rgba(255, 255, 255, 0.1);
+    }
+
+    .app-menu-button:focus-visible {
+        outline: 2px solid #a9c7e4;
+        outline-offset: 2px;
+    }
+
+.app-menu-bar {
+    display: block;
+    height: 2px;
+    background: #fff;
+    border-radius: 1px;
+}
+
+/* Sits between the page and the panel so any click outside the panel dismisses it, without
+   needing a document-level JS listener. */
+.app-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 40;
+}
+
+.app-menu-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    left: 0;
+    z-index: 41;
+    min-width: 220px;
+    display: flex;
+    flex-direction: column;
+    padding: 6px;
+    background: #fff;
+    border: 1px solid #d7dfe5;
+    border-radius: 8px;
+    box-shadow: 0 8px 24px rgba(30, 42, 51, 0.25);
+}
+
+    .app-menu-panel a {
+        padding: 9px 12px;
+        border-radius: 6px;
+        color: #1e2a33;
+        font-size: 13px;
+        font-weight: 600;
+        text-decoration: none;
+        white-space: nowrap;
+    }
+
+        .app-menu-panel a:hover {
+            background: #eef2f5;
+        }
+
+.app-menu-signout {
+    margin-top: 6px;
+    padding-top: 12px !important;
+    border-top: 1px solid #eef1f3;
+    color: #a02c21 !important;
+}
+
 #blazor-error-ui {
     color-scheme: light only;
     background: lightyellow;

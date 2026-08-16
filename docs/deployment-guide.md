@@ -247,9 +247,9 @@ authorization policy overriding the app's stricter default) has not been confirm
 sign-in as of this writing — architecture doc §6.5/§8 has the full explanation of why this specific
 check matters more than most.
 
-**Known, deliberately deferred:** the top staff nav currently shows links to Calendar/Settings/
-Practice Ice Requests to every signed-in user, including non-staff members — clicking correctly
-denies them, but a visibly dead link is poor UX. Not yet built.
+**Known, deliberately deferred:** the staff header's hamburger menu shows every destination to every
+signed-in user, including non-staff members — clicking correctly denies them, but a visibly dead
+link is poor UX. Not yet built.
 
 #### Troubleshooting: signed in successfully but denied every page
 

@@ -1,18 +1,40 @@
 ﻿@inherits LayoutComponentBase
+@using FacilityScheduler.Services
 
 <header class="app-header">
-    <span class="app-title">GCC Ice &amp; Event Calendar</span>
-    <a href="calendar">Calendar</a>
-    <a href="/public/practice-ice" target="_blank">Practice Ice</a>
-    <a href="/practice-ice/approvals">Practice Ice Requests</a>
-    <a href="/public/calendar" target="_blank">Public Calendar</a>
-    <a href="settings">Settings</a>
-    <AuthorizeView>
-        <Authorized>
-            <span class="user-name">@context.User.Identity?.Name</span>
-            <a href="MicrosoftIdentity/Account/SignOut">Sign out</a>
-        </Authorized>
-    </AuthorizeView>
+    @* Wraps the trigger and the panel so the panel can position itself against the button. *@
+    <div class="app-menu">
+        <button type="button" class="app-menu-button" @onclick="ToggleMenu"
+                aria-label="Menu" aria-haspopup="true" aria-expanded="@_menuOpen">
+            <span class="app-menu-bar"></span>
+            <span class="app-menu-bar"></span>
+            <span class="app-menu-bar"></span>
+        </button>
+
+        @if (_menuOpen)
+        {
+            @* Full-viewport transparent backdrop: gives "click anywhere else to dismiss" without
+               needing a JS document-level listener, and sits under the panel in z-order. *@
+            <div class="app-menu-backdrop" @onclick="CloseMenu"></div>
+            <nav class="app-menu-panel">
+                @foreach (var item in MenuItems)
+                {
+                    <a href="@item.Href" target="@(item.NewTab ? "_blank" : null)" @onclick="CloseMenu">@item.Label</a>
+                }
+                <a href="MicrosoftIdentity/Account/SignOut" class="app-menu-signout" @onclick="CloseMenu">Sign out</a>
+            </nav>
+        }
+    </div>
+
+    <div class="app-heading">
+        <div class="app-title">GCC Ice &amp; Event Calendar</div>
+        <AuthorizeView>
+            <Authorized>
+                @* DisplayName(), not Identity.Name - the latter is the UPN on an Entra token (D71). *@
+                <div class="app-greeting">Hello, @context.User.DisplayName()</div>
+            </Authorized>
+        </AuthorizeView>
+    </div>
 </header>
 
 @* Catches an unhandled exception thrown from a page's own event handler (e.g. a Graph 404, a bad
@@ -42,6 +64,24 @@
 
 @code {
     private ErrorBoundary? _errorBoundary;
+    private bool _menuOpen;
+
+    private void ToggleMenu() => _menuOpen = !_menuOpen;
+    private void CloseMenu() => _menuOpen = false;
+
+    private sealed record MenuItem(string Label, string Href, bool NewTab = false);
+
+    // The two anonymous surfaces open in a new tab so a staff member checking what members see
+    // doesn't lose their place in the app; everything else navigates in place.
+    private static readonly MenuItem[] MenuItems =
+    [
+        new("Staff Calendar", "/calendar"),
+        new("Public Calendar", "/public/calendar", NewTab: true),
+        new("Club Events", "/club-events"),
+        new("Practice Ice", "/public/practice-ice", NewTab: true),
+        new("Practice Ice Approvals", "/practice-ice/approvals"),
+        new("Settings", "/settings")
+    ];
 
     // Resets the boundary so the page's own OnInitializedAsync (etc.) runs again in place, rather
     // than forcing a full browser reload the way the circuit-level error banner above does.

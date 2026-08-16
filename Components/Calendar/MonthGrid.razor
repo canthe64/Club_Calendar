@@ -1,16 +1,16 @@
 @using FacilityScheduler.Domain
 
-<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;font-size:11px;min-width:900px">
+<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:5px;font-size:13px;min-width:900px">
     @foreach (var name in DowNames)
     {
-        <div style="text-align:center;color:#90a0ab;font-weight:600;padding:3px 0;font-size:11.5px">@name</div>
+        <div style="text-align:center;color:#90a0ab;font-weight:600;padding:3px 0;font-size:13.5px">@name</div>
     }
     @foreach (var cell in MonthCells)
     {
         var inMonth = cell.Month == AnchorMonth.Month;
         <div @onclick="() => OnDayClick.InvokeAsync(cell)"
              style="border:1px solid #e7ecef;border-radius:6px;min-height:112px;padding:4px 5px;background:@(inMonth ? "#fff" : "#fafbfc");cursor:pointer">
-            <div style="font-size:11px;color:@(inMonth ? "#90a0ab" : "#c1ccd4");font-weight:600;padding:1px 2px">@cell.Day</div>
+            <div style="font-size:13px;color:@(inMonth ? "#90a0ab" : "#c1ccd4");font-weight:600;padding:1px 2px">@cell.Day</div>
             @{
                 var dayClubEvents = ClubEvents.Where(ce => ce.Start.Date <= cell.Date && cell.Date <= ce.End.Date).ToList();
                 var dayBookings = Bookings
@@ -27,14 +27,14 @@
                 @if (item.ClubEvent is { } ce)
                 {
                     <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:3px;padding:2px 5px;margin-top:2px;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">
+                         style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">
                         @ClubEventTitle(ce)
                     </div>
                 }
                 else if (item.Booking is { } b)
                 {
                     <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:10px;font-weight:600;white-space:nowrap;overflow:hidden">
+                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">
                         @BookingTitle(b)
                     </div>
                 }
