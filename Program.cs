@@ -140,7 +140,19 @@ builder.Services.Configure<OpenIdConnectOptions>(OpenIdConnectDefaults.Authentic
 // in production - the inline version shipped a bug that no test could reach (architecture doc D74).
 builder.Services.AddAuthorization(FacilityScheduler.Services.StaffAuthorizationPolicies.Configure);
 builder.Services.AddCascadingAuthenticationState();
-builder.Services.AddRazorPages()
+// The only Razor Pages in this app are Microsoft.Identity.Web's own sign-in UI (SignIn, SignOut,
+// SignedOut, AccessDenied, Error, under the MicrosoftIdentity area). They have to be reachable by
+// someone the app has just denied - AccessDenied is shown *to* a forbidden user by definition, and
+// SignOut is the only way out for a user whose auth cookie predates a policy change.
+//
+// Live-found 2026-08-15: with the staff-only fallback policy applied to these too, a stale
+// pre-D75 cookie left a real staff member authenticated-but-never-staff (the claim is only added at
+// sign-in, and a valid cookie skips sign-in entirely), and /MicrosoftIdentity/Account/SignOut
+// itself denied them - so the only escape was deleting cookies in browser devtools. Scoped to that
+// one area rather than a blanket AllowAnonymous on MapRazorPages, so a future custom Razor Page
+// doesn't silently inherit anonymous access.
+builder.Services.AddRazorPages(options =>
+        options.Conventions.AllowAnonymousToAreaFolder("MicrosoftIdentity", "/"))
     .AddMicrosoftIdentityUI();
 
 var app = builder.Build();

@@ -247,9 +247,9 @@ authorization policy overriding the app's stricter default) has not been confirm
 sign-in as of this writing — architecture doc §6.5/§8 has the full explanation of why this specific
 check matters more than most.
 
-**Known, deliberately deferred:** the staff header's hamburger menu shows every destination to every
-signed-in user, including non-staff members — clicking correctly denies them, but a visibly dead
-link is poor UX. Not yet built.
+**The header menu adapts to who's signed in:** a non-staff member (someone guest-invited purely to
+request practice ice) sees only Public Calendar, Practice Ice, and Sign out. This is presentation
+only — every page enforces its own access regardless — so it's a convenience, not a control.
 
 #### Troubleshooting: signed in successfully but denied every page
 
@@ -274,7 +274,22 @@ Then match what you find:
 |---|---|
 | `StaffGroupCheckFailed` with `Insufficient privileges to complete the operation` | The Graph permissions in step 3 above — missing, or added without admin consent. The single most common cause. |
 | `StaffGroupCheckFailed` with anything else | Read the `details=` value; it's the raw Graph error. |
-| No `StaffGroupCheckFailed` at all | The check *worked* and returned "not a member." Either the account genuinely isn't in the group, or `StaffAccess:StaffGroupId` holds the wrong value — it must be the group's **object ID (a GUID)**, not its display name. A display name there produces no error at all, just a silent permanent "not staff." |
+| No `StaffGroupCheckFailed` at all, but a `StaffSignIn` entry appears (Debug tier) | The check *worked* and returned "not a member." Either the account genuinely isn't in the group, or `StaffAccess:StaffGroupId` holds the wrong value — it must be the group's **object ID (a GUID)**, not its display name. A display name there produces no error at all, just a silent permanent "not staff." |
+| **No new log entry of any kind** | No sign-in is happening: a still-valid auth cookie is being accepted, so the OIDC flow (and with it the group check that adds the staff claim) is skipped entirely. See below. |
+
+**Stale auth cookie — the "works in a private window but not my normal browser" case.**
+The staff claim is added once, at sign-in, and then lives in the auth cookie. A cookie issued before
+the staff group existed (or before any authorization change) keeps its old claims until it turns
+over, and the app will happily accept it as authenticated while denying every page. Restarting the
+app doesn't help — nothing relevant is server-side. Restarting the *browser* often doesn't either,
+because Chrome/Edge's "continue where you left off" preserves session cookies.
+
+Recovery, in order: navigate to `https://<your-app>/MicrosoftIdentity/Account/SignOut` and sign back
+in; or if that fails, clear the site's cookies (**F12 → Application → Cookies →** your site → delete
+`.AspNetCore.*`). Signing back in runs the full flow and picks up the claim.
+
+The same property applies routinely: **adding someone to the staff group takes effect on their next
+sign-in, not immediately.** Tell new staff to sign out and back in after you add them.
 
 ---
 
