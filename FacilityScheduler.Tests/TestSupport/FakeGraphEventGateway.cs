@@ -26,12 +26,24 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
     private readonly Dictionary<string, List<Event>> _mailboxes = new();
     private int _nextId = 1;
 
+    /// <summary>Guards every access to _mailboxes, the per-mailbox lists, and the id/call counters.
+    /// Required, not defensive: the concurrency tests exist precisely to run two callers through
+    /// this fake at once, and the ones exercising *independent* locks (different sheets, different
+    /// external ids) genuinely do reach here in parallel - by design, since that independence is
+    /// what they assert. Without this, a read-and-insert on the bare Dictionary corrupts it
+    /// ("Operations that change non-concurrent collections must have exclusive access") and a list
+    /// mutated mid-enumeration throws or tears, intermittently, as a pure test-harness artifact
+    /// with no production counterpart (the real gateway is stateless - Graph holds the state).</summary>
+    private readonly Lock _gate = new();
+
     public Func<Task>? DelayDuringCalendarView { get; set; }
     public Func<Task>? DelayDuringFindEvents { get; set; }
 
     private static readonly Regex ExtendedPropertyFilter =
         new(@"ep/id eq '(?<id>[^']+)' and ep/value eq '(?<value>[^']*)'", RegexOptions.Compiled);
 
+    /// <summary>Caller must hold <see cref="_gate"/>. Never hand the returned list outside the lock -
+    /// snapshot it (Select(Clone).ToList()) instead, or a concurrent Add/Remove can tear the read.</summary>
     private List<Event> Mailbox(string mailbox) =>
         _mailboxes.TryGetValue(mailbox, out var list) ? list : _mailboxes[mailbox] = [];
 
@@ -63,13 +75,19 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
         var start = DateTime.Parse(startUtc, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
         var end = DateTime.Parse(endUtc, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
 
-        return Mailbox(mailbox).Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start).Select(Clone).ToList();
+        lock (_gate)
+        {
+            return Mailbox(mailbox).Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start).Select(Clone).ToList();
+        }
     }
 
     public Task<Event?> GetEventAsync(string mailbox, string eventId, string[]? expand = null, CancellationToken ct = default)
     {
-        var found = Mailbox(mailbox).FirstOrDefault(e => e.Id == eventId);
-        return Task.FromResult(found is null ? null : Clone(found));
+        lock (_gate)
+        {
+            var found = Mailbox(mailbox).FirstOrDefault(e => e.Id == eventId);
+            return Task.FromResult(found is null ? null : Clone(found));
+        }
     }
 
     public async Task<List<Event>> FindEventsAsync(string mailbox, string filter, string[] expand, CancellationToken ct = default)
@@ -88,10 +106,13 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
         var propId = match.Groups["id"].Value;
         var propValue = match.Groups["value"].Value;
 
-        return Mailbox(mailbox)
-            .Where(e => e.SingleValueExtendedProperties?.Any(p => p.Id == propId && p.Value == propValue) == true)
-            .Select(Clone)
-            .ToList();
+        lock (_gate)
+        {
+            return Mailbox(mailbox)
+                .Where(e => e.SingleValueExtendedProperties?.Any(p => p.Id == propId && p.Value == propValue) == true)
+                .Select(Clone)
+                .ToList();
+        }
     }
 
     /// <summary>When set, the (n+1)th CreateEventAsync call throws - simulates a Graph write failing
@@ -103,20 +124,31 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
 
     public Task<Event?> CreateEventAsync(string mailbox, Event graphEvent, CancellationToken ct = default)
     {
-        if (FailCreateAfter is int limit && _createCount++ >= limit)
+        lock (_gate)
         {
-            throw new InvalidOperationException($"Simulated Graph create failure on call {_createCount}.");
-        }
+            if (FailCreateAfter is int limit && _createCount++ >= limit)
+            {
+                throw new InvalidOperationException($"Simulated Graph create failure on call {_createCount}.");
+            }
 
-        var created = Clone(graphEvent);
-        created.Id = $"evt-{_nextId++}";
-        created.ICalUId = $"ical-{created.Id}";
-        NormalizeStorage(created);
-        Mailbox(mailbox).Add(created);
-        return Task.FromResult<Event?>(Clone(created));
+            var created = Clone(graphEvent);
+            created.Id = $"evt-{_nextId++}";
+            created.ICalUId = $"ical-{created.Id}";
+            NormalizeStorage(created);
+            Mailbox(mailbox).Add(created);
+            return Task.FromResult<Event?>(Clone(created));
+        }
     }
 
     public Task PatchEventAsync(string mailbox, string eventId, Event patch, CancellationToken ct = default)
+    {
+        lock (_gate)
+        {
+            return PatchLocked(mailbox, eventId, patch);
+        }
+    }
+
+    private Task PatchLocked(string mailbox, string eventId, Event patch)
     {
         var stored = Mailbox(mailbox).FirstOrDefault(e => e.Id == eventId) ?? throw NotFound();
 
@@ -154,10 +186,13 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
 
     public Task DeleteEventAsync(string mailbox, string eventId, CancellationToken ct = default)
     {
-        var list = Mailbox(mailbox);
-        var found = list.FirstOrDefault(e => e.Id == eventId) ?? throw NotFound();
-        list.Remove(found);
-        return Task.CompletedTask;
+        lock (_gate)
+        {
+            var list = Mailbox(mailbox);
+            var found = list.FirstOrDefault(e => e.Id == eventId) ?? throw NotFound();
+            list.Remove(found);
+            return Task.CompletedTask;
+        }
     }
 
     public Task<List<Event>> GetInstancesAsync(string mailbox, string eventId, string startUtc, string endUtc, CancellationToken ct = default) =>
@@ -200,13 +235,25 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
     /// test.</summary>
     public string Seed(string mailbox, Event graphEvent, string? eventId = null)
     {
-        var stored = Clone(graphEvent);
-        stored.Id = eventId ?? $"evt-{_nextId++}";
-        stored.ICalUId ??= $"ical-{stored.Id}";
-        NormalizeStorage(stored);
-        Mailbox(mailbox).Add(stored);
-        return stored.Id;
+        lock (_gate)
+        {
+            var stored = Clone(graphEvent);
+            stored.Id = eventId ?? $"evt-{_nextId++}";
+            stored.ICalUId ??= $"ical-{stored.Id}";
+            NormalizeStorage(stored);
+            Mailbox(mailbox).Add(stored);
+            return stored.Id;
+        }
     }
 
-    public IReadOnlyList<Event> Events(string mailbox) => Mailbox(mailbox);
+    /// <summary>Returns a snapshot, deliberately not the live list - an assertion enumerating the
+    /// live list while another in-flight call mutates it is the same race this fake's lock exists
+    /// to remove.</summary>
+    public IReadOnlyList<Event> Events(string mailbox)
+    {
+        lock (_gate)
+        {
+            return Mailbox(mailbox).ToList();
+        }
+    }
 }

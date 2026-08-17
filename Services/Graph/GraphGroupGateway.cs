@@ -9,7 +9,7 @@ namespace FacilityScheduler.Services.Graph;
 /// the user object as well as its memberships, and GroupMember.Read.All alone returns a 403
 /// "Insufficient privileges", live-found 2026-08-15) - unlike Calendars.ReadWrite/Mail.Send, these are
 /// directory (Entra ID) operation, not an Exchange Online mailbox one, so it is NOT subject to
-/// Application Access Policy scoping (deployment guide §2.5).</summary>
+/// Application Access Policy scoping (deployment guide Step 5).</summary>
 public class GraphGroupGateway(GraphServiceClient graphClient) : IGraphGroupGateway
 {
     public async Task<bool> IsMemberOfGroupAsync(string userId, string groupId, CancellationToken ct = default)

@@ -1,508 +1,603 @@
-# GCC Ice & Event Calendar — Deployment / Installation Guide
+# GCC Ice & Event Calendar — Deployment Guide
 
-**Audience:** whoever is standing up a new instance of this app (a new tenant, a new environment, or a fresh facility entirely). Written assuming no prior Azure experience.
-**Companion to:** `curling-facility-scheduling-architecture.md` (design), `provision-categories.ps1` (tenant provisioning script).
+**What this is:** an ordered, do-this-then-this walkthrough for standing up a working instance of this
+app from nothing — Microsoft 365 tenant side and Azure side both. Follow the steps in order; later
+steps depend on values produced by earlier ones.
+
+**What this is not:** an explanation of *why* the system is built this way. Where a step exists for a
+non-obvious reason, it links to `curling-facility-scheduling-architecture.md` (referred to below as
+"the architecture doc") rather than repeating the reasoning here.
+
+**Time:** roughly half a day, most of it waiting on Microsoft 365 provisioning and DNS.
 
 ---
 
-## 1. Prerequisites
+## Before you start
 
-Before deploying the app itself, the tenant side needs to exist.
+### Roles you (or someone on call) must hold
 
-### 1.1 Entra ID app registration
+| Role | Needed for |
+|---|---|
+| **Exchange Administrator** | Steps 1–3, 6 (mailboxes, mail-enabled group, calendar processing, Application Access Policy) |
+| **Groups Administrator** | Step 7 (staff security group) |
+| **Application Administrator** | Step 4 (app registration) |
+| **Global Administrator** or **Privileged Role Administrator** | Step 5 only — granting admin consent to Microsoft Graph *application* permissions cannot be delegated below this |
+| **Contributor** on an Azure subscription | Steps 9–12 |
 
-In the target M365 tenant's Entra admin center (entra.microsoft.com → **Applications → App registrations → New registration**):
+The Global Admin involvement is a single click in Step 5. Everything ongoing after deployment
+(adding staff, adding a sheet) needs none of these — see "Day-two operations" at the end.
 
-- **Delegated** `Calendars.Read` (or similar) scope, for staff sign-in (identity/audit only — see the architecture doc §6.2, Graph itself always runs on the app-only credential below).
-- **Application** Graph calendar scopes (e.g. `Calendars.ReadWrite`), admin-consented, for the service identity that does all actual Graph work.
-- A client secret (or certificate) generated for the application credential (**Certificates & secrets** tab → **New client secret** → copy the value immediately, it's shown only once).
+### Tools
 
-### 1.2 Leave "Assignment required?" off
-
-On the **Enterprise application** (Entra admin center → Identity → Applications → Enterprise
-applications — *not* App registrations; these are two separate linked objects and this toggle only
-exists on the Enterprise Application's Properties tab), leave **Assignment required?** set to **No**.
-
-Access control happens in the app, not at the sign-in gate: the staff claim (§2.5, architecture
-doc §6.5) checks per page, so a signed-in non-staff member reaches only `/practice-ice/request` and
-nothing else. Turning this on would mean **every member wanting to host practice ice needs an
-individual Entra admin action just to sign in** — because on Entra ID Free, assignment only accepts
-individual users, not security groups (live-confirmed 2026-08-12; group assignment to an Enterprise
-Application is a P1+ feature, on this screen and on App Roles alike).
-
-**Accepted exposure:** anyone already in the tenant for an unrelated reason could also reach
-`/practice-ice/request` and submit a request. That request is reversible, staff-visible, and requires
-approval before it means anything (architecture doc §5.4.4) — not worth the per-member admin
-bottleneck the alternative creates.
-
-### 1.3 Resource mailboxes provisioned
-
-One per sheet, plus one Club Events mailbox — scoped to a dedicated security group, with the app registration's application permission constrained to that group via an Application Access Policy or RBAC for Applications (architecture doc §6.3). Run `docs/provision-categories.ps1` against the tenant once the mailboxes exist, to set up the master category lists:
 ```powershell
-$env:CURLING_APP_CLIENT_SECRET = '<client secret>'
-.\provision-categories.ps1 -TenantId '<tenant id>' -ClientId '<app registration client id>' -TenantDomain '<tenant>.onmicrosoft.com' -SheetCount 5
+Install-Module ExchangeOnlineManagement -Scope CurrentUser
+Install-Module Microsoft.Graph -Scope CurrentUser
 ```
 
-### 1.4 Runtime
+Plus the **.NET 10 SDK** on whatever machine will build and publish the app, and the repo cloned
+locally.
 
-**.NET 10 ASP.NET Core runtime** available wherever the app will run — the exact install mechanism depends on the host; see §3 (Azure) or §4 (IIS) below.
+### Fill these in once and paste into each PowerShell session
 
-### 1.5 Run the test suite before publishing
+Every command below uses these variables.
 
-`FacilityScheduler.Tests` (architecture doc §11) runs against an in-memory fake, not a real tenant — no configuration needed:
+```powershell
+$TenantDomain  = 'yourclub.onmicrosoft.com'   # or the tenant's primary mail domain
+$SheetParts    = @('sheet1','sheet2','sheet3','sheet4','sheet5')
+$ClubEventPart = 'clubevents'
+$MailerMailbox = 'scheduler-mailer@yourclub.org'  # licensed account that sends practice ice mail
+$MailboxGroup  = 'Facility Mailboxes'         # created in Step 2
+$StaffGroup    = 'Facility Scheduler Staff'   # created in Step 7
 
+$SheetMailboxes = $SheetParts | ForEach-Object { "$_@$TenantDomain" }
+$ClubEvents     = "$ClubEventPart@$TenantDomain"
+$AllMailboxes   = @($SheetMailboxes) + $ClubEvents
 ```
+
+Sheet mailbox local-parts do **not** have to be `sheet1..sheetN` — the app takes an explicit list
+(Appendix A). One exception: `provision-categories.ps1` (Step 3) assumes that naming and takes a
+`-SheetCount`; a different scheme means editing that one line in the script.
+
+### Run the tests first
+
+They run entirely against in-memory fakes — no tenant, no configuration:
+
+```bash
 dotnet test FacilityScheduler.Tests/FacilityScheduler.Tests.csproj
 ```
 
-CI (`.github/workflows/tests.yml`) runs this on every push/PR to `master`; run it locally too before a manual publish (§3.3/§4) since CI passing on `master` doesn't guarantee an uncommitted local change still passes.
+CI runs this on every push to `master`, but a local publish can carry uncommitted changes CI never saw.
 
 ---
 
-## 2. Configuration Reference
+## Step 1 — Create the resource mailboxes
 
-Every value the app needs, and where it belongs. None of this is baked into source — see the architecture doc §4.6.
-
-Two notations appear below for each key: the **JSON form** (`Graph:TenantId`, as it'd appear nested in an `appsettings.json` file or user-secrets) and the **environment-variable form** (`Graph__TenantId`, double underscore). **Any host that sets configuration via environment variables — Azure App Service's Environment variables blade included — requires the double-underscore form.** Colons are not valid in an environment variable name and Azure will reject them; this corrects an earlier version of this doc that claimed Azure accepted both.
-
-| Key (JSON form) | Environment-variable form | What it is | Secret? | Local dev | Production |
-|---|---|---|---|---|---|
-| `Graph:TenantId` | `Graph__TenantId` | Entra tenant (directory) ID for the app registration | No | user-secrets or `appsettings.Development.json` | App Service Environment variables (or host equivalent) |
-| `Graph:ClientId` | `Graph__ClientId` | App registration client ID (application credential) | No | same | same |
-| `Graph:ClientSecret` | `Graph__ClientSecret` | App registration client secret | **Yes** | user-secrets only, never committed | App Service Environment variables, marked as a "slot setting"/secret if the host supports it |
-| `AzureAd:Instance` | `AzureAd__Instance` | Always `https://login.microsoftonline.com/` | No | `appsettings.json` (already set) | same |
-| `AzureAd:TenantId` | `AzureAd__TenantId` | Entra tenant ID for staff SSO (delegated sign-in) | No | user-secrets | App Service Environment variables |
-| `AzureAd:ClientId` | `AzureAd__ClientId` | App registration client ID for staff SSO (delegated scope) | No | user-secrets | App Service Environment variables |
-| `AzureAd:ClientSecret` | `AzureAd__ClientSecret` | Client secret for the delegated sign-in flow | **Yes** | user-secrets only | App Service Environment variables |
-| `Facility:TenantDomain` | `Facility__TenantDomain` | The tenant's mailbox domain, e.g. `contoso.onmicrosoft.com` | No | `appsettings.Development.json` | App Service Environment variables |
-| `Facility:SheetMailboxLocalParts` | `Facility__SheetMailboxLocalParts__0`, `__1`, `__2`, … | Array of sheet mailbox local-parts — not a count, an explicit list | No | same | same — see §2.1 for the exact keys, and a worked example |
-| `Facility:ClubEventsMailboxLocalPart` | `Facility__ClubEventsMailboxLocalPart` | Local-part of the Club Events mailbox (default `clubevents`) | No | same | same |
-| `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID the facility operates in (e.g. `Pacific Standard Time`) | No | same | same |
-| `Facility:Name` | `Facility__Name` | Facility display name | No | optional, currently inert (no UI wiring yet) | optional |
-| `Facility:LogoPath` | `Facility__LogoPath` | Relative path under `wwwroot` to a logo image (e.g. `/branding/logo.png`) | No | optional, currently inert | optional — the actual image file must be placed under `wwwroot` in the deployed app if set |
-| `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Shared secret Breely must send in the `X-Webhook-Secret` header on every call to `/api/webhooks/breely` (architecture doc §4.8/§5.5) | **Yes** — this is the only thing gating a write-capable anonymous endpoint | user-secrets only, never committed | App Service Environment variables, marked as a "slot setting"/secret if the host supports it |
-| `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path where the app's rotating activity/debug log files live (architecture doc §4.9) | No | `App_Data/logs` (relative, under the project folder) is fine locally | **Must** be set to a path outside the deployed app folder — see §2.3 below |
-| `AppLog:RetentionDays` | `AppLog__RetentionDays` | How many days of rotated log files to keep before automatic deletion | No | optional, defaults to `30` | optional |
-| `PracticeIce:EligibleStartHour` / `EligibleEndHour` | `PracticeIce__EligibleStartHour` / `__EligibleEndHour` | Hours (0-24, Start < End) practice ice may be requested within, each day | No | optional, defaults to `6`/`22` | optional |
-| `PracticeIce:MinLeadHours` | `PracticeIce__MinLeadHours` | Minimum hours in advance a slot must be requested | No | optional, defaults to `48` | optional |
-| `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How many days out slots are offered | No | optional, defaults to `30` | optional |
-| `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Mail-enabled group notified when a member submits a request | No, but see below | not a secret, but keep out of the tracked `appsettings.json` regardless — see the note below the table | App Service Environment variables |
-| `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox the app sends practice ice notifications as, via Graph `Mail.Send` (application permission) | No, but see below | same | App Service Environment variables |
-| `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Entra object id of the security group whose members get the staff claim (architecture doc §6.5) | No, but **load-bearing** — the app refuses to start without it, same tier as `Facility:TenantDomain` | `appsettings.Development.json` is fine (not a secret — an object id, not a credential) | App Service Environment variables |
-
-**`Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`, `Facility:TimeZone`, and `StaffAccess:StaffGroupId` are load-bearing** — the app fails fast at startup with a clear error if any is missing, rather than starting in a silently-broken state. For `StaffAccess:StaffGroupId` (§2.5) the reason is specific: unlike a feature-level setting, leaving it blank would lock everyone, including real staff, out of every staff page. `Webhook:BreelySharedSecret` and `AppLog:LogDirectory` are not load-bearing in that sense (the app starts fine without either) but each has a consequence if left unset: `/api/webhooks/breely` rejects every request with `401` (see §2.2 below), and the activity log falls back to a path that's lost on every redeploy (see §2.3 below). `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` are the same shape again — the app boots fine blank, but practice ice submission is blocked outright (rather than silently accepting a hold nobody gets notified about) until both are set; see §2.4.
-
-**A note on the two `PracticeIce` mail addresses specifically:** neither is a secret the way a client secret is, but real values still don't belong committed into the tracked `appsettings.json` — that file is meant to carry only the blank placeholders shipped in the repo, same as every other section above. It's easy to forget this while iterating locally (live-hit 2026-08-11); double-check `git diff appsettings.json` before committing if you've been testing with real addresses filled in.
-
-### 2.1 Representing the `SheetMailboxLocalParts` array as environment variables
-
-.NET configuration flattens JSON arrays into indexed keys, joined with `__` (double underscore — .NET's section-separator convention for environment variables, and the only form Azure App Service's Environment variables blade accepts; a colon in the name will be rejected). **Worked example for this project's actual 5-sheet setup** — these are the exact name/value pairs to add, one row each, in Azure's Environment variables blade (or any other host's env-var mechanism):
-
-| Name | Value |
-|---|---|
-| `Facility__SheetMailboxLocalParts__0` | `sheet1` |
-| `Facility__SheetMailboxLocalParts__1` | `sheet2` |
-| `Facility__SheetMailboxLocalParts__2` | `sheet3` |
-| `Facility__SheetMailboxLocalParts__3` | `sheet4` |
-| `Facility__SheetMailboxLocalParts__4` | `sheet5` |
-| `Facility__ClubEventsMailboxLocalPart` | `clubevents` |
-| `Facility__TenantDomain` | *(your tenant's `.onmicrosoft.com` domain)* |
-| `Facility__TimeZone` | `Pacific Standard Time` |
-
-The index (`__0`, `__1`, …) must be contiguous starting from `0` with no gaps, or .NET's configuration binder will stop reading the array at the first missing index. If a sheet is ever added or removed, add/remove exactly one indexed row here — nothing else in configuration changes.
-
-### 2.2 Setting up the Breely booking webhook
-
-`/api/webhooks/breely` (architecture doc §4.8/§5.5) is how bookings taken through the Breely booking platform get reflected onto this app's calendar. It's optional in the sense the app runs fine without it configured — but until it is, Breely bookings simply won't appear here at all, since nothing else feeds them in.
-
-1. Generate a strong random secret (e.g. `openssl rand -base64 32`, or any password generator producing 32+ random characters — this doesn't need to be memorable, only unguessable) and set it as `Webhook:BreelySharedSecret` per the table above.
-2. In Breely's own admin/webhook configuration for this club's account, configure a webhook pointing at `https://<your-app-domain>/api/webhooks/breely`, with a custom header `X-Webhook-Secret` set to the same value generated in step 1. (Breely's webhook configuration only supports a fixed URL, static custom headers, and a body — there's no per-request signature to configure, hence the static-secret approach rather than HMAC; see architecture doc §6.4 for why that's an accepted trade-off.)
-3. Trigger a real test booking through Breely and confirm it appears on the correct sheet's calendar in this app. If it lands on the fallback sheet with a `⚠ Web booking needs review` Club Event marker instead, that means no open Group Event hold matched the booking's window — check that a hold actually exists on some sheet covering that time.
-4. If the secret is ever rotated, update it in both places (this app's configuration, and Breely's webhook header) at the same time — a mismatch fails closed (`401`, request dropped), it doesn't fall back to unauthenticated.
-
-### 2.3 Setting up the activity/debug log (Settings page)
-
-`AppLog:LogDirectory` (architecture doc §4.9) controls where the app's rotating log files and the persisted logging-level marker live. **Left unset, it falls back to `App_Data/logs` under the deployed app folder** — fine for local dev, but wrong for Azure App Service: that folder is part of the deployed content and gets replaced on every redeploy/zip-deploy, silently losing log history with no error. As of 2026-08-03 this same directory also holds a small `booking-policy.txt` marker for the Settings page's "Minimum group event booking interval" field — nothing to configure separately, just don't delete unrecognized small text files from this folder.
-
-1. Pick a path outside the app's own deployment folder:
-   - **Azure App Service:** use the persistent storage share every instance already has, e.g. `%HOME%\LogFiles\facility-scheduler` (on Windows App Service; adjust for Linux App Service's equivalent persistent path under `/home`). This survives redeploys because it isn't part of the deployed content — only `wwwroot`/the app folder is replaced.
-   - **IIS / other hosts:** any folder outside the deployed app directory that the app pool identity (§4.7) has write access to, e.g. `C:\FacilityScheduler-Logs`.
-2. Set `AppLog:LogDirectory` to that path per §2's table (environment variable form: `AppLog__LogDirectory`).
-3. Optionally set `AppLog:RetentionDays` if 30 days isn't the right window for how long you want to keep rotated files around.
-4. After deploying, sign in and open **Settings** (`/settings`) — confirm a log entry appears after taking any action (create/edit/cancel a booking), and that the level toggle saves and takes effect immediately.
-
-No action is needed for the app to function without this configured — the fallback just means log history won't survive a redeploy, which defeats the point of having it in production.
-
-### 2.4 Setting up practice ice hosting's notification email
-
-Practice ice hosting (architecture doc §5.4.4) sends email via Graph `Mail.Send` from the mailbox
-set as `PracticeIce:MailerMailbox`. This needs two things beyond the config table above, and the
-second one is the part actually worth reading carefully — it's what took the longest to diagnose the
-first time through.
-
-1. **Grant `Mail.Send`** as an **application** permission (not delegated) on the same Entra app
-   registration used for `Graph:ClientId`/`Calendars.ReadWrite` (§1.1), with admin consent. This app
-   only ever uses app-only Graph calls (§6.2 of the architecture doc), so there's no separate
-   delegated flow to configure.
-2. **Add the mailer mailbox to the same Application Access Policy scope group** that already
-   restricts `Calendars.ReadWrite` to the sheet + Club Events mailboxes (§7 step 2/6 of the
-   provisioning checklist). Application Access Policies scope by **app + group membership, not by
-   permission** — there's no way to grant `Mail.Send` on a narrower set of mailboxes than
-   `Calendars.ReadWrite` already covers without creating an entirely separate policy and group, and
-   for a single low-volume mailer that's not worth the extra moving part. The one real trade-off:
-   the app also technically gains `Calendars.ReadWrite` on the mailer mailbox itself once it joins
-   the group — harmless (the app has no reason to ever call it) but worth knowing rather than
-   discovering later.
-
-**Diagnosing it, if mail sends fail with an error like:**
-
-```
-Access to OData is disabled: [RAOP] : Blocked by tenant configured AppOnly AccessPolicy settings.
-```
-
-That's Exchange's Application Access Policy layer, not a `Mail.Send` consent problem (a missing
-consent grant fails earlier, before reaching Exchange, with a different error). First, confirm which
-group is actually in scope — the exact property name returned varies by Exchange Online Management
-module version, so ask for everything rather than guessing a specific one:
+One room mailbox per ice sheet, plus one for Club Events (the whole-club calendar, architecture doc
+§4.4). Room mailboxes need no license.
 
 ```powershell
 Connect-ExchangeOnline
-Get-ApplicationAccessPolicy | Format-List *
+
+foreach ($part in $SheetParts) {
+    New-Mailbox -Room -Name $part -PrimarySmtpAddress "$part@$TenantDomain"
+}
+New-Mailbox -Room -Name $ClubEventPart -PrimarySmtpAddress $ClubEvents
 ```
 
-Look for `ScopeName`/`ScopeIdentity` (or `PolicyScopeGroupId` on older module versions) matching the
-`AppId` equal to `Graph:ClientId`. Add the mailer mailbox as a member of that group:
+Provisioning is not instant — new mailboxes can take several minutes to become addressable.
+
+### 1a. Calendar processing — turn the Resource Booking Attendant into an auto-decline
+
+**This app is the sole writer to these calendars.** It writes events directly via Graph, so the
+Resource Booking Attendant never runs on anything the app does (architecture doc §6.1, D3). But
+nothing stops a member or staffer from opening Outlook and adding `sheet1` as a room on a meeting
+invite, and what Exchange does with that invite is a real decision:
+
+- **Leave it at the room default (`AutoAccept`)** and Exchange books the sheet itself — bypassing the
+  app's conflict check, and producing an event with none of the app's metadata (architecture doc §4.1).
+- **Set `None`** and the invite is silently ignored. Safe, but the sender gets no reply at all and
+  assumes they have the ice.
+
+Configure it to **decline everything, with an explanatory reply** — safe *and* it tells the sender
+where to actually go:
 
 ```powershell
-Add-DistributionGroupMember -Identity "<the group name>" -Member "<mailer mailbox address>"
+foreach ($mb in $AllMailboxes) {
+    Set-CalendarProcessing -Identity $mb `
+        -AutomateProcessing AutoAccept `
+        -AllBookInPolicy $false `
+        -AllRequestInPolicy $false `
+        -AllRequestOutOfPolicy $false `
+        -AddAdditionalResponse $true `
+        -AdditionalResponse 'Ice time is not booked by Outlook invite. Please use the club scheduling app, or contact the ice scheduler.'
+}
 ```
 
-(If that errors because the group is a Microsoft 365 Group rather than a distribution/mail-enabled
-security group, use `Add-UnifiedGroupLinks -Identity "<group>" -LinkType Members -Links "<mailer mailbox address>"` instead.)
-
-Then verify directly, rather than just retrying and guessing whether it worked:
+With no booking policy permitting anyone, every request is out of policy, and with no delegate to
+forward to, the attendant declines it and sends the `AdditionalResponse` text back. Verify on one
+mailbox before moving on:
 
 ```powershell
-Test-ApplicationAccessPolicy -AppId <Graph:ClientId> -Identity "<mailer mailbox address>"
+Get-CalendarProcessing -Identity $SheetMailboxes[0] |
+    Format-List AutomateProcessing, AllBookInPolicy, AllRequestOutOfPolicy, AdditionalResponse
 ```
 
-`AccessCheckResult: Granted` confirms the *current* directory/policy state is correct — but this is
-where the real gotcha is: **the live Graph/Exchange enforcement path that actually throws `[RAOP]`
-does not necessarily share a cache with this diagnostic cmdlet.** A real case (2026-08-11) showed
-`Granted` here well within Microsoft's quoted ~30-minute propagation window, while the actual
-`sendMail` call kept failing for some time afterward — group-*membership* changes to an existing
-policy appear to propagate on a slower, separate cache than the diagnostic check reflects. There is
-no customer-facing way to force that cache to flush. If `Test-ApplicationAccessPolicy` says
-`Granted` and it's still failing, the fix is already correct — just retry again later rather than
-re-diagnosing from scratch.
+### 1b. Enable mailbox audit logging
 
-No action is needed for the app to function without any of this configured — practice ice submission
-is blocked with an explicit "not accepted yet" message (`PracticeIceMailConfigured`, §2 above) rather
-than silently creating an unnotified hold.
+```powershell
+foreach ($mb in $AllMailboxes) { Set-Mailbox -Identity $mb -AuditEnabled $true }
+```
 
-### 2.5 Setting up staff vs. member authorization
+The app cannot verify this itself, and it's the only record of a change made outside the app.
 
-**This one is not optional the way §2.4 was.** Per architecture doc §6.5, every page
-except `/practice-ice/request` requires the staff claim, decided by live Entra group membership
-at sign-in — and `StaffAccess:StaffGroupId` is load-bearing (§2 above): the app will not start until
-it's set to a real group.
+---
 
-1. **Create a security group for staff** — a *separate* group from the mailbox-scoping one in the
-   provisioning checklist §7 step 2 (that one governs mailbox access; this one governs app
-   authorization — don't reuse it, or every mailbox in the scoping group would need to double as a
-   staff account). Add every current staff/committee member.
-2. **Delegate Ownership** of that group to at least one person who isn't one of the tenant's Entra
-   admins — Owners can add/remove Members with no Entra admin role at all, which is the entire point:
-   this tenant is Entra ID Free, so the native alternative (assigning a group to an Entra App Role)
-   isn't available, and the fallback (assigning individual users to a role directly) would put every
-   staff change back on the tenant's two Entra admins.
-3. **Grant both `GroupMember.Read.All` and `User.Read.All`** as **application** permissions on the
-   same app registration used for `Graph:ClientId` (§1.1), then click **Grant admin consent**.
-   **Both are required** — live-verified 2026-08-15. `POST /users/{id}/checkMemberGroups` has to
-   resolve the user object as well as its group memberships, so `GroupMember.Read.All` alone returns
-   `403 Insufficient privileges to complete the operation`. `Directory.Read.All` would also cover it
-   but is a much broader grant than this feature needs; prefer the pair.
+## Step 2 — Create the mail-enabled security group that scopes app access
 
-   These are directory (Entra ID) permissions, not Exchange Online ones — they are **not** subject to
-   Application Access Policy scoping the way `Calendars.ReadWrite`/`Mail.Send` are (§2.4), so there's
-   no group to add them to and no propagation delay to wait out. Consent takes effect on the next
-   sign-in.
+The app's Graph credential must be restricted to *only* these mailboxes (architecture doc §6.3). That
+restriction is applied in Step 6 and keys off this group, which must be a **mail-enabled security
+group** — a plain Entra security group will not work.
 
-   **A permission that's been added but not consented fails identically to one that was never added
-   at all** — same 403, same message. If sign-in still denies after granting, re-open the API
-   permissions blade and confirm every row reads "Granted for &lt;tenant&gt;" rather than a warning icon.
-4. **Set `StaffAccess:StaffGroupId`** to the group's object id from step 1 (`Get-MgGroup` /
-   Entra admin center → Groups → the group → Object Id). Not a secret — safe to set directly in
-   `appsettings.Development.json` locally, same as `Facility:TenantDomain`.
+The **mailer mailbox** goes in this group too. Application Access Policies scope by app + group
+membership, not by permission, so `Mail.Send` cannot be scoped separately from `Calendars.ReadWrite`
+(architecture doc D73). Create the mailer as a normal licensed user account first if it doesn't
+exist — it needs an Exchange Online license to send.
 
-**Ongoing staff changes are just group membership from here on** — add or remove someone from the
-group (Exchange/Entra admin center, or PowerShell), and their access changes on their next sign-in.
-No further app configuration, redeploy, or Entra admin action needed for a routine staff change.
+```powershell
+New-DistributionGroup -Name $MailboxGroup -Type Security -PrimarySmtpAddress "facility-mailboxes@$TenantDomain"
 
-**Verify before relying on this in production**, with a real non-staff test account (a guest who is
-signed in but deliberately *not* in the staff group): confirm `/practice-ice/request` works, and that
-`/calendar`, `/settings`, `/club-events`, and `/practice-ice/approvals` all correctly deny access. The
-mechanism that makes `/practice-ice/request` reachable while everything else isn't (a per-page
-authorization policy overriding the app's stricter default) has not been confirmed against a real
-sign-in as of this writing — architecture doc §6.5/§8 has the full explanation of why this specific
-check matters more than most.
+foreach ($mb in $AllMailboxes) { Add-DistributionGroupMember -Identity $MailboxGroup -Member $mb }
+Add-DistributionGroupMember -Identity $MailboxGroup -Member $MailerMailbox
+```
 
-**The header menu adapts to who's signed in:** a non-staff member (someone guest-invited purely to
-request practice ice) sees only Public Calendar, Practice Ice, and Sign out. This is presentation
-only — every page enforces its own access regardless — so it's a convenience, not a control.
+---
 
-#### Troubleshooting: signed in successfully but denied every page
+## Step 3 — Grant staff read-only Outlook access
 
-This is the expected symptom of a failed group check, since the check fails *closed* by design — a
-Graph error means "not staff," never "staff." Sign-in itself completes normally, which makes it look
-like an authentication problem when it isn't.
+Staff view sheet calendars in Outlook only as an emergency fallback; the app is the operational
+interface (architecture doc D2). Reviewer is read-only, which is what protects the sole-writer
+invariant.
 
-**The platform log stream will not tell you why.** Nothing on this path writes to `ILogger`, so an
-Azure log stream showing a clean token validation (`IDX10242`/`IDX10239`/`IDX10234`/`IDX10245`) and
-then nothing is exactly what both success and failure look like. The answer is in the app's own log
-file (§2.3), and — the awkward part — the Settings page that would show it to you is itself behind
-the staff-only policy you're locked out of. Read the file directly instead, over SSH or Kudu
-(`https://<yourapp>.scm.azurewebsites.net`):
+```powershell
+foreach ($mb in $AllMailboxes) {
+    Add-MailboxFolderPermission -Identity "${mb}:\Calendar" -User $MailboxGroup -AccessRights Reviewer
+}
+```
+
+Substitute a staff-specific group if you don't want everyone in `$MailboxGroup` to have this.
+
+---
+
+## Step 4 — Create the Entra app registration
+
+Portal: **entra.microsoft.com → Applications → App registrations → + New registration**.
+
+- **Name:** e.g. `Facility Scheduler`
+- **Supported account types:** *Accounts in this organizational directory only (single tenant)*
+- **Redirect URI:** leave blank for now — the app's URL doesn't exist until Step 9.
+
+From the **Overview** blade, record these two; you'll need them repeatedly:
+
+- **Application (client) ID** → becomes both `Graph:ClientId` and `AzureAd:ClientId`
+- **Directory (tenant) ID** → becomes both `Graph:TenantId` and `AzureAd:TenantId`
+
+### 4a. Create a client secret
+
+**Certificates & secrets → Client secrets → + New client secret.** Copy the **Value** immediately —
+it is never shown again. This becomes both `Graph:ClientSecret` and `AzureAd:ClientSecret`.
+
+Note the expiry date somewhere you'll see it. An expired secret takes the whole app down with a
+Graph authentication failure, with no advance warning from the app itself.
+
+### 4b. Leave "Assignment required?" off
+
+On the **Enterprise application** (Entra → Applications → Enterprise applications — a separate linked
+object from the App registration; this toggle exists only there), leave **Properties → Assignment
+required?** set to **No**.
+
+Access control is enforced inside the app by the staff claim (Step 7), not at the sign-in gate. On
+Entra ID Free, assignment accepts only individual users — turning this on would put every member who
+wants to host practice ice behind an individual Entra admin action. The accepted exposure is that
+anyone already in the tenant can reach `/practice-ice/request` and submit a request, which is
+reversible and requires staff approval (architecture doc §6.5).
+
+---
+
+## Step 5 — Grant and consent the Graph permissions
+
+**API permissions → + Add a permission → Microsoft Graph.**
+
+Under **Application permissions** add all five:
+
+| Permission | Used by |
+|---|---|
+| `Calendars.ReadWrite` | Every booking read and write — the core of the app |
+| `MailboxSettings.ReadWrite` | `provision-categories.ps1` (Step 8) writing the master category list |
+| `Mail.Send` | Practice ice notification email (skip only if that feature stays off) |
+| `GroupMember.Read.All` | Staff group check at sign-in |
+| `User.Read.All` | Also the staff group check — `checkMemberGroups` resolves the user object as well as its memberships, and `GroupMember.Read.All` alone returns 403 (live-verified 2026-08-15) |
+
+Under **Delegated permissions**, `User.Read` is added by default and is all that's needed — staff
+sign-in is for identity only, and every Graph call runs on the application credential above
+(architecture doc §6.2). Do not add delegated calendar scopes.
+
+Then click **Grant admin consent for &lt;tenant&gt;** and confirm every row reads *Granted*. **A
+permission that's been added but not consented fails identically to one that was never added** —
+same 403, same message.
+
+### 5a. Enable ID tokens
+
+**Authentication → Implicit grant and hybrid flows → check "ID tokens (used for implicit and hybrid
+flows)".**
+
+Microsoft.Identity.Web's default response type for a sign-in-only app that calls no downstream API
+is `id_token`. If sign-in later fails with `AADSTS700054` ("response_type 'id_token' is not
+enabled"), this is the checkbox.
+
+---
+
+## Step 6 — Restrict the app to the facility mailboxes
+
+Without this, the app's credential can read and write **every** mailbox in the tenant. This step is
+mandatory (architecture doc §6.3).
+
+```powershell
+New-ApplicationAccessPolicy `
+    -AppId '<Application (client) ID from Step 4>' `
+    -PolicyScopeGroupId "facility-mailboxes@$TenantDomain" `
+    -AccessRight RestrictAccess `
+    -Description 'Facility Scheduler - facility mailboxes only'
+```
+
+Verify positively **and negatively** — the negative test is the one that proves the restriction works:
+
+```powershell
+# Expect: AccessCheckResult = Granted
+Test-ApplicationAccessPolicy -AppId '<client id>' -Identity $SheetMailboxes[0]
+Test-ApplicationAccessPolicy -AppId '<client id>' -Identity $MailerMailbox
+
+# Expect: AccessCheckResult = Denied
+Test-ApplicationAccessPolicy -AppId '<client id>' -Identity 'someone.else@yourclub.org'
+```
+
+Allow up to ~30 minutes for propagation. See Appendix C if mail later fails with `[RAOP]` despite
+`Granted` here.
+
+---
+
+## Step 7 — Create the staff security group
+
+Every page except `/practice-ice/request` requires membership in this group (architecture doc §6.5).
+It is a **different group** from Step 2's — that one scopes mailbox access, this one scopes app
+authorization. Reusing it would make every mailbox double as a staff account.
+
+```powershell
+Connect-MgGraph -Scopes 'Group.ReadWrite.All'
+
+$group = New-MgGroup -DisplayName $StaffGroup -MailEnabled:$false `
+    -MailNickname 'facility-scheduler-staff' -SecurityEnabled:$true
+$group.Id   # <- this is StaffAccess:StaffGroupId
+```
+
+Record `$group.Id`. It must be the **object ID (a GUID)**. A display name here produces no error at
+all — just a silent, permanent "nobody is staff."
+
+Then:
+
+1. **Add every staff and committee member** as a Member.
+2. **Assign at least one Owner who is not an Entra admin.** Owners can manage membership with no
+   Entra admin role, which is the entire point of doing it this way — the tenant is Entra ID Free,
+   where the native alternatives all route staff changes back through the two Entra admins.
+
+---
+
+## Step 8 — Provision the calendar category palettes
+
+Now that permissions are consented (Step 5) and scoped (Step 6), the category script can run. It
+mirrors the app's own colors into Exchange's master category lists so the Outlook fallback view
+doesn't show a different scheme. Idempotent — safe to re-run.
+
+```powershell
+$env:CURLING_APP_CLIENT_SECRET = '<client secret from Step 4a>'
+
+.\docs\provision-categories.ps1 `
+    -TenantId '<directory (tenant) id>' `
+    -ClientId '<application (client) id>' `
+    -TenantDomain $TenantDomain `
+    -SheetCount 5
+```
+
+It prints a per-mailbox, per-category result table. Anything marked `FAILED` here almost always means
+Step 5 or Step 6 isn't right yet.
+
+**The tenant side is now complete.** Everything below is Azure.
+
+---
+
+## Step 9 — Create the Azure Web App
+
+1. **[portal.azure.com](https://portal.azure.com) → App Services → + Create → Web App.**
+2. **Basics:**
+   - **Resource Group:** create one, e.g. `facility-scheduler-rg`
+   - **Name:** globally unique; becomes `https://<name>.azurewebsites.net`
+   - **Publish:** Code · **Runtime stack:** .NET 10 (or latest offered)
+   - **Operating System:** Linux or Windows both work; Linux is cheaper at the same tier
+   - **Region:** nearest the facility
+3. **App Service Plan → Create new → Basic B1.** Do not use Free (F1): it sleeps on inactivity, which
+   breaks Blazor Server's persistent SignalR circuit, and has no custom domain support.
+4. **Create**, then **Go to resource** and note the URL from the Overview blade.
+
+### 9a. Turn on the settings Blazor Server needs
+
+**Settings → Configuration → General settings:**
+
+- **Web sockets: On** — off by default on Windows App Service; without it Blazor Server silently
+  degrades to long polling.
+- **Always On: On** — prevents idle unload dropping active circuits.
+- **Session affinity (ARR): On** — the default; leave it, or scaling out will break circuits.
+
+---
+
+## Step 10 — Register the redirect URIs
+
+Back in the app registration (Step 4): **Authentication → + Add a platform → Web**, and add both,
+using the real URL from Step 9:
+
+- `https://<name>.azurewebsites.net/signin-oidc`
+- `https://<name>.azurewebsites.net/signout-callback-oidc`
+
+**Save.** Effective immediately, no restart. Missing this produces `AADSTS50011` on first sign-in.
+
+Repeat this for any custom domain you bind in Step 12.
+
+---
+
+## Step 11 — Set the application configuration
+
+**Settings → Environment variables → + Add**, one row per key. Use the **double-underscore** names
+from Appendix A — Azure rejects the colon form outright.
+
+The minimum set for a working instance:
+
+| Name | Value |
+|---|---|
+| `Graph__TenantId` | directory (tenant) ID |
+| `Graph__ClientId` | application (client) ID |
+| `Graph__ClientSecret` | client secret from Step 4a |
+| `AzureAd__TenantId` | same tenant ID |
+| `AzureAd__ClientId` | same client ID |
+| `AzureAd__ClientSecret` | same secret |
+| `Facility__TenantDomain` | e.g. `yourclub.onmicrosoft.com` |
+| `Facility__SheetMailboxLocalParts__0` … `__4` | `sheet1` … `sheet5` — one row each |
+| `Facility__ClubEventsMailboxLocalPart` | `clubevents` |
+| `Facility__TimeZone` | e.g. `Pacific Standard Time` |
+| `StaffAccess__StaffGroupId` | group object ID from Step 7 |
+| `AppLog__LogDirectory` | `%HOME%\LogFiles\facility-scheduler` (Windows) or `/home/LogFiles/facility-scheduler` (Linux) |
+| `PracticeIce__MailerMailbox` | the mailer address, if practice ice is enabled |
+| `PracticeIce__ApproverDistributionEmail` | mail-enabled group notified of new requests |
+| `Webhook__BreelySharedSecret` | only if integrating Breely — see Step 14 |
+
+Four of these are **load-bearing**: `Facility__TenantDomain`, `Facility__SheetMailboxLocalParts`,
+`Facility__TimeZone`, and `StaffAccess__StaffGroupId`. The app refuses to start without them rather
+than running in a silently wrong state.
+
+Three details that bite:
+
+- **Array indices must be contiguous from `0`.** A gap makes .NET's binder stop reading at the hole.
+- **`AppLog__LogDirectory` must be outside the deployed app folder.** Left unset it falls back to
+  `App_Data/logs` *inside* the deployment, which is replaced on every redeploy — log history vanishes
+  with no error (architecture doc §4.9).
+- **`Facility__TimeZone` must genuinely be the facility's zone.** Every "today" in the app derives
+  from it, and a wrong value shifts the whole app a day forward during the facility's own evening.
+
+Click **Apply → Save** and confirm the restart prompt.
+
+Secrets here are stored as plain settings, visible to anyone with Contributor on the resource. An
+**Azure Key Vault reference** (`@Microsoft.KeyVault(SecretUri=…)` as the value) is a worthwhile
+later upgrade, not required to get running.
+
+---
+
+## Step 12 — Publish, and bind a domain
+
+Publish, by whichever route suits:
+
+```bash
+dotnet publish -c Release -o ./publish
+```
+
+then zip `./publish` and either drag it onto **Deployment Center → ZIP Deploy** in the portal, or:
+
+```bash
+az webapp deploy --resource-group facility-scheduler-rg --name <your-app-name> --src-path ./publish.zip --type zip
+```
+
+Visual Studio's right-click **Publish → Azure App Service** does the same thing interactively. Once
+the app is stable, Deployment Center can generate a GitHub Actions workflow that redeploys on push.
+
+**Custom domain (optional but expected for production):**
+
+1. **Custom domains → + Add** → enter the domain → add the TXT/CNAME record Azure shows you at your
+   registrar → **Validate**.
+2. **Certificates → + Create App Service Managed Certificate** (free, auto-renewing) → bind it.
+3. **TLS/SSL settings → HTTPS Only: On.**
+4. **Go back to Step 10** and add the new domain's two redirect URIs, or sign-in fails with
+   `AADSTS50011` on the custom domain.
+
+---
+
+## Step 13 — Verify
+
+Work through this in order; each item has caught a real failure at least once.
+
+- [ ] **A staff account signs in and `/calendar` loads real data for every sheet.** Signs in but
+      every page denies → Appendix C.
+- [ ] **A non-staff test account** (signed in, deliberately not in the Step 7 group) can reach
+      `/practice-ice/request`, and is denied on `/calendar`, `/settings`, `/club-events`, and
+      `/practice-ice/approvals`. *This has never been verified against a real tenant* (architecture
+      doc §8) — do not skip it before inviting members as guests.
+- [ ] `/public/calendar` and `/api/public/availability` both load in a private window, signed out.
+- [ ] **Practice ice end to end:** submit a request from `/public/practice-ice`, confirm the hold
+      appears on `/calendar` and the approver email arrives; then approve it from
+      `/practice-ice/approvals` and confirm the volunteer's confirmation email arrives. Mail failure
+      here → Appendix C.
+- [ ] **Logging:** take any booking action, open `/settings`, confirm the entry appears; confirm the
+      log path is the one from Step 11, not `App_Data/logs`.
+- [ ] **Time zone:** confirm the calendar's "Today" is correct *in the facility's evening*, not just
+      during the day — that's when a wrong zone shows itself.
+- [ ] **Headers:** `curl -I https://<app>/calendar` shows `X-Frame-Options: DENY` and a
+      `Content-Security-Policy`; the same against `/public/calendar` shows neither — that page is the
+      one deliberate exception, so it can be iframed on the club site.
+- [ ] **Outlook invite is declined:** send a meeting invite from Outlook with a sheet as a room and
+      confirm the decline reply arrives (Step 1a).
+- [ ] **Negative access test still passes:** re-run `Test-ApplicationAccessPolicy` against a mailbox
+      outside the group and confirm `Denied`.
+
+---
+
+## Step 14 — Optional: the Breely booking webhook
+
+Bookings taken through Breely, the club's separate customer-facing platform, reach this app only via
+this webhook (architecture doc §4.8). Without it configured, they simply never appear here.
+
+1. Generate a strong random secret (32+ random characters) and set it as `Webhook__BreelySharedSecret`.
+2. In Breely's webhook configuration, point a webhook at
+   `https://<your-app-domain>/api/webhooks/breely` with a custom header `X-Webhook-Secret` set to the
+   same value. Breely supports no per-request signature, hence a static secret (architecture doc §6.4).
+3. Confirm an unauthenticated `POST` to that URL returns `401`.
+4. Take a real test booking through Breely and confirm it lands on the correct sheet. If it lands on
+   the fallback sheet with a `⚠ Web booking needs review` marker, no open Group Event hold covered
+   that window.
+5. **Rotating the secret means changing it in both places at once** — a mismatch fails closed.
+
+---
+
+## Day-two operations
+
+| Task | What's involved | Needs an Entra admin? |
+|---|---|---|
+| Add or remove a staff member | Add/remove them in the Step 7 group. Takes effect **on their next sign-in** — tell them to sign out and back in. | No — a group Owner can do it |
+| Add a new ice sheet | New mailbox (Step 1 + 1a + 1b), add to `$MailboxGroup` (Step 2), Reviewer permission (Step 3), re-run the category script (Step 8), add one `Facility__SheetMailboxLocalParts__N` row (Step 11) | No |
+| Rotate the client secret | New secret in Step 4a, update `Graph__ClientSecret` and `AzureAd__ClientSecret` (Step 11) | Application Administrator |
+| Renew before expiry | Watch the Step 4a expiry date — an expired secret is a full outage | Application Administrator |
+
+---
+
+## Appendix A — Configuration reference
+
+Two notations: the **JSON form** (`Graph:TenantId`, for `appsettings.json` and user-secrets) and the
+**environment-variable form** (`Graph__TenantId`, double underscore) required by Azure and any other
+env-var host. Nothing here is baked into source (architecture doc §4.6).
+
+| JSON key | Env-var name | What it is | Required |
+|---|---|---|---|
+| `Graph:TenantId` | `Graph__TenantId` | Directory (tenant) ID | Yes |
+| `Graph:ClientId` | `Graph__ClientId` | Application (client) ID | Yes |
+| `Graph:ClientSecret` | `Graph__ClientSecret` | Client secret — **secret** | Yes |
+| `AzureAd:Instance` | `AzureAd__Instance` | `https://login.microsoftonline.com/` — already set in `appsettings.json` | Preset |
+| `AzureAd:TenantId` | `AzureAd__TenantId` | Same tenant ID, for staff sign-in | Yes |
+| `AzureAd:ClientId` | `AzureAd__ClientId` | Same client ID, for staff sign-in | Yes |
+| `AzureAd:ClientSecret` | `AzureAd__ClientSecret` | Same secret — **secret** | Yes |
+| `Facility:TenantDomain` | `Facility__TenantDomain` | Mailbox domain, e.g. `yourclub.onmicrosoft.com` | **Load-bearing** |
+| `Facility:SheetMailboxLocalParts` | `Facility__SheetMailboxLocalParts__0`, `__1`, … | Explicit list of sheet mailbox local-parts, not a count. Indices contiguous from `0`. | **Load-bearing** |
+| `Facility:ClubEventsMailboxLocalPart` | `Facility__ClubEventsMailboxLocalPart` | Defaults to `clubevents` | No |
+| `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID, e.g. `Pacific Standard Time` | **Load-bearing** |
+| `Facility:Name` | `Facility__Name` | Display name — accepted but not yet wired to any UI | No |
+| `Facility:LogoPath` | `Facility__LogoPath` | Path under `wwwroot` — accepted but not yet wired to any UI | No |
+| `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Staff group **object ID** (GUID). Not a secret. | **Load-bearing** |
+| `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox that sends notifications | Practice ice only |
+| `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Group notified of new requests | Practice ice only |
+| `PracticeIce:EligibleStartHour` / `EligibleEndHour` | `PracticeIce__EligibleStartHour` / `__EligibleEndHour` | Bookable hours, 0–24, Start < End. Default `6`/`22` | No |
+| `PracticeIce:MinLeadHours` | `PracticeIce__MinLeadHours` | Minimum notice. Default `48` | No |
+| `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How far out slots appear. Default `30` | No |
+| `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Breely's `X-Webhook-Secret` value — **secret** | Breely only |
+| `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path, **outside** the deployed app folder | Strongly recommended |
+| `AppLog:RetentionDays` | `AppLog__RetentionDays` | Rotated files kept. Default `30` | No |
+
+**Load-bearing** = the app throws at startup rather than running misconfigured. The two `PracticeIce`
+mail addresses are softer: the app boots without them, but request submission is blocked with an
+explicit message rather than creating a hold nobody is notified about.
+
+**Keep real values out of the tracked `appsettings.json`** — it ships blank placeholders only. That
+includes the two `PracticeIce` addresses, which aren't secrets but still don't belong committed. Use
+user-secrets locally; `dotnet user-secrets set "Graph:ClientSecret" "…"` from the project folder.
+
+---
+
+## Appendix B — Hosting somewhere other than Azure
+
+This is a standard ASP.NET Core Blazor Server app with no cloud-specific dependency. Any host needs:
+
+- **.NET 10 ASP.NET Core runtime**
+- **Outbound HTTPS** to `graph.microsoft.com` and `login.microsoftonline.com` — nothing else external
+  is called
+- **HTTPS termination**, with **WebSocket support passed through** if a reverse proxy is in front —
+  Blazor Server's circuit needs it
+- **A secret-injection mechanism** — environment variables (double-underscore form) or a mounted
+  config file
+- **A process supervisor** — systemd, a container restart policy, or equivalent
+- **A writable log directory** outside the deployed app folder
+
+Steps 1–8 (the entire tenant side) and Appendix A apply unchanged; only Steps 9–12 are Azure-specific.
+
+---
+
+## Appendix C — Troubleshooting
+
+### Signed in successfully, but every page is denied
+
+The staff group check fails **closed** by design — a Graph error means "not staff," never "staff" —
+so sign-in completes normally and this looks like an authentication problem when it isn't.
+
+**The Azure log stream will not tell you why.** Nothing on this path writes to `ILogger`. The answer
+is in the app's own log file, and the Settings page that would show it is itself behind the policy
+you're locked out of. Read the file directly over SSH or Kudu (`https://<app>.scm.azurewebsites.net`):
 
 ```bash
 tail -50 <AppLog:LogDirectory>/app-*.log
 ```
 
-Then match what you find:
-
-| Log line | Cause |
+| What you find | Cause |
 |---|---|
-| `StaffGroupCheckFailed` with `Insufficient privileges to complete the operation` | The Graph permissions in step 3 above — missing, or added without admin consent. The single most common cause. |
-| `StaffGroupCheckFailed` with anything else | Read the `details=` value; it's the raw Graph error. |
-| No `StaffGroupCheckFailed` at all, but a `StaffSignIn` entry appears (Debug tier) | The check *worked* and returned "not a member." Either the account genuinely isn't in the group, or `StaffAccess:StaffGroupId` holds the wrong value — it must be the group's **object ID (a GUID)**, not its display name. A display name there produces no error at all, just a silent permanent "not staff." |
-| **No new log entry of any kind** | No sign-in is happening: a still-valid auth cookie is being accepted, so the OIDC flow (and with it the group check that adds the staff claim) is skipped entirely. See below. |
+| `StaffGroupCheckFailed` + `Insufficient privileges to complete the operation` | Step 5 — a permission missing, or added without admin consent. By far the most common cause. |
+| `StaffGroupCheckFailed` + anything else | The `details=` value is the raw Graph error. |
+| No failure, but a `StaffSignIn` entry (Debug tier) | The check worked and said "not a member." Either the account really isn't in the group, or `StaffAccess:StaffGroupId` holds a display name instead of the object ID GUID — which produces no error, just a permanent silent "not staff." |
+| **No new log entry at all** | No sign-in is happening — see below. |
 
-**Stale auth cookie — the "works in a private window but not my normal browser" case.**
-The staff claim is added once, at sign-in, and then lives in the auth cookie. A cookie issued before
-the staff group existed (or before any authorization change) keeps its old claims until it turns
-over, and the app will happily accept it as authenticated while denying every page. Restarting the
-app doesn't help — nothing relevant is server-side. Restarting the *browser* often doesn't either,
-because Chrome/Edge's "continue where you left off" preserves session cookies.
+### "Works in a private window but not my normal browser"
 
-Recovery, in order: navigate to `https://<your-app>/MicrosoftIdentity/Account/SignOut` and sign back
-in; or if that fails, clear the site's cookies (**F12 → Application → Cookies →** your site → delete
-`.AspNetCore.*`). Signing back in runs the full flow and picks up the claim.
+The staff claim is written into the auth cookie at sign-in. A cookie issued before the group existed
+(or before any authorization change) keeps its old claims and is happily accepted as authenticated
+while every page denies. Restarting the app changes nothing — none of this is server-side. Restarting
+the browser often doesn't either, because "continue where you left off" preserves session cookies.
 
-The same property applies routinely: **adding someone to the staff group takes effect on their next
-sign-in, not immediately.** Tell new staff to sign out and back in after you add them.
+Recovery: visit `https://<app>/MicrosoftIdentity/Account/SignOut` and sign back in; failing that,
+**F12 → Application → Cookies →** delete the `.AspNetCore.*` cookies.
 
----
+The same property is why **adding someone to the staff group takes effect on their next sign-in**.
 
-## 3. Path A — Azure App Service
+### Mail fails with `[RAOP] : Blocked by tenant configured AppOnly AccessPolicy settings`
 
-A step-by-step walkthrough assuming you haven't used Azure before. If you already have an Azure subscription, skip to §3.2.
-
-### 3.1 Get an Azure subscription
-
-If the club doesn't already have one, go to [azure.microsoft.com/free](https://azure.microsoft.com) and create an account (a credit card is required for verification even on free-tier usage, but this app's actual resource needs are small — see §3.3 on pricing tier). If the club already uses Microsoft 365, you can usually create an Azure subscription under the same tenant from the Azure portal directly.
-
-### 3.2 Create the Web App
-
-1. Go to **[portal.azure.com](https://portal.azure.com)** and sign in.
-2. In the search bar at the top, type **"App Services"** and select it.
-3. Click **+ Create → Web App**.
-4. Fill out the **Basics** tab:
-   - **Subscription**: your subscription.
-   - **Resource Group**: click **Create new**, give it a name like `facility-scheduler-rg`. (A resource group is just a folder that groups related Azure resources together for billing/management — nothing to configure inside it yet.)
-   - **Name**: a globally unique name (becomes `https://<name>.azurewebsites.net` unless you bind a custom domain later — see §3.5).
-   - **Publish**: **Code**.
-   - **Runtime stack**: **.NET 10** (or the closest available version at deploy time — pick the latest .NET LTS/STS offered).
-   - **Operating System**: either Linux or Windows work; Linux is typically cheaper at the same tier.
-   - **Region**: pick whichever is geographically closest to the facility/staff.
-5. Under **App Service Plan**, click **Create new**. This is the compute tier the app actually runs on:
-   - **Pricing plan**: select **Basic B1**. This app's actual concurrency (1–2 staff, plus light anonymous public traffic against the rate-limited public endpoints) is comfortably served by the smallest paid tier — B1 is enough. Avoid the **Free (F1)** tier for anything beyond a quick test: it has no custom domain/SSL support and the app "sleeps" after inactivity, which breaks Blazor Server's live SignalR connections.
-6. Click **Review + create**, then **Create**. Wait for the deployment notification (usually 1–2 minutes), then click **Go to resource**.
-7. **Note the app's URL** (shown on the Overview blade, e.g. `https://<name>.azurewebsites.net`) and immediately register it as a redirect URI — see §3.2.1. Skipping this until after you try to sign in produces `AADSTS50011: The redirect URI ... does not match the redirect URIs configured for the application`, live-hit during this project's own first deployment.
-
-### 3.2.1 Register the redirect URIs
-
-The app registration from §1.1 needs to know exactly which URL(s) it's allowed to send the Microsoft sign-in response back to — this is a security control (it stops a login response from being redirected somewhere an attacker controls), not paperwork, so Entra rejects anything not on the list rather than warning about it.
-
-1. In the Entra admin center, go to **Identity → Applications → App registrations**, open the registration from §1.1.
-2. Open **Authentication** in the left menu. Add a **Web** platform if none exists yet (**+ Add a platform → Web**).
-3. Under **Redirect URIs**, add both, using the app's actual URL from step 7 above:
-   - `https://<name>.azurewebsites.net/signin-oidc`
-   - `https://<name>.azurewebsites.net/signout-callback-oidc`
-4. **Save**. No app restart needed — this takes effect immediately.
-
-**Revisit this step whenever the app's externally-visible URL changes** — binding a custom domain (§3.5) means adding that domain's `/signin-oidc` and `/signout-callback-oidc` here too; the `azurewebsites.net` ones can stay registered alongside it if you still want the default URL to work.
-
-### 3.3 Publish the app
-
-Pick whichever fits your comfort level:
-
-- **Visual Studio (easiest if you have it open already)**: right-click the project → **Publish** → **Azure** → **Azure App Service (Windows/Linux)** → sign in and pick the Web App you just created → **Publish**. Visual Studio handles the build and upload for you.
-- **Command line**:
-  ```
-  dotnet publish -c Release -o ./publish
-  ```
-  then either `az webapp deploy --resource-group facility-scheduler-rg --name <your-app-name> --src-path ./publish.zip --type zip` (after zipping the `./publish` folder), or drag-and-drop ZIP deploy through **Deployment Center** in the portal.
-- **GitHub Actions**: if the code lives in GitHub, the App Service **Deployment Center** blade can generate a ready-made workflow file that redeploys automatically on every push — worth setting up once the app is stable, not required for a first deployment.
-
-### 3.4 Set Application Settings
-
-1. In the App Service resource, find **Settings → Environment variables** (newer portal) or **Configuration → Application settings** (classic portal — both are the same underlying feature).
-2. Click **+ Add** for each key from the §2 table's **environment-variable form** (`Graph__TenantId`, double underscore) as the **name**. Azure's Environment variables blade rejects colons in the name outright — the double-underscore form is the only one that works here, regardless of which portal view you're using.
-3. For `Facility:SheetMailboxLocalParts`, add the indexed rows from §2.1's worked example (`Facility__SheetMailboxLocalParts__0` = `sheet1`, `__1` = `sheet2`, etc.).
-4. Click **Apply**, then **Save** at the top. App Service will prompt to restart the app to pick up the change — confirm.
-5. **Secret values** (`Graph:ClientSecret`, `AzureAd:ClientSecret`): these are stored as plain application settings by default, visible to anyone with Contributor access to the resource (masked behind a "click to show" toggle in the UI, not encrypted from an authorized viewer). For stronger protection, consider an **Azure Key Vault reference** instead (`@Microsoft.KeyVault(SecretUri=https://<vault>.vault.azure.net/secrets/<name>)` as the setting's value) — a worthwhile upgrade later, not required to get running.
-
-### 3.5 Custom domain + HTTPS
-
-1. **Custom Domains** blade → **+ Add custom domain** → enter the domain (e.g. `booking.yourclub.org`) → follow the on-screen instructions to add the TXT/CNAME record Azure shows you at your domain registrar → **Validate**.
-2. **Certificates** blade → **+ Create App Service Managed Certificate** (free, auto-renewing) → bind it to the custom domain from step 1.
-3. **TLS/SSL settings** blade → toggle **HTTPS Only** to **On**, so plain HTTP requests are always redirected.
-4. **Go back to §3.2.1** and add this new domain's `/signin-oidc` and `/signout-callback-oidc` redirect URIs — sign-in will fail with `AADSTS50011` on the custom domain until you do.
-
-### 3.6 Restart and verify
-
-**Overview** blade → **Restart**, then work through §6 (Post-Deploy Verification Checklist) below. If something doesn't come up correctly, the **Log stream** blade (under **Monitoring**) shows live console output from the app — the most useful first place to look.
-
----
-
-## 4. Path B — IIS on Windows Server (on-premises)
-
-An alternative to Azure if the facility already has (or wants) an on-premises Windows server. This section also covers reducing IIS/Windows Server's configuration footprint to the minimum this app actually needs — fewer installed roles and features means less attack surface and less running overhead, without giving anything up functionally.
-
-### 4.1 Prerequisites
-
-- **Windows Server 2019 or 2022** (Server Core, without the Desktop Experience GUI, is the lower-footprint choice if you're comfortable managing IIS remotely via IIS Manager from another machine or via PowerShell — Server with Desktop Experience is easier if this will be managed locally at the console).
-- A TLS certificate for the server's hostname — an internal CA certificate, a purchased certificate, or a free one via [win-acme](https://www.win-acme.com/) (an ACME/Let's Encrypt client for Windows) if the server has a real public hostname.
-
-### 4.2 Install IIS with a minimal role-service set
-
-Rather than the full IIS role (which includes FTP, extra authentication providers, and legacy modules this app doesn't use), install only what's needed. Via **Server Manager → Add Roles and Features → Web Server (IIS)**, select just:
-
-- **Web Server → Common HTTP Features**: Static Content, Default Document, HTTP Errors.
-- **Web Server → Health and Diagnostics**: HTTP Logging (for basic access logs; skip the rest).
-- **Web Server → Performance**: Static Content Compression (optional, reduces bandwidth for the static assets under `wwwroot`).
-- **Web Server → Security**: Request Filtering only.
-- **Management Tools**: IIS Management Console (and IIS Management Scripts/Tools if you'll manage it via PowerShell).
-
-**Deliberately skip**: FTP Server, WebDAV Publishing, CGI, ISAPI Filters/Extensions (the ASP.NET Core Module handles all request routing — none of the legacy modules apply), Basic/Windows/Digest/Client Certificate Authentication (this app handles its own sign-in via Entra ID/OIDC — IIS-level authentication providers are unused and unnecessary attack surface), URL Authorization, IP and Domain Restrictions (add later only if you specifically want network-level allowlisting on top of the app's own auth).
-
-Equivalent PowerShell, for a repeatable/scripted install:
-```powershell
-Install-WindowsFeature -Name Web-Server, Web-Common-Http, Web-Static-Content, Web-Default-Doc, Web-Http-Errors, Web-Http-Logging, Web-Stat-Compression, Web-Filtering, Web-Mgmt-Console -IncludeManagementTools
-```
-
-### 4.3 Install the .NET 10 Hosting Bundle
-
-Download and run the **ASP.NET Core Hosting Bundle** installer for .NET 10 from Microsoft's .NET download page (this installs the runtime plus the IIS integration module, `AspNetCoreModuleV2`). **Restart IIS** afterward (`iisreset`) so it picks up the newly-registered module — this step is easy to miss and the most common cause of a fresh IIS deployment failing to start.
-
-### 4.4 Certificate and site binding
-
-1. **IIS Manager → Server Certificates** → import the certificate from §4.1 if it isn't already in the server's certificate store.
-2. **Sites → Add Website**:
-   - **Site name**: e.g. `FacilityScheduler`.
-   - **Physical path**: wherever you'll deploy the published app (e.g. `C:\inetpub\FacilityScheduler`).
-   - **Binding**: type **https**, port **443**, select the certificate from step 1. Add a second binding for **http** on port **80** only if you want it to auto-redirect to HTTPS (the app's own `UseHttpsRedirection()` handles that redirect once a request reaches it).
-
-### 4.5 Application pool configuration
-
-IIS creates an app pool automatically when you create the site above (named after the site). Open **Application Pools**, select it, and set:
-
-- **.NET CLR version**: **No Managed Code** — ASP.NET Core doesn't run under the classic CLR pipeline; this setting name is a holdover from earlier .NET Framework-hosted IIS apps.
-- **Identity**: leave as **ApplicationPoolIdentity** (the default) — a least-privilege virtual account scoped to just this app pool, rather than a shared or administrative account.
-- **Start Mode**: **AlwaysRunning**, and on the *site's* own **Advanced Settings**, set **Preload Enabled**: **True** — together these keep the app warm instead of cold-starting on the first request after a period of inactivity, which matters here since Blazor Server's SignalR circuit shouldn't be dropped mid-session by an idle recycle.
-- **Idle Time-out (minutes)**: set to **0** (disabled) for the same reason — the default 20-minute idle shutdown would otherwise kill active staff sessions during a quiet stretch.
-
-### 4.6 Application configuration (environment variables)
-
-`dotnet publish` generates a `web.config` in the publish output with an `<aspNetCore>` element. Add an `<environmentVariables>` block inside it for every key from §2, using the double-underscore form from §2.1:
-```xml
-<aspNetCore processPath="dotnet" arguments=".\FacilityScheduler.dll" stdoutLogEnabled="false" hostingModel="InProcess">
-  <environmentVariables>
-    <environmentVariable name="Graph__TenantId" value="..." />
-    <environmentVariable name="Graph__ClientId" value="..." />
-    <environmentVariable name="Graph__ClientSecret" value="..." />
-    <environmentVariable name="AzureAd__TenantId" value="..." />
-    <environmentVariable name="AzureAd__ClientId" value="..." />
-    <environmentVariable name="AzureAd__ClientSecret" value="..." />
-    <environmentVariable name="Facility__TenantDomain" value="..." />
-    <environmentVariable name="Facility__SheetMailboxLocalParts__0" value="sheet1" />
-    <environmentVariable name="Facility__SheetMailboxLocalParts__1" value="sheet2" />
-    <environmentVariable name="Facility__SheetMailboxLocalParts__2" value="sheet3" />
-    <environmentVariable name="Facility__SheetMailboxLocalParts__3" value="sheet4" />
-    <environmentVariable name="Facility__SheetMailboxLocalParts__4" value="sheet5" />
-    <environmentVariable name="Facility__ClubEventsMailboxLocalPart" value="clubevents" />
-    <environmentVariable name="Facility__TimeZone" value="Pacific Standard Time" />
-    <environmentVariable name="Webhook__BreelySharedSecret" value="..." />
-    <environmentVariable name="AppLog__LogDirectory" value="C:\FacilityScheduler-Logs" />
-  </environmentVariables>
-</aspNetCore>
-```
-Since `web.config` then contains secrets, restrict its NTFS permissions the same way as the rest of the app folder (§4.7) and keep it out of source control (it's a deploy-time artifact, not something to commit).
-
-### 4.7 File permissions
-
-Grant the app pool identity **Read & Execute only** on the deployed folder itself — nothing there needs to be written to at runtime. In an elevated PowerShell prompt:
-```powershell
-$poolName = "FacilityScheduler"
-icacls "C:\inetpub\FacilityScheduler" /grant ("IIS AppPool\$poolName`:(OI)(CI)RX") /T
-```
-The activity/debug log's directory (§2.3) is deliberately **outside** this folder and needs the opposite: grant the app pool identity **write** access there specifically (`RX` above is not enough for it to create/append log files), e.g.:
-```powershell
-icacls "C:\FacilityScheduler-Logs" /grant ("IIS AppPool\$poolName`:(OI)(CI)M") /T
-```
-
-### 4.8 Firewall
-
-Only two things need to cross the network boundary: inbound HTTPS from staff/visitors, and outbound HTTPS from the server to Microsoft's cloud endpoints.
+That's the Application Access Policy (Step 6), not a `Mail.Send` consent problem — a missing consent
+fails earlier with a different error. Confirm which group is actually in scope; the exact property
+names vary by module version, so ask for all of them:
 
 ```powershell
-# Inbound: only 443 (and 80, if you're using it purely for the HTTPS redirect)
-New-NetFirewallRule -DisplayName "FacilityScheduler HTTPS" -Direction Inbound -Protocol TCP -LocalPort 443 -Action Allow
-New-NetFirewallRule -DisplayName "FacilityScheduler HTTP Redirect" -Direction Inbound -Protocol TCP -LocalPort 80 -Action Allow
+Get-ApplicationAccessPolicy | Format-List *
+Test-ApplicationAccessPolicy -AppId '<client id>' -Identity $MailerMailbox
 ```
-Outbound HTTPS (443) to `graph.microsoft.com` and `login.microsoftonline.com` is usually already permitted by Windows Firewall's default allow-outbound policy — only add explicit outbound rules if this server's firewall policy has been changed to default-deny outbound. No static IP allowlisting is needed on the Microsoft side; these are standard public Microsoft 365 endpoints resolved by DNS.
 
-### 4.9 Minimal-footprint checklist (attack surface + resource use)
+**If `Test-ApplicationAccessPolicy` says `Granted` and sends still fail, the configuration is already
+correct — just wait and retry.** Group-*membership* changes to an existing policy propagate on a
+slower cache than the diagnostic cmdlet reads, well past Microsoft's quoted ~30 minutes in a real
+observed case (2026-08-11). There is no way to force that flush; re-diagnosing from scratch wastes
+the time instead.
 
-- [ ] Only the **Web Server (IIS)** role is installed on this machine — no other server roles (AD DS, DNS, DHCP, File Server, etc.) unless this box genuinely serves other purposes.
-- [ ] Role services match §4.2's minimal list — FTP, WebDAV, CGI, ISAPI, and all non-Entra IIS authentication providers are **not** installed.
-- [ ] **Directory browsing** is disabled (IIS default is already off — confirm it wasn't turned on).
-- [ ] The **Server** response header is suppressed: in `web.config` or via `applicationHost.config`, set `<security><requestFiltering removeServerHeader="true" /></security>` (IIS 10+) so responses don't advertise the exact IIS version to anyone probing the site.
-- [ ] **Detailed error pages** are not shown to remote requests in production — the app's own `UseExceptionHandler("/Error")` (active outside `Development`) already covers this; don't override it with IIS's own detailed remote errors setting.
-- [ ] App pool **Identity** is the default `ApplicationPoolIdentity`, not a shared/administrative account.
-- [ ] NTFS permissions on the app folder are **Read & Execute** only for the app pool identity (§4.7) — no broader access than that.
-- [ ] Windows Firewall allows only 443 (and optionally 80) inbound; nothing else is open on this host.
-- [ ] Consider **Server Core** (no Desktop Experience) if this server is managed remotely — it has a materially smaller patch/attack surface than a full GUI install, at the cost of needing IIS Manager or PowerShell from another machine for day-to-day administration.
-- [ ] Windows Update stays current — this is a small, low-traffic app; a stale, unpatched server is a far larger risk than anything in the app itself.
+### `AADSTS50011: The redirect URI … does not match`
 
----
+Step 10, or Step 12 if you've just bound a custom domain.
 
-## 5. Generic Requirements — Any Other Host
+### The app won't start at all
 
-If deploying somewhere other than Azure App Service or IIS (a Linux VM, a container, etc.), the app has no cloud-specific dependency — it's a standard ASP.NET Core Blazor Server app. Any host needs:
-
-- **.NET 10 ASP.NET Core runtime** (or the SDK, if building on the host itself).
-- **Outbound HTTPS access** to `graph.microsoft.com` and `login.microsoftonline.com` — nothing else external is called.
-- **HTTPS termination** — either the app's own Kestrel server with a bound certificate, or a reverse proxy (nginx, a cloud load balancer) terminating TLS in front of it. Blazor Server's SignalR circuit needs WebSocket support to pass through cleanly if a reverse proxy is in the path.
-- **A secret-injection mechanism** — environment variables (using the `__` convention from §2.1) or a mounted configuration file are both sufficient; nothing here requires a specific secret manager.
-- **A process supervisor** to keep the app running and restart it on failure — a systemd unit, a container orchestrator's own restart policy, or equivalent.
-- The same §2 configuration reference table applies regardless of host — only *where* each value is set changes.
-
----
-
-## 6. Post-Deploy Verification Checklist
-
-- [ ] Staff sign-in (Entra SSO) succeeds and the app's root URL (`/`, which routes directly to the staff Calendar) loads real data for every configured mailbox. A blank calendar or a Graph error here usually means either the Application Access Policy/RBAC scoping (architecture doc §6.3) or the `Facility` configuration is wrong.
-- [ ] A non-assigned account is correctly blocked from signing in, if §1.2's Enterprise Application assignment restriction was configured.
-- [ ] `/public/calendar` loads without signing in, in a private/incognito browser window.
-- [ ] `/api/public/availability` returns JSON without signing in.
-- [ ] If `Webhook:BreelySharedSecret` is configured, a test call to `/api/webhooks/breely` without the `X-Webhook-Secret` header returns `401`, and a real test booking through Breely (§2.2) shows up on the correct sheet's calendar. If the test booking spans multiple sheets, confirm every sheet gets claimed (not just one) and that they show up grouped together when clicked (architecture doc §4.8).
-- [ ] `AppLog:LogDirectory` is set to a path outside the deployed app folder (§2.3) — not left at the `App_Data/logs` fallback. Sign in, open `/settings`, take any booking action, and confirm a new line appears in the log viewer after clicking Refresh.
-- [ ] Mailbox audit logging is confirmed enabled on the resource mailboxes (per the provisioning checklist, architecture doc §7) — this is a tenant-side setting, not something the app itself can verify.
-- [ ] `Facility:TimeZone` is genuinely the facility's own zone, not left at a placeholder — every "today" in the app (the staff/public calendar's Today button, new-booking defaults, the public availability window) is computed from it (`FacilityConfiguration.Today`, architecture doc §4.6). A wrong zone here silently shifts what "today" means, most noticeably in the evening.
-- [ ] `curl -I https://<your-app>/calendar` (or any staff page) shows `X-Frame-Options: DENY` and a `Content-Security-Policy` header; the same check against `/public/calendar` should show neither — that page is the one deliberate exception (architecture doc §6.4).
-- [ ] If `Facility:TenantDomain` (or any other load-bearing `Facility` value) is deliberately left unset as a smoke test, the app should fail to start with a clear `InvalidOperationException` — confirms the fail-fast validation is actually wired up in this environment, not silently bypassed by a stale cached config.
-- [ ] `/public/practice-ice` loads without signing in; clicking an open slot and submitting a real request (§2.4) creates a `Practice Ice` hold visible on `/calendar` and sends the approver notification email — if it doesn't, see §2.4's diagnosis steps before assuming the code is wrong. Approve or decline it from `/practice-ice/approvals` and confirm the volunteer's confirmation/decline email arrives.
-- [ ] **A staff account signs in and can reach `/calendar`.** If sign-in completes but every page denies, the group check is failing closed — see §2.5's troubleshooting table, and check the Graph permissions first (both `GroupMember.Read.All` *and* `User.Read.All`, both consented; this exact gap caused a production lockout on 2026-08-15).
-- [ ] **Before inviting any member as a guest for practice ice hosting:** complete §2.5's setup, then **sign in as a real non-staff test account** and confirm `/practice-ice/request` works while `/calendar`, `/settings`, `/club-events`, and `/practice-ice/approvals` all correctly deny access. This specific check has not been performed against a real tenant as of this writing (architecture doc §6.5/§8) — don't skip it on the assumption the code is obviously right.
-- [ ] (IIS only) The site is bound to 443 with a valid, non-expired certificate, and Windows Firewall shows only the expected inbound ports open.
+Check the log stream for an `InvalidOperationException` naming a specific setting — that's the
+fail-fast validation on the four load-bearing keys in Appendix A working as intended.

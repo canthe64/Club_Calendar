@@ -228,7 +228,7 @@ upcoming windows where every sheet is genuinely free of any activity (a differen
   shifts continuously with the current time, so results reflect "now" within that cache window.
 
 **Response `200 OK`** — `text/html; charset=utf-8`. No query parameters; the eligible-hours/lead-time/
-horizon bounds come entirely from configuration (`PracticeIce:*`, deployment guide §2.4).
+horizon bounds come entirely from configuration (`PracticeIce:*`, deployment guide Appendix A).
 
 ---
 
@@ -311,7 +311,7 @@ ID (`Program.cs:56-62`) and interact entirely through Blazor Server pages - ever
 public endpoints above requires authentication by default (`FallbackPolicy =
 RequireAuthenticatedUser()`, `Program.cs:64-71`). Guest-vs-member-vs-any-authenticated-user access is
 controlled entirely by the Entra Enterprise Application's "Assignment required?" setting, not by any
-code in this app (see the deployment guide's §1.2 for how to restrict it).
+code in this app (see the deployment guide's Step 4b for how to restrict it).
 
 Because everything else runs over one shared, authenticated SignalR circuit, there's no meaningful
 sense in which a staff "request" has its own URL, verb, or independent auth check the way the public
@@ -404,7 +404,7 @@ service layer the rest of this appendix documents, but included here for complet
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`, Standard tier so it's visible without Debug on) and treated as `false`, never propagated, so a transient outage or a missing/unconsented Graph permission degrades a sign-in to non-staff rather than risking an accidental grant. Requires **both** `GroupMember.Read.All` and `User.Read.All` (application) - see deployment guide §2.5. |
+| `IsStaffAsync` | `Task<bool> IsStaffAsync(string userObjectId)` | Checks live Entra group membership (`IGraphGroupGateway.IsMemberOfGroupAsync`, `graphClient.Users[id].CheckMemberGroups`) against `FacilityConfiguration.StaffGroupId`. **Fails closed** - a Graph error is logged (`StaffGroupCheckFailed`, Standard tier so it's visible without Debug on) and treated as `false`, never propagated, so a transient outage or a missing/unconsented Graph permission degrades a sign-in to non-staff rather than risking an accidental grant. Requires **both** `GroupMember.Read.All` and `User.Read.All` (application) - see deployment guide Step 5. |
 
 Also exposes `StaffClaimType` (`facility:staff`) and `StaffClaimValue`, the claim `Program.cs` adds at
 sign-in and the policies below match on.
@@ -449,12 +449,12 @@ Also exposes the practice ice settings (`PracticeIceEligibleStartHour`/`Eligible
 `PracticeIceMailConfigured`). Unlike `Facility:TenantDomain`/`SheetMailboxLocalParts`/`TimeZone`,
 the two mail addresses are allowed to be blank at startup - `PracticeIceMailConfigured` gates the
 feature at request time instead, so an incremental feature rollout doesn't stop an already-running
-deployment from booting (deployment guide §2.4).
+deployment from booting (deployment guide Appendix A).
 
 `StaffGroupId` (architecture doc §6.5/D74) is **not** treated leniently like the practice ice mail
 addresses - it's validated in the same required-field block as `Facility:TenantDomain` above and
 throws at construction if blank, since an unset value would lock every staff page for everyone, not
-just disable one feature (deployment guide §2.5).
+just disable one feature (deployment guide Appendix A).
 
 ### `AppLogService`
 
