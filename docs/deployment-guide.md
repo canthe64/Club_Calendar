@@ -21,7 +21,7 @@ non-obvious reason, it links to `curling-facility-scheduling-architecture.md` (r
 | **Exchange Administrator** | Steps 1–3, 6, 7 (mailboxes, calendar processing, both security groups, Application Access Policy) |
 | **Application Administrator** | Step 4 (app registration) |
 | **Global Administrator** or **Privileged Role Administrator** | Step 5 only — granting admin consent to Microsoft Graph *application* permissions cannot be delegated below this |
-| **Contributor** on an Azure subscription | Steps 9–12 |
+| **Contributor** on an Azure subscription | Steps 9–11, 13–14 |
 
 The Global Admin involvement is a single click in Step 5. Everything ongoing after deployment
 (adding staff, adding a sheet) needs none of these — see "Day-two operations" at the end.
@@ -267,7 +267,7 @@ same 403, same message.
 
 One more registration setting — **ID token issuance** — is required, but it cannot be set yet: the
 portal hides that section until a Web platform with a redirect URI exists, and the redirect URI needs
-the app's URL from Step 9. It is Step 10.
+the app's URL from Step 9. It is Step 12.
 
 ---
 
@@ -365,7 +365,7 @@ It prints a per-mailbox, per-category result table. Anything marked `FAILED` her
 Step 5 or Step 6 isn't right yet.
 
 **Exchange Online is now done** — no step after this one touches a mailbox or a group. The rest is
-mostly the Azure portal, with one return trip to the Entra admin center in Step 10 to finish the app
+mostly the Azure portal, with one return trip to the Entra admin center in Step 12 to finish the app
 registration once the app's URL exists.
 
 ---
@@ -414,7 +414,7 @@ between portal revisions.
   Gateway, Front Door — where the cookie would otherwise carry the App Service hostname rather than
   the public one ([App Service + Application Gateway integration](https://learn.microsoft.com/en-us/azure/app-service/overview-app-gateway-integration)).
 
-This deployment serves traffic straight from App Service on its own custom domain (Step 12), with no
+This deployment serves traffic straight from App Service on its own custom domain (Step 14), with no
 gateway in front, so the proxy variant has nothing to read and no problem to solve. Turning it on
 anyway would mean the cookie domain follows a **client-supplied header** — which is why Microsoft
 pairs that setting with a recommendation to add access restrictions confining traffic to the proxy.
@@ -442,7 +442,85 @@ unrelated to SignalR, and this app doesn't use it.
 
 ---
 
-## Step 10 — Register the redirect URIs and enable ID tokens
+## Step 10 — Set the application configuration
+
+**Back in the Azure portal, on the Web App from Step 9** — [portal.azure.com](https://portal.azure.com)
+→ **App Services → &lt;your app&gt; → Settings → Environment variables**. Not the app registration —
+there's one more visit to Entra in Step 12, after the app is published.
+
+**+ Add**, one row per key. Use the **double-underscore** names from Appendix A — Azure rejects the
+colon form outright.
+
+The minimum set for a working instance:
+
+| Name | Value |
+|---|---|
+| `Graph__TenantId` | directory (tenant) ID |
+| `Graph__ClientId` | application (client) ID |
+| `Graph__ClientSecret` | client secret from Step 4a |
+| `AzureAd__TenantId` | same tenant ID |
+| `AzureAd__ClientId` | same client ID |
+| `AzureAd__ClientSecret` | same secret |
+| `Facility__TenantDomain` | e.g. `yourclub.onmicrosoft.com` |
+| `Facility__SheetMailboxLocalParts__0` … `__4` | `sheet1` … `sheet5` — one row each |
+| `Facility__ClubEventsMailboxLocalPart` | `clubevents` |
+| `Facility__TimeZone` | e.g. `Pacific Standard Time` |
+| `StaffAccess__StaffGroupId` | group object ID from Step 7 |
+| `AppLog__LogDirectory` | `%HOME%\LogFiles\facility-scheduler` (Windows) or `/home/LogFiles/facility-scheduler` (Linux) |
+| `PracticeIce__MailerMailbox` | the mailer address, if practice ice is enabled |
+| `PracticeIce__ApproverDistributionEmail` | mail-enabled group notified of new requests |
+| `Webhook__BreelySharedSecret` | only if integrating Breely — see Step 15 |
+
+Four of these are **load-bearing**: `Facility__TenantDomain`, `Facility__SheetMailboxLocalParts`,
+`Facility__TimeZone`, and `StaffAccess__StaffGroupId`. The app refuses to start without them rather
+than running in a silently wrong state.
+
+Three details that bite:
+
+- **Array indices must be contiguous from `0`.** A gap makes .NET's binder stop reading at the hole.
+- **`AppLog__LogDirectory` must be outside the deployed app folder.** Left unset it falls back to
+  `App_Data/logs` *inside* the deployment, which is replaced on every redeploy — log history vanishes
+  with no error (architecture doc §4.9).
+- **`Facility__TimeZone` must genuinely be the facility's zone.** Every "today" in the app derives
+  from it, and a wrong value shifts the whole app a day forward during the facility's own evening.
+
+Click **Apply → Save** and confirm the restart prompt.
+
+Setting configuration *before* publishing means the app's very first start validates it: the four
+load-bearing keys fail fast, so a missing one shows up in Step 11's log stream rather than as a
+confusing error for the first user.
+
+Secrets here are stored as plain settings, visible to anyone with Contributor on the resource. An
+**Azure Key Vault reference** (`@Microsoft.KeyVault(SecretUri=…)` as the value) is a worthwhile
+later upgrade, not required to get running.
+
+---
+
+## Step 11 — Publish the app
+
+```bash
+dotnet publish -c Release -o ./publish
+```
+
+then zip `./publish` and either drag it onto **Deployment Center → ZIP Deploy** in the portal, or:
+
+```bash
+az webapp deploy --resource-group facility-scheduler-rg --name <your-app-name> --src-path ./publish.zip --type zip
+```
+
+Visual Studio's right-click **Publish → Azure App Service** does the same thing interactively. Once
+the app is stable, Deployment Center can generate a GitHub Actions workflow that redeploys on push.
+
+**Watch the first start.** Open the **Log stream** blade (under Monitoring) and confirm the app comes
+up. An `InvalidOperationException` naming a specific setting means Step 10 missed one of the
+load-bearing keys — that's the fail-fast validation working, not a deployment failure.
+
+You can't sign in yet: the app registration has no redirect URI until Step 12. Browsing to the app
+now will fail at the Microsoft sign-in page, which is expected.
+
+---
+
+## Step 12 — Register the redirect URIs and enable ID tokens
 
 **Back in the Entra admin center, not the Azure portal.** This step returns to the app registration
 from Step 4 — [entra.microsoft.com](https://entra.microsoft.com) → **Applications → App registrations
@@ -450,8 +528,8 @@ from Step 4 — [entra.microsoft.com](https://entra.microsoft.com) → **Applica
 portal.azure.com under "Microsoft Entra ID", if you'd rather not switch portals — same object either
 way.)
 
-**Nothing here can be verified yet** — the app has no configuration until Step 11 and isn't published
-until Step 12, so first sign-in is Step 13. This step is registration only.
+The app is configured and running by now, so this is the last thing standing between you and a
+working sign-in — Step 13 tests it immediately.
 
 ### Do both in one pass
 
@@ -479,7 +557,7 @@ appear in it. The `azurewebsites.net` pair is enough to sign in and work through
 is cut over.
 
 But registration doesn't check that a host resolves — so if the final domain name is already decided,
-add its pair here too and Step 12's step 4 becomes a no-op:
+add its pair here too and Step 14's redirect-URI step becomes a no-op:
 
 - `https://booking.yourclub.org/signin-oidc`
 - `https://booking.yourclub.org/signout-callback-oidc`
@@ -515,88 +593,11 @@ the portal hides until a Web platform with at least one redirect URI exists.
 
 ---
 
-## Step 11 — Set the application configuration
-
-**Back in the Azure portal, on the Web App from Step 9** — [portal.azure.com](https://portal.azure.com)
-→ **App Services → &lt;your app&gt; → Settings → Environment variables**. Not the app registration; you're
-done in Entra until Step 12's custom domain, if you didn't already pre-register its redirect URIs.
-
-**+ Add**, one row per key. Use the **double-underscore** names from Appendix A — Azure rejects the
-colon form outright.
-
-The minimum set for a working instance:
-
-| Name | Value |
-|---|---|
-| `Graph__TenantId` | directory (tenant) ID |
-| `Graph__ClientId` | application (client) ID |
-| `Graph__ClientSecret` | client secret from Step 4a |
-| `AzureAd__TenantId` | same tenant ID |
-| `AzureAd__ClientId` | same client ID |
-| `AzureAd__ClientSecret` | same secret |
-| `Facility__TenantDomain` | e.g. `yourclub.onmicrosoft.com` |
-| `Facility__SheetMailboxLocalParts__0` … `__4` | `sheet1` … `sheet5` — one row each |
-| `Facility__ClubEventsMailboxLocalPart` | `clubevents` |
-| `Facility__TimeZone` | e.g. `Pacific Standard Time` |
-| `StaffAccess__StaffGroupId` | group object ID from Step 7 |
-| `AppLog__LogDirectory` | `%HOME%\LogFiles\facility-scheduler` (Windows) or `/home/LogFiles/facility-scheduler` (Linux) |
-| `PracticeIce__MailerMailbox` | the mailer address, if practice ice is enabled |
-| `PracticeIce__ApproverDistributionEmail` | mail-enabled group notified of new requests |
-| `Webhook__BreelySharedSecret` | only if integrating Breely — see Step 14 |
-
-Four of these are **load-bearing**: `Facility__TenantDomain`, `Facility__SheetMailboxLocalParts`,
-`Facility__TimeZone`, and `StaffAccess__StaffGroupId`. The app refuses to start without them rather
-than running in a silently wrong state.
-
-Three details that bite:
-
-- **Array indices must be contiguous from `0`.** A gap makes .NET's binder stop reading at the hole.
-- **`AppLog__LogDirectory` must be outside the deployed app folder.** Left unset it falls back to
-  `App_Data/logs` *inside* the deployment, which is replaced on every redeploy — log history vanishes
-  with no error (architecture doc §4.9).
-- **`Facility__TimeZone` must genuinely be the facility's zone.** Every "today" in the app derives
-  from it, and a wrong value shifts the whole app a day forward during the facility's own evening.
-
-Click **Apply → Save** and confirm the restart prompt.
-
-Secrets here are stored as plain settings, visible to anyone with Contributor on the resource. An
-**Azure Key Vault reference** (`@Microsoft.KeyVault(SecretUri=…)` as the value) is a worthwhile
-later upgrade, not required to get running.
-
----
-
-## Step 12 — Publish, and bind a domain
-
-Publish, by whichever route suits:
-
-```bash
-dotnet publish -c Release -o ./publish
-```
-
-then zip `./publish` and either drag it onto **Deployment Center → ZIP Deploy** in the portal, or:
-
-```bash
-az webapp deploy --resource-group facility-scheduler-rg --name <your-app-name> --src-path ./publish.zip --type zip
-```
-
-Visual Studio's right-click **Publish → Azure App Service** does the same thing interactively. Once
-the app is stable, Deployment Center can generate a GitHub Actions workflow that redeploys on push.
-
-**Custom domain (optional but expected for production):**
-
-1. **Custom domains → + Add** → enter the domain → add the TXT/CNAME record Azure shows you at your
-   registrar → **Validate**.
-2. **Certificates → + Create App Service Managed Certificate** (free, auto-renewing) → bind it.
-3. **TLS/SSL settings → HTTPS Only: On.**
-4. **Unless you already registered them in Step 10**, go back there and add the new domain's two
-   redirect URIs, or sign-in fails with
-   `AADSTS50011` on the custom domain.
-
----
-
 ## Step 13 — Verify
 
-Work through this in order; each item has caught a real failure at least once.
+Work through this in order, against `https://<name>.azurewebsites.net`; each item has caught a real
+failure at least once. If you bind a custom domain in Step 14, re-run the first item afterwards
+against the new hostname — that's the only one the domain change can break.
 
 - [ ] **A staff account signs in and `/calendar` loads real data for every sheet.** Signs in but
       every page denies → Appendix C.
@@ -610,7 +611,7 @@ Work through this in order; each item has caught a real failure at least once.
       `/practice-ice/approvals` and confirm the volunteer's confirmation email arrives. Mail failure
       here → Appendix C.
 - [ ] **Logging:** take any booking action, open `/settings`, confirm the entry appears; confirm the
-      log path is the one from Step 11, not `App_Data/logs`.
+      log path is the one from Step 10, not `App_Data/logs`.
 - [ ] **Time zone:** confirm the calendar's "Today" is correct *in the facility's evening*, not just
       during the day — that's when a wrong zone shows itself.
 - [ ] **Headers:** `curl -I https://<app>/calendar` shows `X-Frame-Options: DENY` and a
@@ -623,7 +624,24 @@ Work through this in order; each item has caught a real failure at least once.
 
 ---
 
-## Step 14 — Optional: the Breely booking webhook
+## Step 14 — Bind a custom domain (optional, expected for production)
+
+Everything works on `https://<name>.azurewebsites.net` without this. Do it when DNS is ready — it
+doesn't block anything above.
+
+1. **Custom domains → + Add** → enter the domain → add the TXT/CNAME record Azure shows you at your
+   registrar → **Validate**.
+2. **Certificates → + Create App Service Managed Certificate** (free, auto-renewing) → bind it.
+3. **TLS/SSL settings → HTTPS Only: On.**
+4. **Add the new domain's two redirect URIs** in the app registration (Step 12), or sign-in fails
+   with `AADSTS50011` on the custom domain. Skip if you already registered them there.
+5. **Re-run Step 13's first item** on the custom domain: sign in and confirm `/calendar` loads.
+   Keep the `azurewebsites.net` URIs registered — having both hostnames working is what lets you
+   tell a DNS problem apart from an app problem.
+
+---
+
+## Step 15 — Optional: the Breely booking webhook
 
 Bookings taken through Breely, the club's separate customer-facing platform, reach this app only via
 this webhook (architecture doc §4.8). Without it configured, they simply never appear here.
@@ -645,8 +663,8 @@ this webhook (architecture doc §4.8). Without it configured, they simply never 
 | Task | What's involved | Needs an Entra admin? |
 |---|---|---|
 | Add or remove a staff member | Add/remove them in `$StaffGroup`. Takes effect **on their next sign-in** — tell them to sign out and back in. | No — a group Owner can do it |
-| Add a new ice sheet | New mailbox (Step 1 + 1a + 1b), add to `$MailboxGroup` (Step 2), Reviewer permission (Step 3), re-run the category script (Step 8), add one `Facility__SheetMailboxLocalParts__N` row (Step 11) | No |
-| Rotate the client secret | New secret in Step 4a, update `Graph__ClientSecret` and `AzureAd__ClientSecret` (Step 11) | Application Administrator |
+| Add a new ice sheet | New mailbox (Step 1 + 1a + 1b), add to `$MailboxGroup` (Step 2), Reviewer permission (Step 3), re-run the category script (Step 8), add one `Facility__SheetMailboxLocalParts__N` row (Step 10) | No |
+| Rotate the client secret | New secret in Step 4a, update `Graph__ClientSecret` and `AzureAd__ClientSecret` (Step 10) | Application Administrator |
 | Renew before expiry | Watch the Step 4a expiry date — an expired secret is a full outage | Application Administrator |
 
 ---
@@ -706,7 +724,7 @@ This is a standard ASP.NET Core Blazor Server app with no cloud-specific depende
 - **A process supervisor** — systemd, a container restart policy, or equivalent
 - **A writable log directory** outside the deployed app folder
 
-Steps 1–8 (the entire tenant side) and Appendix A apply unchanged; only Steps 9–12 are Azure-specific.
+Steps 1–8 (the entire tenant side) and Appendix A apply unchanged; only Steps 9–14 are Azure-specific.
 
 ---
 
@@ -763,7 +781,7 @@ the time instead.
 
 ### `AADSTS50011: The redirect URI … does not match`
 
-Step 10, or Step 12 if you've just bound a custom domain.
+Step 12, or Step 14 if you've just bound a custom domain.
 
 ### The app won't start at all
 

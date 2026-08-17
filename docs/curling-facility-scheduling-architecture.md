@@ -471,7 +471,7 @@ below map to its own.
 6. **Entra app registration**, single-tenant, with **ID token issuance enabled** (`id_token` is
    Microsoft.Identity.Web's response type for a sign-in-only app; without it every sign-in fails
    `AADSTS700054`). Delegated `User.Read` (the default) is the entire delegated requirement — staff
-   sign-in is identity-only and every Graph call runs app-only (§6.2). *(Steps 4 and 10.)*
+   sign-in is identity-only and every Graph call runs app-only (§6.2). *(Steps 4 and 12.)*
 7. **Five application permissions, all admin-consented** *(Step 5)*. Four are exercised by the app:
    `Calendars.ReadWrite` (§5.1) · `Mail.Send` (practice ice, §5.4.4) · `GroupMember.Read.All`
    **and** `User.Read.All`, both required for `checkMemberGroups` (live-verified 2026-08-15, §6.5).
@@ -495,7 +495,7 @@ below map to its own.
     provisioned leaves existing events on the old literal string until migrated (as happened with
     Rental → Group Event; see `docs/migrate-rental-category.ps1`). *(Step 8.)*
 11. **App configuration** (§4.6) set to this tenant's real values, including
-    `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` if practice ice is enabled. *(Step 11.)*
+    `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` if practice ice is enabled. *(Step 10.)*
 
 **Per new sheet added later:** repeat steps 1, 2, 3, 5 and 10 for the new mailbox, add it to the
 mailbox group from step 4, and add one indexed `Facility:SheetMailboxLocalParts` entry. No Entra
