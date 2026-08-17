@@ -364,7 +364,9 @@ $env:CURLING_APP_CLIENT_SECRET = '<client secret from Step 4a>'
 It prints a per-mailbox, per-category result table. Anything marked `FAILED` here almost always means
 Step 5 or Step 6 isn't right yet.
 
-**The tenant side is now complete.** Everything below is Azure.
+**Exchange Online is now done** — no step after this one touches a mailbox or a group. The rest is
+mostly the Azure portal, with one return trip to the Entra admin center in Step 10 to finish the app
+registration once the app's URL exists.
 
 ---
 
@@ -378,55 +380,124 @@ Step 5 or Step 6 isn't right yet.
    - **Operating System:** Linux or Windows both work; Linux is cheaper at the same tier
    - **Region:** nearest the facility
 3. **App Service Plan → Create new → Basic B1.** Do not use Free (F1): it sleeps on inactivity, which
-   breaks Blazor Server's persistent SignalR circuit, and has no custom domain support.
+   breaks Blazor Server's persistent SignalR circuit, has no custom domain support, and caps Linux
+   apps at **five concurrent web socket connections** before returning HTTP 429 — one circuit per
+   signed-in user means that's a five-user ceiling.
 4. **Create**, then **Go to resource** and note the URL from the Overview blade.
 
 ### 9a. Turn on the settings Blazor Server needs
 
-**Settings → Configuration → General settings:**
+Three site settings, all of which exist because the app holds a long-lived SignalR circuit per
+signed-in user rather than serving independent requests:
 
-- **Web sockets: On** — off by default on Windows App Service; without it Blazor Server silently
-  degrades to long polling.
-- **Always On: On** — prevents idle unload dropping active circuits.
-- **Session affinity (ARR): On** — the default; leave it, or scaling out will break circuits.
+| Setting | Wanted | Why |
+|---|---|---|
+| Always On | **On** | Stops an idle unload from dropping active circuits. |
+| Session affinity | **On** | Already the default. Leave it — scaling out to a second instance without it breaks circuits. |
+| Session affinity proxy | **Off** | A different setting despite the near-identical name. See below. |
+| Web sockets | **On, Windows only** | See below — on Linux there is nothing to set. |
+
+```bash
+az webapp config set --name <your-app-name> --resource-group facility-scheduler-rg --always-on true
+```
+
+In the portal these live on the app's **Configuration → General settings**, though that blade moves
+between portal revisions.
+
+**The two session affinity checkboxes are not a pair — leave the second one off:**
+
+- **Session affinity** (`clientAffinityEnabled`) is the ARR cookie that pins a visitor to one
+  instance. This is the one Blazor Server needs. On by default.
+- **Session affinity proxy** (`clientAffinityProxyEnabled`) changes *how the cookie's domain is
+  chosen*: with it on, App Service reads the `X-Original-Host` / `X-Forwarded-Host` request header
+  and sets the cookie domain from that. It exists for apps behind a reverse proxy — Application
+  Gateway, Front Door — where the cookie would otherwise carry the App Service hostname rather than
+  the public one ([App Service + Application Gateway integration](https://learn.microsoft.com/en-us/azure/app-service/overview-app-gateway-integration)).
+
+This deployment serves traffic straight from App Service on its own custom domain (Step 12), with no
+gateway in front, so the proxy variant has nothing to read and no problem to solve. Turning it on
+anyway would mean the cookie domain follows a **client-supplied header** — which is why Microsoft
+pairs that setting with a recommendation to add access restrictions confining traffic to the proxy.
+Off is both correct and the safer default here.
+
+Revisit only if a reverse proxy is ever put in front of this app; at that point enable it *and* add
+the access restrictions.
+
+**Web sockets depends on which OS you picked in Step 9:**
+
+- **Linux — nothing to do.** Web sockets are always on, and there is no toggle. Per Microsoft's
+  [App Service on Linux FAQ](https://learn.microsoft.com/en-us/troubleshoot/azure/app-service/faqs-app-service-linux-new#are-web-sockets-supported),
+  "the `webSocketsEnabled` Azure Resource Manager (ARM) doesn't apply to Linux apps since Web Sockets
+  are always enabled for Linux." The property still exists and will often read `false` — **ignore
+  it**, it's inert on Linux and not worth chasing.
+- **Windows — off by default, turn it on.** Without it the SignalR circuit silently falls back to
+  long polling: it works, but worse.
+
+  ```bash
+  az webapp config set --name <your-app-name> --resource-group facility-scheduler-rg --web-sockets-enabled true
+  ```
+
+**Web sockets is not "WebJobs Runtime."** WebJobs hosts background jobs alongside the app, is
+unrelated to SignalR, and this app doesn't use it.
 
 ---
 
 ## Step 10 — Register the redirect URIs and enable ID tokens
 
-Both live on the app registration's **Authentication** blade, and they have to happen in this order:
-the ID token setting sits in a section the portal keeps hidden until a Web platform with at least one
-redirect URI exists.
+**Back in the Entra admin center, not the Azure portal.** This step returns to the app registration
+from Step 4 — [entra.microsoft.com](https://entra.microsoft.com) → **Applications → App registrations
+→ <your registration> → Authentication**. (App registrations are also reachable from
+portal.azure.com under "Microsoft Entra ID", if you'd rather not switch portals — same object either
+way.)
 
-### 10a. Add the Web platform and redirect URIs
+**Nothing here can be verified yet** — the app has no configuration until Step 11 and isn't published
+until Step 12, so first sign-in is Step 13. This step is registration only.
 
-Back in the app registration (Step 4): **Authentication → + Add a platform → Web**, and add both,
-using the real URL from Step 9:
+### Do both in one pass
 
-- `https://<name>.azurewebsites.net/signin-oidc`
-- `https://<name>.azurewebsites.net/signout-callback-oidc`
+The Web platform panel carries the implicit grant checkboxes alongside the URI fields, so both
+settings go in together:
 
-**Save.** Effective immediately, no restart. Missing this produces `AADSTS50011` on first sign-in.
+1. **Add Redirect URI → Web** (older portal versions label this **+ Add a platform → Web**).
+2. Enter the redirect URIs, using the real URL from Step 9:
+   - `https://<name>.azurewebsites.net/signin-oidc`
+   - `https://<name>.azurewebsites.net/signout-callback-oidc`
+3. In the same panel, under **Implicit grant and hybrid flows**, tick **ID tokens**. Leave **Access
+   tokens** unchecked — the app has no use for implicit access tokens.
+4. **Configure / Save.** Effective immediately, no restart.
 
-Repeat this for any custom domain you bind in Step 12.
+Both are required, and each has its own failure mode at first sign-in: a missing redirect URI gives
+`AADSTS50011` ("the redirect URI ... does not match"), and a missing ID token setting gives
+`AADSTS700054` ("response_type 'id_token' is not enabled"). Microsoft.Identity.Web's response type
+for a sign-in-only app that calls no downstream API is `id_token`, which is why the second one is
+needed at all.
 
-### 10b. Enable ID tokens
+### Add the custom domain's URIs now if you know it
 
-Required. Microsoft.Identity.Web's response type for a sign-in-only app that calls no downstream API
-is `id_token`, so without this, sign-in fails with `AADSTS700054` ("response_type 'id_token' is not
-enabled for the application").
+Redirect URIs are a list, and the only rule is that whatever hostname the browser is actually on must
+appear in it. The `azurewebsites.net` pair is enough to sign in and work through Step 13 before DNS
+is cut over.
 
-The section only appears once 10a is saved — the portal states outright that Web and SPA settings
-"stay hidden until you add one or multiple redirect URIs to Web or SPA platform."
+But registration doesn't check that a host resolves — so if the final domain name is already decided,
+add its pair here too and Step 12's step 4 becomes a no-op:
 
-**Authentication → Settings → Web and SPA Settings → Implicit grant and hybrid flows → check "ID
-tokens".** Leave **Access tokens** unchecked — the app has no use for implicit access tokens.
+- `https://booking.yourclub.org/signin-oidc`
+- `https://booking.yourclub.org/signout-callback-oidc`
 
-That blade is under active redesign, so if the path doesn't match what you see, set it on the
-**Manifest** blade instead, which doesn't change and isn't gated on a platform existing:
+Keep both sets registered afterwards; having the `azurewebsites.net` pair still working is useful for
+telling a DNS problem apart from an app problem.
+
+### If the labels have moved again
+
+Set both on the **Manifest** blade, which is version-proof and not gated on a platform existing —
+writing `redirectUris` creates the Web platform exactly as the button does:
 
 ```json
 "web": {
+    "redirectUris": [
+        "https://<name>.azurewebsites.net/signin-oidc",
+        "https://<name>.azurewebsites.net/signout-callback-oidc"
+    ],
     "implicitGrantSettings": {
         "enableAccessTokenIssuance": false,
         "enableIdTokenIssuance": true
@@ -434,16 +505,24 @@ That blade is under active redesign, so if the path doesn't match what you see, 
 }
 ```
 
-Older manifest schema calls the same setting `oauth2AllowIdTokenImplicitFlow`. The manifest is also
-the quickest way to *confirm* the setting on an existing registration, rather than hunting for the
-checkbox.
+Older manifest schema calls the ID token setting `oauth2AllowIdTokenImplicitFlow`. The manifest is
+also the quickest way to *confirm* both settings on an existing registration, rather than hunting for
+controls that move between portal revisions.
+
+If you ever need to change the ID token setting on its own later, the standalone control is
+**Authentication → Settings → Web and SPA Settings → Implicit grant and hybrid flows** — a section
+the portal hides until a Web platform with at least one redirect URI exists.
 
 ---
 
 ## Step 11 — Set the application configuration
 
-**Settings → Environment variables → + Add**, one row per key. Use the **double-underscore** names
-from Appendix A — Azure rejects the colon form outright.
+**Back in the Azure portal, on the Web App from Step 9** — [portal.azure.com](https://portal.azure.com)
+→ **App Services → &lt;your app&gt; → Settings → Environment variables**. Not the app registration; you're
+done in Entra until Step 12's custom domain, if you didn't already pre-register its redirect URIs.
+
+**+ Add**, one row per key. Use the **double-underscore** names from Appendix A — Azure rejects the
+colon form outright.
 
 The minimum set for a working instance:
 
@@ -509,7 +588,8 @@ the app is stable, Deployment Center can generate a GitHub Actions workflow that
    registrar → **Validate**.
 2. **Certificates → + Create App Service Managed Certificate** (free, auto-renewing) → bind it.
 3. **TLS/SSL settings → HTTPS Only: On.**
-4. **Go back to Step 10** and add the new domain's two redirect URIs, or sign-in fails with
+4. **Unless you already registered them in Step 10**, go back there and add the new domain's two
+   redirect URIs, or sign-in fails with
    `AADSTS50011` on the custom domain.
 
 ---
