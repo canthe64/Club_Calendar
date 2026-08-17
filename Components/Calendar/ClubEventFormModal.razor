@@ -13,7 +13,7 @@
                 <div>
                     <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
                     <div style="display:flex;gap:6px">
-                        @foreach (var cat in Enum.GetValues<ClubEventCategory>())
+                        @foreach (var cat in CalendarStyles.ClubEventCategories)
                         {
                             var isSelected = Draft.Category == cat;
                             <span @onclick="() => Draft.Category = cat"

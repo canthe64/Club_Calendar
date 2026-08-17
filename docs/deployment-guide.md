@@ -226,15 +226,36 @@ reversible and requires staff approval (architecture doc §6.5).
 
 **API permissions → + Add a permission → Microsoft Graph.**
 
-Under **Application permissions** add all five:
+Under **Application permissions** add all five. Four are called by the running app; one is not, and
+it's worth knowing which is which.
 
-| Permission | Used by |
+**Used by the app at runtime:**
+
+| Permission | Called from |
 |---|---|
-| `Calendars.ReadWrite` | Every booking read and write — the core of the app |
-| `MailboxSettings.ReadWrite` | `provision-categories.ps1` (Step 8) writing the master category list |
-| `Mail.Send` | Practice ice notification email (skip only if that feature stays off) |
-| `GroupMember.Read.All` | Staff group check at sign-in |
-| `User.Read.All` | Also the staff group check — `checkMemberGroups` resolves the user object as well as its memberships, and `GroupMember.Read.All` alone returns 403 (live-verified 2026-08-15) |
+| `Calendars.ReadWrite` | `calendarView`, `events` create/read/update/delete, `instances` — every booking read and write |
+| `Mail.Send` | `sendMail` — practice ice notifications (skip only if that feature stays off) |
+| `GroupMember.Read.All` | `checkMemberGroups` — the staff group check at sign-in |
+| `User.Read.All` | Also `checkMemberGroups` — the call resolves the user object as well as its memberships, so `GroupMember.Read.All` alone returns 403 (live-verified 2026-08-15) |
+
+**Used only by the provisioning script:**
+
+| Permission | Called from |
+|---|---|
+| `MailboxSettings.ReadWrite` | `provision-categories.ps1` (Step 8), writing `/users/{mailbox}/outlook/masterCategories` |
+
+The app itself never reads or writes mailbox settings. The script needs the permission here anyway
+because it has no identity of its own — it authenticates with `client_credentials` against this same
+`ClientId`. Delegated auth wouldn't avoid it either: delegated `MailboxSettings.ReadWrite` reaches
+only the signed-in user's *own* mailbox, and there is no Exchange PowerShell cmdlet for master
+categories, so writing another mailbox's list is app-only or nothing.
+
+**Leaving it granted is the recommended posture**, on the basis that the marginal risk is close to
+zero: Step 6 confines it to the facility mailboxes, and a credential that already holds
+`Calendars.ReadWrite` on those mailboxes gains very little from also being able to set their
+categories and auto-replies. Revoking it after Step 8 is defensible if you want the running app to
+hold nothing it doesn't exercise — just note that adding a sheet later means re-granting it, and
+re-granting needs a Global Administrator again (see Day-two operations).
 
 Under **Delegated permissions**, `User.Read` is added by default and is all that's needed — staff
 sign-in is for identity only, and every Graph call runs on the application credential above
@@ -244,14 +265,9 @@ Then click **Grant admin consent for &lt;tenant&gt;** and confirm every row read
 permission that's been added but not consented fails identically to one that was never added** —
 same 403, same message.
 
-### 5a. Enable ID tokens
-
-**Authentication → Implicit grant and hybrid flows → check "ID tokens (used for implicit and hybrid
-flows)".**
-
-Microsoft.Identity.Web's default response type for a sign-in-only app that calls no downstream API
-is `id_token`. If sign-in later fails with `AADSTS700054` ("response_type 'id_token' is not
-enabled"), this is the checkbox.
+One more registration setting — **ID token issuance** — is required, but it cannot be set yet: the
+portal hides that section until a Web platform with a redirect URI exists, and the redirect URI needs
+the app's URL from Step 9. It is Step 10.
 
 ---
 
@@ -376,7 +392,13 @@ Step 5 or Step 6 isn't right yet.
 
 ---
 
-## Step 10 — Register the redirect URIs
+## Step 10 — Register the redirect URIs and enable ID tokens
+
+Both live on the app registration's **Authentication** blade, and they have to happen in this order:
+the ID token setting sits in a section the portal keeps hidden until a Web platform with at least one
+redirect URI exists.
+
+### 10a. Add the Web platform and redirect URIs
 
 Back in the app registration (Step 4): **Authentication → + Add a platform → Web**, and add both,
 using the real URL from Step 9:
@@ -387,6 +409,34 @@ using the real URL from Step 9:
 **Save.** Effective immediately, no restart. Missing this produces `AADSTS50011` on first sign-in.
 
 Repeat this for any custom domain you bind in Step 12.
+
+### 10b. Enable ID tokens
+
+Required. Microsoft.Identity.Web's response type for a sign-in-only app that calls no downstream API
+is `id_token`, so without this, sign-in fails with `AADSTS700054` ("response_type 'id_token' is not
+enabled for the application").
+
+The section only appears once 10a is saved — the portal states outright that Web and SPA settings
+"stay hidden until you add one or multiple redirect URIs to Web or SPA platform."
+
+**Authentication → Settings → Web and SPA Settings → Implicit grant and hybrid flows → check "ID
+tokens".** Leave **Access tokens** unchecked — the app has no use for implicit access tokens.
+
+That blade is under active redesign, so if the path doesn't match what you see, set it on the
+**Manifest** blade instead, which doesn't change and isn't gated on a platform existing:
+
+```json
+"web": {
+    "implicitGrantSettings": {
+        "enableAccessTokenIssuance": false,
+        "enableIdTokenIssuance": true
+    }
+}
+```
+
+Older manifest schema calls the same setting `oauth2AllowIdTokenImplicitFlow`. The manifest is also
+the quickest way to *confirm* the setting on an existing registration, rather than hunting for the
+checkbox.
 
 ---
 

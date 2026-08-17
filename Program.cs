@@ -18,6 +18,11 @@ var builder = WebApplication.CreateBuilder(args);
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Wire format for the Minimal API JSON surface - see PublicJsonOptions for what and why. Applies to
+// endpoint request/response serialization only; it does not touch the Graph SDK's own client.
+builder.Services.ConfigureHttpJsonOptions(options =>
+    FacilityScheduler.Services.PublicJsonOptions.Configure(options.SerializerOptions));
+
 builder.Services.Configure<GraphOptions>(builder.Configuration.GetSection(GraphOptions.SectionName));
 builder.Services.Configure<FacilityOptions>(builder.Configuration.GetSection(FacilityOptions.SectionName));
 builder.Services.Configure<PracticeIceOptions>(builder.Configuration.GetSection(PracticeIceOptions.SectionName));

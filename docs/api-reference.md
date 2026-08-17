@@ -100,7 +100,7 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
 | `sheetSlots[].sheetLabel` | string | Public-safe display name (e.g. `"Sheet 1"`) - never the underlying resource mailbox address. |
 | `sheetSlots[].start` / `.end` | datetime | Local facility time (not UTC), ISO 8601, no offset. |
 | `clubEvents` | array | Every club-wide event in the window, regardless of category. |
-| `clubEvents[].category` | string | One of `Bonspiel`, `Activities`, `Closure`, `Other`. |
+| `clubEvents[].category` | string | One of `Bonspiel`, `Activities`, `Meetings`, `Closure`, `Other`. **Changed 2026-08-17** (D79): this previously serialized as the enum's integer ordinal, contradicting this document. `PublicJsonOptions` now registers a string-enum converter, so the name is the wire value. |
 | `clubEvents[].marksSheetsUnavailable` | boolean | `true` when this event closes every sheet for its duration - the widget shows "all sheets reserved" wording specifically for these. |
 
 A slot that overlaps a `marksSheetsUnavailable` club event is excluded from `sheetSlots` even if a
@@ -432,7 +432,7 @@ lambdas were not, which is how a full staff lockout reached production (architec
 | `ClubEvent` | `EventId`, `ICalUId`, `Title`, `Category` (`ClubEventCategory`), `Start`, `End`, `IsAllDay`, `MarksSheetsUnavailable`, `Notes`, `BookedBy` | Not tied to any sheet. |
 | `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `Other` | Display labels ("Group Event", "Practice Ice") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
 | `BookingState` | `Hold`, `Confirmed` | |
-| `ClubEventCategory` | `Bonspiel`, `Activities`, `Closure`, `Other` | |
+| `ClubEventCategory` | `Bonspiel`, `Activities`, `Closure`, `Other`, `Meetings` | Member **names** are the public API wire value (D79) and the Graph category literal - renaming one is a breaking change on both fronts. Ordinals are unpublished, so declaration order is free; picker display order is `CalendarStyles.ClubEventCategories`. |
 | `BookingResult` | `IsSuccess`, `Booking?`, `Conflicts: List<SheetBooking>` | Result of a single-sheet create. |
 | `GroupBookingResult` | `IsSuccess`, `Bookings: List<SheetBooking>`, `Conflicts: List<SheetBooking>` | Result of a multi-sheet create/update. |
 

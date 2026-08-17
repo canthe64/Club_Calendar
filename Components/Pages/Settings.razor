@@ -10,6 +10,14 @@
 <div style="padding:16px 24px;max-width:900px">
     <h1>Settings</h1>
 
+    <div style="color:#5a7183;font-size:13px;margin:-6px 0 22px">
+        <span style="font-weight:600;color:#1e2a33">@AppVersion.Display</span>
+        @if (AppVersion.BuiltUtc is DateTime built)
+        {
+            <span style="margin-left:10px">built @built.ToString("yyyy-MM-dd HH:mm") UTC</span>
+        }
+    </div>
+
     <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
         <h2 style="font-size:16px;margin-bottom:8px">Practice Ice Requests</h2>
         <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">

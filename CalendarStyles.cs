@@ -75,12 +75,29 @@ public static class CalendarStyles
     public static readonly BookingCategory[] SheetCategories =
         Enum.GetValues<BookingCategory>().Where(c => c != BookingCategory.Event).ToArray();
 
+    /// <summary>
+    /// Club Events categories in the order they're offered in the picker. Deliberately its own list
+    /// rather than Enum.GetValues: ClubEventCategory is append-only because its ordinals are on the
+    /// public API wire (see that enum), so a new category lands at the end of the enum regardless of
+    /// where it belongs in front of a person. Meetings reads better beside Activities than after
+    /// Other. Every enum member must appear here - ClubEventCategoryTests enforces that.
+    /// </summary>
+    public static readonly ClubEventCategory[] ClubEventCategories =
+    [
+        ClubEventCategory.Bonspiel,
+        ClubEventCategory.Activities,
+        ClubEventCategory.Meetings,
+        ClubEventCategory.Closure,
+        ClubEventCategory.Other
+    ];
+
     /// <summary>Club Events category colors: Bonspiel=orange (mirrors the Exchange master category
-    /// provisioned in Phase 1), Activities=teal, Closure=gray, Other=neutral.</summary>
+    /// provisioned in Phase 1), Activities=teal, Meetings=cranberry, Closure=gray, Other=neutral.</summary>
     public static string ClubEventCategoryColor(ClubEventCategory category) => category switch
     {
         ClubEventCategory.Bonspiel => "#c2622f",
         ClubEventCategory.Activities => "#2e7d8c",
+        ClubEventCategory.Meetings => "#a63a5d",
         ClubEventCategory.Closure => "#6b7680",
         ClubEventCategory.Other => "#9c9690",
         _ => "#9c9690"
@@ -90,6 +107,7 @@ public static class CalendarStyles
     {
         ClubEventCategory.Bonspiel => "#f7e8e0",
         ClubEventCategory.Activities => "#e2eef0",
+        ClubEventCategory.Meetings => "#f5e5eb",
         ClubEventCategory.Closure => "#eef0f2",
         ClubEventCategory.Other => "#f1efec",
         _ => "#f1efec"

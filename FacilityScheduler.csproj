@@ -6,6 +6,23 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <BlazorDisableThrowNavigationException>true</BlazorDisableThrowNavigationException>
     <UserSecretsId>c3794faa-1424-4466-b475-551c703eacff</UserSecretsId>
+
+    <!-- ==== Version, as shown on the Settings page (Services/AppVersion.cs) ====
+         VersionPrefix is the hand-edited part - bump it here for a real release and nowhere else.
+         BuildNumber is the build's own UTC timestamp (yyMMddHHmm), so it changes on its own every
+         time the assembly is actually recompiled, with no counter file to keep in sync across
+         machines or CI. It sorts chronologically, and reads back as a date, which is what you
+         actually want when asking "is the server running what I just deployed?". Override it
+         explicitly (dotnet build -p:BuildNumber=...) if a build system needs its own scheme.
+         Two consequences worth knowing: two rebuilds inside the same minute share a build number,
+         and because the generated assembly attribute changes when the minute ticks over, that
+         build recompiles rather than no-oping. Both are fine at this project's size. -->
+    <VersionPrefix>1.0.0</VersionPrefix>
+    <BuildNumber Condition="'$(BuildNumber)' == ''">$([System.DateTime]::UtcNow.ToString('yyMMddHHmm'))</BuildNumber>
+    <InformationalVersion>$(VersionPrefix)+build.$(BuildNumber)</InformationalVersion>
+    <!-- Without this the SDK appends "+<git sha>" to InformationalVersion, which would collide with
+         the "+build.N" metadata above and break the parse. -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
     <!-- The SDK only excludes bin/ and obj/ from its default item globs by default - a local
          "dotnet publish -o ./publish" (or any other output folder left inside the project tree)
          gets re-globbed as source input on the next build, and a copied .razor.js with no sibling

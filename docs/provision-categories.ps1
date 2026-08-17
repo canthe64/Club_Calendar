@@ -42,10 +42,11 @@ $sheetCategories = @(
     @{ displayName = "Other";       color = "preset0"  }   # Red       - app #c0392b
 )
 $clubEventCategories = @(
-    @{ displayName = "Bonspiel";   color = "preset1"  },  # Orange
-    @{ displayName = "Activities"; color = "preset3"  },  # Yellow
-    @{ displayName = "Closure";    color = "preset12" },  # Gray
-    @{ displayName = "Other";      color = "preset10" }   # Steel
+    @{ displayName = "Bonspiel";   color = "preset1"  },  # Orange    - app #c2622f
+    @{ displayName = "Activities"; color = "preset3"  },  # Yellow    - app #2e7d8c
+    @{ displayName = "Meetings";   color = "preset9"  },  # Cranberry - app #a63a5d
+    @{ displayName = "Closure";    color = "preset12" },  # Gray      - app #6b7680
+    @{ displayName = "Other";      color = "preset10" }   # Steel     - app #9c9690
 )
 
 $results = @()

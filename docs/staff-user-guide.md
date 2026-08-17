@@ -147,7 +147,7 @@ specific sheet. Reach them either via the **Club Events** button in the calendar
 dedicated `/club-events` list page) or by clicking a Club Event chip directly on the calendar, which
 opens the same edit form inline without leaving the calendar page.
 
-- **Category** — Bonspiel, Activities, Closure, or Other. Required, no default.
+- **Category** — Bonspiel, Activities, Meetings, Closure, or Other. Required, no default.
 - **Event Title** — required.
 - **All day** — toggle on/off. When off, set **From**/**To** times (same 30-minute increments as
   bookings).

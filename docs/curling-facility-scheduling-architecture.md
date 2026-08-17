@@ -164,7 +164,7 @@ Every piece of booking data lives on the event object:
 - **subject** — human-readable, for the Outlook fallback (`"{Category} - {RenterName}"` or just `{Category}` if blank).
 - **start / end (+ timezone)** — the reserved slot, tagged with the facility's configured local time zone (§4.6), never UTC.
 - **showAs** — `tentative` = Hold, `busy` = Confirmed. Drives free/busy and the hold-vs-confirmed encoding; conflict enforcement itself is the app's job regardless of `showAs` (§6.1).
-- **categories** — one of Group Event / League / Bonspiel / Maintenance / Practice Ice / Other for sheets (Event is reserved for Club Events, never offered in the sheet-booking picker); Bonspiel / Activities / Closure / Other for Club Events. The category's *display* label (e.g. "Group Event", "Practice Ice") is kept separate from the enum's own wire value written to/read from this Graph property — renaming a label never risks breaking the read-back parse.
+- **categories** — one of Group Event / League / Bonspiel / Maintenance / Practice Ice / Other for sheets (Event is reserved for Club Events, never offered in the sheet-booking picker); Bonspiel / Activities / Meetings / Closure / Other for Club Events. The category's *display* label (e.g. "Group Event", "Practice Ice") is kept separate from the enum's own wire value written to/read from this Graph property — renaming a label never risks breaking the read-back parse.
 - **recurrence** — native Graph recurring series for league blocks etc. (§4.5).
 - **Named extended properties** (server-side filterable): `BookedBy`, `BookingGroupId` (§4.5).
 - **JSON blob** (one extended property, display-only): renter name, phone, email, notes.
@@ -209,7 +209,7 @@ A dedicated resource mailbox, not tied to any physical sheet, for whole-club-sca
 
 **Why a dedicated mailbox instead of writing the same event to every sheet calendar:** independent per-sheet Graph writes have no transactional guarantee; a single event on a single dedicated calendar is atomic by construction.
 
-**Category taxonomy:** Bonspiel / Activities / Closure / Other. Kept structurally separate from the sheet-level category enum.
+**Category taxonomy:** Bonspiel / Activities / Meetings / Closure / Other. Kept structurally separate from the sheet-level category enum. Member *names* are load-bearing twice over - the public API's wire value (D79) and the Graph category literal - so renaming one is a breaking change, while reordering is free. Picker display order lives in `CalendarStyles.ClubEventCategories` rather than following declaration order.
 
 **Display:** Club Events render **inline within the calendar itself**, never as a separate banner — sorted chronologically alongside sheet bookings (all-day events sort first). In Month view they appear as chips within each day cell; in Week and Day view (both hourly grids, §4.7) an all-day event pins to a slim row at the top of its column, and a timed event renders as a full-width band positioned at its actual hour, the same as a sheet booking. Every club event chip/band gets a dotted border (as opposed to bookings' dashed=hold/solid=confirmed), so the border style alone identifies what kind of calendar item something is, independent of its category color. Clicking a Club Event chip anywhere on the staff calendar opens its edit form directly (a bug where the click instead bubbled up to the day cell's own "jump to Day view" handler was found and fixed). A "Show club events" toggle lets staff hide them from the calendar entirely.
 
@@ -468,21 +468,27 @@ below map to its own.
 5. **Staff Reviewer (read-only) calendar permission**, granted to the *staff* group, per §6.2 —
    preserving the sole-writer invariant for the Outlook fallback path (D2). Group-granted, so
    membership changes in step 9 carry it automatically with no per-person mailbox work. *(Step 3.)*
-6. **Entra app registration**, single-tenant. Delegated `User.Read` (the default) is the entire
-   delegated requirement — staff sign-in is identity-only and every Graph call runs app-only (§6.2).
-   *(Step 4.)*
-7. **Five application permissions, all admin-consented** *(Step 5)*:
-   `Calendars.ReadWrite` · `Mail.Send` (practice ice) · `MailboxSettings.ReadWrite` (the category
-   script's `masterCategories` writes) · `GroupMember.Read.All` **and** `User.Read.All` (both
-   required for `checkMemberGroups` — live-verified 2026-08-15, §6.5). A permission added but not
-   consented fails identically to one never added.
+6. **Entra app registration**, single-tenant, with **ID token issuance enabled** (`id_token` is
+   Microsoft.Identity.Web's response type for a sign-in-only app; without it every sign-in fails
+   `AADSTS700054`). Delegated `User.Read` (the default) is the entire delegated requirement — staff
+   sign-in is identity-only and every Graph call runs app-only (§6.2). *(Steps 4 and 10.)*
+7. **Five application permissions, all admin-consented** *(Step 5)*. Four are exercised by the app:
+   `Calendars.ReadWrite` (§5.1) · `Mail.Send` (practice ice, §5.4.4) · `GroupMember.Read.All`
+   **and** `User.Read.All`, both required for `checkMemberGroups` (live-verified 2026-08-15, §6.5).
+   The fifth, `MailboxSettings.ReadWrite`, is **never called by the app** — it exists solely for
+   `provision-categories.ps1` (step 10), which has no identity of its own and authenticates as this
+   same app registration; writing another mailbox's `masterCategories` is app-only, with no
+   delegated or Exchange PowerShell equivalent. Kept granted rather than revoked after provisioning
+   because step 8 already confines it to the facility mailboxes, where a credential holding
+   `Calendars.ReadWrite` gains almost nothing from it. A permission added but not consented fails
+   identically to one never added.
 8. **Application Access Policy** scoping the app registration to the group from step 4, **negatively
    tested** — verify the app identity is *denied* a mailbox outside the group (§6.3). *(Step 6.)*
 9. **Populate and delegate the staff group** from step 4, with management delegated to at least one
    non-Entra-admin so ongoing staff changes need no Entra admin action (§6.5). Its **object id** (a
    GUID, never the display name or SMTP address) becomes `StaffAccess:StaffGroupId`. *(Step 7.)*
 10. **Master category lists** on every sheet mailbox (Group Event/League/Event/Bonspiel/Maintenance/
-    Practice Ice/Other) and the Club Events mailbox (Bonspiel/Activities/Closure/Other), via
+    Practice Ice/Other) and the Club Events mailbox (Bonspiel/Activities/Meetings/Closure/Other), via
     `docs/provision-categories.ps1`. Its preset colors mirror `CalendarStyles.CategoryColor` as
     closely as Exchange's fixed palette allows, so the Outlook fallback (D2) doesn't show a different
     scheme — if either side changes, change both. Renaming a category after mailboxes are
@@ -643,6 +649,8 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D75 | The staff marker is an app-owned claim type (`facility:staff`) matched with `RequireClaim`, never `ClaimTypes.Role` + `RequireRole`; and the authorization policies live in `StaffAuthorizationPolicies`, not inline in `Program.cs` | `RequireRole` matches only against `ClaimsIdentity.RoleClaimType`, which Microsoft.Identity.Web overrides to `"roles"` - the role-based pairing silently never matched and locked every staff member out on the first deploy (§6.5/§8). An app-owned claim type depends on no framework convention. Extracting the policies is inseparable from the fix: inline lambdas in `Program.cs` are unreachable from tests, which is exactly why nothing caught it before deploy. |
 | D76 | The staff header is a hamburger menu (always visible, click-to-dropdown) plus a title block, replacing D64's inline nav links | Operator requirement ahead of production. The inline links didn't scale past the handful of pages the app now has, and every added surface made the header more crowded. A single menu holds all seven destinations (Staff Calendar, Public Calendar, Club Events, Practice Ice, Practice Ice Approvals, Settings, Sign out) at a fixed header size, and puts Club Events back as a first-class destination rather than only a button on the Calendar page. The two anonymous surfaces open in a new tab so a staff member checking the member-facing view doesn't lose their place. Dismissal uses a transparent full-viewport backdrop element rather than a document-level JS listener - this is the authenticated Blazor circuit, so `@onclick` is available (D15 constrains the *anonymous* pages only). |
 | D77 | The staff header's CSS lives in `MainLayout.razor.css` (Blazor scoped CSS) | The `app-header`/`app-title` classes had been referenced by the markup since the initial build but were never defined anywhere - no Bootstrap is loaded and `wwwroot/app.css` carries only leftover template rules, so the header rendered as unstyled text. Scoped rather than global CSS specifically so it can never leak into the hand-built public pages, which style themselves inline and share no stylesheet with the staff app. |
+| D79 | `/api/public/availability` serializes enums by name, via a `JsonStringEnumConverter` registered in `PublicJsonOptions` | Found 2026-08-17 while adding the Meetings club event category (D80). The endpoint returns `PublicClubEventLabel.Category` through `Results.Ok` with the default web JSON options, which carry no string-enum converter - so `clubEvents[].category` had always gone out as an integer ordinal, while `api-reference.md` had always documented it as a name. Verified empirically rather than inferred from the defaults. Serializing by name makes the endpoint match its own published contract, and moves the breaking-change risk from *reordering* the enum (invisible, easy to do by accident) to *renaming* a member (deliberate, and already breaking for the Graph category literal anyway). A knowingly breaking change to a public endpoint, accepted because the one known consumer - the club's embed widget - doesn't read club event categories at all. Registered through an extracted `Configure` method rather than an inline lambda in `Program.cs`, per D75's lesson about untestable startup wiring. |
+| D80 | Club event category `Meetings`, cranberry, positioned between Activities and Closure in the picker | Operator request. Picker order comes from `CalendarStyles.ClubEventCategories` (mirroring the existing `SheetCategories` pattern) rather than enum declaration order - originally to keep the enum append-only while the ordinals were on the wire, and kept after D79 removed that constraint because display order and declaration order have no reason to be coupled. The split is guarded by a test asserting the list covers every enum member, since a category present in the enum but missing from the list would render on the calendar while being impossible to select. |
 | D78 | The resource mailboxes are configured to **auto-decline every meeting invite** (`AutomateProcessing AutoAccept` with all booking policies false and no delegates, plus an `AdditionalResponse`), not to auto-accept and not to ignore | D3 established that the Resource Booking Attendant never runs on the app's own direct writes, but said nothing about invites arriving from Outlook — and nothing stops a member or staffer adding a sheet as a room on a meeting. Left at the room default (`AutoAccept`), Exchange books the sheet itself: no app-side conflict check (§6.1), and an event carrying none of the app's metadata (§4.1). Set to `None`, the invite is silently ignored and the sender reasonably assumes they have the ice. Declining is the only option that both preserves the sole-writer invariant and tells the sender where to actually go. Documented as a tenant provisioning step (§7 step 2) rather than left to the mailbox default, which was the prior unstated behavior. |
 
 ---
