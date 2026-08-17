@@ -459,11 +459,15 @@ below map to its own.
    (§4.1). See D78. *(Step 1a.)*
 3. **Mailbox audit logging** enabled on every mailbox — the only record of a change made outside the
    app, and not something the app can verify for itself. *(Step 1b.)*
-4. **Mail-enabled security group** containing every sheet mailbox, the Club Events mailbox, **and the
-   practice ice mailer mailbox** (D73). Must be mail-enabled; a plain Entra security group cannot
-   scope an Application Access Policy. *(Step 2.)*
-5. **Staff Reviewer (read-only) calendar permission** per §6.2, preserving the sole-writer invariant
-   for the Outlook fallback path (D2). *(Step 3.)*
+4. **Two security groups — one of mailboxes, one of people** *(Step 2)*. The mailbox group holds
+   every sheet mailbox, Club Events, and the practice ice mailer (D73), and exists solely to scope
+   the Application Access Policy; it must be mail-enabled, since a plain Entra security group cannot
+   scope one. The staff group holds people and is used for both steps 5 and 9 below. Conflating them
+   would make every mailbox a staff account, and grant the sheets calendar permission on each other
+   instead of granting it to anyone.
+5. **Staff Reviewer (read-only) calendar permission**, granted to the *staff* group, per §6.2 —
+   preserving the sole-writer invariant for the Outlook fallback path (D2). Group-granted, so
+   membership changes in step 9 carry it automatically with no per-person mailbox work. *(Step 3.)*
 6. **Entra app registration**, single-tenant. Delegated `User.Read` (the default) is the entire
    delegated requirement — staff sign-in is identity-only and every Graph call runs app-only (§6.2).
    *(Step 4.)*
@@ -474,10 +478,9 @@ below map to its own.
    consented fails identically to one never added.
 8. **Application Access Policy** scoping the app registration to the group from step 4, **negatively
    tested** — verify the app identity is *denied* a mailbox outside the group (§6.3). *(Step 6.)*
-9. **Staff security group** — a *separate* group from step 4 (that one scopes mailbox access, this
-   one scopes app authorization), with Ownership delegated to at least one non-Entra-admin so
-   ongoing staff changes need no Entra admin action (§6.5). Its **object id** (a GUID, never the
-   display name) becomes `StaffAccess:StaffGroupId`. *(Step 7.)*
+9. **Populate and delegate the staff group** from step 4, with management delegated to at least one
+   non-Entra-admin so ongoing staff changes need no Entra admin action (§6.5). Its **object id** (a
+   GUID, never the display name or SMTP address) becomes `StaffAccess:StaffGroupId`. *(Step 7.)*
 10. **Master category lists** on every sheet mailbox (Group Event/League/Event/Bonspiel/Maintenance/
     Practice Ice/Other) and the Club Events mailbox (Bonspiel/Activities/Closure/Other), via
     `docs/provision-categories.ps1`. Its preset colors mirror `CalendarStyles.CategoryColor` as
@@ -489,8 +492,8 @@ below map to its own.
     `PracticeIce:ApproverDistributionEmail`/`MailerMailbox` if practice ice is enabled. *(Step 11.)*
 
 **Per new sheet added later:** repeat steps 1, 2, 3, 5 and 10 for the new mailbox, add it to the
-group in step 4, and add one indexed `Facility:SheetMailboxLocalParts` entry. No Entra admin action
-and no redeploy.
+mailbox group from step 4, and add one indexed `Facility:SheetMailboxLocalParts` entry. No Entra
+admin action and no redeploy.
 
 **Two things that cost real time the first time through**, both now in the deployment guide's
 troubleshooting appendix rather than repeated here: group-*membership* changes to an existing

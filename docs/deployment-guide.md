@@ -18,8 +18,7 @@ non-obvious reason, it links to `curling-facility-scheduling-architecture.md` (r
 
 | Role | Needed for |
 |---|---|
-| **Exchange Administrator** | Steps 1–3, 6 (mailboxes, mail-enabled group, calendar processing, Application Access Policy) |
-| **Groups Administrator** | Step 7 (staff security group) |
+| **Exchange Administrator** | Steps 1–3, 6, 7 (mailboxes, calendar processing, both security groups, Application Access Policy) |
 | **Application Administrator** | Step 4 (app registration) |
 | **Global Administrator** or **Privileged Role Administrator** | Step 5 only — granting admin consent to Microsoft Graph *application* permissions cannot be delegated below this |
 | **Contributor** on an Azure subscription | Steps 9–12 |
@@ -31,7 +30,6 @@ The Global Admin involvement is a single click in Step 5. Everything ongoing aft
 
 ```powershell
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
-Install-Module Microsoft.Graph -Scope CurrentUser
 ```
 
 Plus the **.NET 10 SDK** on whatever machine will build and publish the app, and the repo cloned
@@ -47,7 +45,7 @@ $SheetParts    = @('sheet1','sheet2','sheet3','sheet4','sheet5')
 $ClubEventPart = 'clubevents'
 $MailerMailbox = 'scheduler-mailer@yourclub.org'  # licensed account that sends practice ice mail
 $MailboxGroup  = 'Facility Mailboxes'         # created in Step 2
-$StaffGroup    = 'Facility Scheduler Staff'   # created in Step 7
+$StaffGroup    = 'Facility Scheduler Staff'   # created in Step 2, populated in Step 7
 
 $SheetMailboxes = $SheetParts | ForEach-Object { "$_@$TenantDomain" }
 $ClubEvents     = "$ClubEventPart@$TenantDomain"
@@ -55,7 +53,7 @@ $AllMailboxes   = @($SheetMailboxes) + $ClubEvents
 ```
 
 Sheet mailbox local-parts do **not** have to be `sheet1..sheetN` — the app takes an explicit list
-(Appendix A). One exception: `provision-categories.ps1` (Step 3) assumes that naming and takes a
+(Appendix A). One exception: `provision-categories.ps1` (Step 8) assumes that naming and takes a
 `-SheetCount`; a different scheme means editing that one line in the script.
 
 ### Run the tests first
@@ -132,23 +130,40 @@ The app cannot verify this itself, and it's the only record of a change made out
 
 ---
 
-## Step 2 — Create the mail-enabled security group that scopes app access
+## Step 2 — Create the two security groups
 
-The app's Graph credential must be restricted to *only* these mailboxes (architecture doc §6.3). That
-restriction is applied in Step 6 and keys off this group, which must be a **mail-enabled security
-group** — a plain Entra security group will not work.
+Two groups, doing unrelated jobs. Keeping them separate matters: **one contains mailboxes, the other
+contains people.**
 
-The **mailer mailbox** goes in this group too. Application Access Policies scope by app + group
+| Group | Contains | Used for |
+|---|---|---|
+| `$MailboxGroup` | The sheet mailboxes, Club Events, and the mailer mailbox — **no human accounts** | Scoping the app's Graph credential to only these mailboxes (Step 6) |
+| `$StaffGroup` | Staff and committee **people** — no mailboxes | Who counts as staff in the app (Step 7), and read-only Outlook access (Step 3) |
+
+Both are created as **mail-enabled security groups**. For `$MailboxGroup` that's mandatory — an
+Application Access Policy cannot be scoped by a plain Entra security group. For `$StaffGroup` it's
+so `Add-MailboxFolderPermission` in Step 3 will accept it as a principal; a non-mail-enabled Entra
+security group is rejected there. Mail-enabled security groups can only be created from Exchange
+PowerShell, not the Entra portal.
+
+The **mailer mailbox** goes in `$MailboxGroup` too. Application Access Policies scope by app + group
 membership, not by permission, so `Mail.Send` cannot be scoped separately from `Calendars.ReadWrite`
 (architecture doc D73). Create the mailer as a normal licensed user account first if it doesn't
 exist — it needs an Exchange Online license to send.
 
 ```powershell
+# Mailbox scope group - mailboxes only
 New-DistributionGroup -Name $MailboxGroup -Type Security -PrimarySmtpAddress "facility-mailboxes@$TenantDomain"
 
 foreach ($mb in $AllMailboxes) { Add-DistributionGroupMember -Identity $MailboxGroup -Member $mb }
 Add-DistributionGroupMember -Identity $MailboxGroup -Member $MailerMailbox
+
+# Staff group - people only. Populated and delegated in Step 7.
+New-DistributionGroup -Name $StaffGroup -Type Security -PrimarySmtpAddress "scheduler-staff@$TenantDomain"
 ```
+
+`$StaffGroup` gets an email address as a side effect of being mail-enabled. Harmless, and often
+useful — but it lands in the GAL, so name it something that makes sense to the whole club.
 
 ---
 
@@ -158,13 +173,17 @@ Staff view sheet calendars in Outlook only as an emergency fallback; the app is 
 interface (architecture doc D2). Reviewer is read-only, which is what protects the sole-writer
 invariant.
 
+The permission goes to **`$StaffGroup`** — the group holding people. Granting it to `$MailboxGroup`
+would give the resource mailboxes Reviewer on each other and no human anything.
+
 ```powershell
 foreach ($mb in $AllMailboxes) {
-    Add-MailboxFolderPermission -Identity "${mb}:\Calendar" -User $MailboxGroup -AccessRights Reviewer
+    Add-MailboxFolderPermission -Identity "${mb}:\Calendar" -User $StaffGroup -AccessRights Reviewer
 }
 ```
 
-Substitute a staff-specific group if you don't want everyone in `$MailboxGroup` to have this.
+The group is still empty at this point; that's fine. Permissions attach to the group, so anyone added
+in Step 7 inherits this automatically, and anyone removed loses it — no per-person mailbox work ever.
 
 ---
 
@@ -265,29 +284,48 @@ Allow up to ~30 minutes for propagation. See Appendix C if mail later fails with
 
 ---
 
-## Step 7 — Create the staff security group
+## Step 7 — Populate and delegate the staff group
 
-Every page except `/practice-ice/request` requires membership in this group (architecture doc §6.5).
-It is a **different group** from Step 2's — that one scopes mailbox access, this one scopes app
-authorization. Reusing it would make every mailbox double as a staff account.
+`$StaffGroup` was created in Step 2 and already carries the Outlook Reviewer permission from Step 3.
+This step fills it and hands over its management. Membership in it is what every page except
+`/practice-ice/request` requires (architecture doc §6.5).
 
 ```powershell
-Connect-MgGraph -Scopes 'Group.ReadWrite.All'
+# 1. Add the people
+Add-DistributionGroupMember -Identity $StaffGroup -Member 'jane@yourclub.org'
+# ...repeat per staff/committee member
 
-$group = New-MgGroup -DisplayName $StaffGroup -MailEnabled:$false `
-    -MailNickname 'facility-scheduler-staff' -SecurityEnabled:$true
-$group.Id   # <- this is StaffAccess:StaffGroupId
+# 2. Delegate management to someone who is not an Entra admin
+Set-DistributionGroup -Identity $StaffGroup -ManagedBy 'jane@yourclub.org' `
+    -MemberJoinRestriction Closed -MemberDepartRestriction Closed
+
+# 3. Get the object id for StaffAccess:StaffGroupId
+(Get-DistributionGroup -Identity $StaffGroup).ExternalDirectoryObjectId
 ```
 
-Record `$group.Id`. It must be the **object ID (a GUID)**. A display name here produces no error at
-all — just a silent, permanent "nobody is staff."
+`ExternalDirectoryObjectId` on an Exchange recipient *is* its Entra object ID — the same GUID the
+Entra portal shows — so this needs no separate Graph connection.
 
-Then:
+Two things to get right:
 
-1. **Add every staff and committee member** as a Member.
-2. **Assign at least one Owner who is not an Entra admin.** Owners can manage membership with no
-   Entra admin role, which is the entire point of doing it this way — the tenant is Entra ID Free,
-   where the native alternatives all route staff changes back through the two Entra admins.
+- **The value must be the object ID (a GUID)**, not the display name and not the SMTP address. A
+  display name here produces no error at all — just a silent, permanent "nobody is staff."
+- **The `ManagedBy` owner needs no Entra admin role** to add and remove members, which is the entire
+  point of doing it this way. The tenant is Entra ID Free, where every native alternative routes each
+  staff change back through the two Entra admins.
+
+`MemberJoinRestriction Closed` stops anyone adding themselves to a group that grants staff access.
+The default for a new distribution group is `Closed`, but it is worth setting explicitly here rather
+than inheriting it.
+
+> **Verify this one before trusting it.** `$StaffGroup` is mail-enabled so Step 3 can use it, and the
+> app's staff check (`checkMemberGroups`) resolves groups by directory object ID, which a
+> mail-enabled security group has like any other. That should work, but it has not been confirmed
+> against a real tenant — and if it doesn't, the failure mode is the staff lockout in Appendix C.
+> Step 13's first item is the check. If a mail-enabled group turns out not to resolve, create a plain
+> Entra security group for `StaffAccess:StaffGroupId` and leave the mail-enabled one holding only the
+> Step 3 calendar permission.
+
 
 ---
 
@@ -432,7 +470,7 @@ Work through this in order; each item has caught a real failure at least once.
 
 - [ ] **A staff account signs in and `/calendar` loads real data for every sheet.** Signs in but
       every page denies → Appendix C.
-- [ ] **A non-staff test account** (signed in, deliberately not in the Step 7 group) can reach
+- [ ] **A non-staff test account** (signed in, deliberately not in `$StaffGroup`) can reach
       `/practice-ice/request`, and is denied on `/calendar`, `/settings`, `/club-events`, and
       `/practice-ice/approvals`. *This has never been verified against a real tenant* (architecture
       doc §8) — do not skip it before inviting members as guests.
@@ -476,7 +514,7 @@ this webhook (architecture doc §4.8). Without it configured, they simply never 
 
 | Task | What's involved | Needs an Entra admin? |
 |---|---|---|
-| Add or remove a staff member | Add/remove them in the Step 7 group. Takes effect **on their next sign-in** — tell them to sign out and back in. | No — a group Owner can do it |
+| Add or remove a staff member | Add/remove them in `$StaffGroup`. Takes effect **on their next sign-in** — tell them to sign out and back in. | No — a group Owner can do it |
 | Add a new ice sheet | New mailbox (Step 1 + 1a + 1b), add to `$MailboxGroup` (Step 2), Reviewer permission (Step 3), re-run the category script (Step 8), add one `Facility__SheetMailboxLocalParts__N` row (Step 11) | No |
 | Rotate the client secret | New secret in Step 4a, update `Graph__ClientSecret` and `AzureAd__ClientSecret` (Step 11) | Application Administrator |
 | Renew before expiry | Watch the Step 4a expiry date — an expired secret is a full outage | Application Administrator |
