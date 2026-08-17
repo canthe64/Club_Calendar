@@ -18,6 +18,12 @@
             <span @onclick="GoToday" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 5px">Today</span>
             <span @onclick="GoNext" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 5px">&#8250;</span>
         </span>
+        @* Jump straight to a date instead of stepping a month at a time. The browser's own date
+           picker rather than a custom popup calendar - it's keyboard-accessible and localised for
+           free, and this is the authenticated app so there's no D15 constraint against it. Bound
+           straight to the anchor date, so it also *reflects* where you are as you use ‹/Today/›. *@
+        <input type="date" @bind="_anchorDate" @bind:after="LoadAsync" aria-label="Jump to date"
+               style="border:1px solid #d7dfe5;border-radius:6px;padding:5px 9px;font-size:13px;color:#1e2a33;font-family:inherit;cursor:pointer" />
         <div style="display:flex;border:1px solid #d7dfe5;border-radius:6px;overflow:hidden;font-size:13px;font-weight:600;margin-left:auto;cursor:pointer">
             <span @onclick='() => SetView(ViewMode.Month)' style="padding:6px 16px;background:@(View == ViewMode.Month ? "#2d5f8a" : "#fff");color:@(View == ViewMode.Month ? "#fff" : "#2d5f8a")">Month</span>
             <span @onclick='() => SetView(ViewMode.Week)' style="padding:6px 16px;background:@(View == ViewMode.Week ? "#2d5f8a" : "#fff");color:@(View == ViewMode.Week ? "#fff" : "#2d5f8a")">Week</span>

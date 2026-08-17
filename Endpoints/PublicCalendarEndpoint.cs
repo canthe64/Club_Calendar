@@ -55,7 +55,7 @@ public static class PublicCalendarEndpoint
             {
                 ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
                 ViewMode.Day => await RenderDayPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
-                _ => await RenderMonthPageAsync(ParseMonth(month, today) ?? today, today, filter, service, ct),
+                _ => await RenderMonthPageAsync(ResolveMonthAnchor(month, date, today), today, filter, service, ct),
             };
             return Results.Content(html, "text/html; charset=utf-8");
         })
@@ -89,6 +89,16 @@ public static class PublicCalendarEndpoint
         var max = new DateTime(today.Year + 2, today.Month, 1);
         return parsed < min ? min : parsed > max ? max : parsed;
     }
+
+    /// <summary>
+    /// Which date Month view anchors on. <c>month=</c> wins when present, since that's what every
+    /// Prev/Today/Next and Month-tab link emits. <c>date=</c> is the fallback so the date-jump
+    /// picker works here too: it produces a full day, and Month view only needs the month that day
+    /// falls in. Without this, a jump in Month view submitted <c>date=</c>, hit a handler reading
+    /// only <c>month=</c>, and silently landed back on today.
+    /// </summary>
+    internal static DateTime ResolveMonthAnchor(string? month, string? date, DateTime today) =>
+        ParseMonth(month, today) ?? ParseDate(date, today) ?? today;
 
     // Same clamping rationale as ParseMonth, applied to Week/Day's ?date= parameter.
     internal static DateTime? ParseDate(string? date, DateTime today)
@@ -147,26 +157,42 @@ public static class PublicCalendarEndpoint
     // selected (the common case - a member only toggled Club Events, or hasn't excluded anything) since
     // ParseFilter already treats "no categories present" as "all" - listing every one explicitly would
     // just make the URL longer without changing what it means.
-    internal static string FilterQuery(FilterState filter)
+    internal static string FilterQuery(FilterState filter) =>
+        string.Concat(FilterParams(filter).Select(p => $"&{p.Name}={p.Value}"));
+
+    /// <summary>
+    /// The same filter state as hidden form fields. A GET form <em>replaces</em> the entire query
+    /// string on submit, so a form that needs to preserve the filter (the date jump below) can't
+    /// lean on <see cref="FilterQuery"/> in its action attribute - the params would be discarded.
+    /// </summary>
+    private static string FilterHiddenFields(FilterState filter) =>
+        string.Concat(FilterParams(filter).Select(p =>
+            $"""<input type="hidden" name="{p.Name}" value="{H(p.Value)}">"""));
+
+    // One source of truth for what the filter serialises to, consumed by both renderers above -
+    // deliberately not two hand-maintained copies of the same rule, which is how a policy and its
+    // duplicate drifted apart in D75.
+    private static IEnumerable<(string Name, string Value)> FilterParams(FilterState filter)
     {
         if (!filter.IsFiltered)
         {
-            return "";
+            yield break;
         }
 
-        var sb = new StringBuilder("&filtered=1");
+        yield return ("filtered", "1");
+
         if (!filter.Categories.SetEquals(AllCategories))
         {
             foreach (var category in filter.Categories)
             {
-                sb.Append("&categories=").Append(category);
+                yield return ("categories", category.ToString());
             }
         }
+
         if (filter.ShowClubEvents)
         {
-            sb.Append("&showClubEvents=1");
+            yield return ("showClubEvents", "1");
         }
-        return sb.ToString();
     }
 
     private static PublicMonthView ApplyFilter(PublicMonthView view, FilterState filter) => view with
@@ -244,8 +270,10 @@ public static class PublicCalendarEndpoint
     // a Month/Week/Day toggle. representativeDate is the anchor used to translate the CURRENT view
     // into each toggle target's own query-param scheme, so switching views doesn't lose context
     // (e.g. switching from Month to Week lands on the week containing the displayed month's 1st).
-    private static string NavBar(string titleText, string prevHref, string todayHref, string nextHref, ViewMode current, DateTime representativeDate, string filterQuery)
+    private static string NavBar(string titleText, string prevHref, string todayHref, string nextHref, ViewMode current, DateTime representativeDate, FilterState filter)
     {
+        var filterQuery = FilterQuery(filter);
+
         string Tab(string label, ViewMode mode, string href)
         {
             var style = mode == current
@@ -262,6 +290,7 @@ public static class PublicCalendarEndpoint
                     <a href="{todayHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">Today</a>
                     <a href="{nextHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">&#8250;</a>
                 </span>
+                {DateJumpForm(current, representativeDate, filter)}
                 <span style="display:flex;gap:4px;margin-left:auto">
                     {Tab("Month", ViewMode.Month, MonthHref(representativeDate, filterQuery))}
                     {Tab("Week", ViewMode.Week, WeekHref(representativeDate, filterQuery))}
@@ -271,6 +300,31 @@ public static class PublicCalendarEndpoint
             <div style="font-size:13px;color:#90a0ab;margin-bottom:12px">What's on the ice, at a glance - tap an entry to see its time.</div>
             """;
     }
+
+    /// <summary>
+    /// Jump straight to a date rather than stepping a month at a time. A plain GET form, matching
+    /// how every other control on this page navigates (D66) - no client-side routing.
+    ///
+    /// Always submits <c>date=</c> (never <c>month=</c>), even in Month view, because a date picker
+    /// yields a day and <c>ParseDate</c> then clamps and anchors the month from it - one param to
+    /// handle instead of branching on the current view. The current filter rides along as hidden
+    /// fields, since a GET submit discards whatever was in the query string before it.
+    ///
+    /// The picker auto-submits on change so it behaves like the staff calendar's; the Go button is
+    /// the no-JS fallback and stays functional on its own. This page already ships small amounts of
+    /// JS for the loading overlay (D23) and chip popups, so this introduces no new dependency - and
+    /// D15 constrains it to being a plain endpoint, not to being JS-free.
+    /// </summary>
+    private static string DateJumpForm(ViewMode current, DateTime anchor, FilterState filter) => $"""
+        <form method="get" style="display:flex;align-items:center;gap:6px">
+            <input type="hidden" name="view" value="{current.ToString().ToLowerInvariant()}">
+            {FilterHiddenFields(filter)}
+            <input type="date" name="date" value="{anchor:yyyy-MM-dd}" aria-label="Jump to date"
+                   onchange="this.form.submit()"
+                   style="border:1px solid #d7dfe5;border-radius:6px;padding:4px 8px;font-size:13px;color:#1e2a33;font-family:inherit;cursor:pointer">
+            <button type="submit" style="border:1px solid #d7dfe5;background:#fff;color:#2d5f8a;border-radius:6px;padding:4px 10px;font-size:13px;font-weight:600;cursor:pointer">Go</button>
+        </form>
+        """;
 
     // The SHOW row - a plain GET form (no client-side JS), same pattern /public/search's own filter
     // form already uses. Hidden fields carry the current view/date so applying a filter doesn't also
@@ -333,7 +387,7 @@ public static class PublicCalendarEndpoint
 
         sb.Append(NavBar(anchorMonth.ToString("MMMM yyyy"),
             MonthHref(anchorMonth.AddMonths(-1), filterQuery), MonthHref(today, filterQuery), MonthHref(anchorMonth.AddMonths(1), filterQuery),
-            ViewMode.Month, anchorMonth, filterQuery));
+            ViewMode.Month, anchorMonth, filter));
         sb.Append(AppendCategoryFilterForm(ViewMode.Month, anchorMonth, filter));
 
         sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:12px">""");
@@ -428,7 +482,7 @@ public static class PublicCalendarEndpoint
             : $"{weekStart:MMM d, yyyy} - {weekEnd:MMM d, yyyy}";
         sb.Append(NavBar(title,
             WeekHref(weekStart.AddDays(-7), filterQuery), WeekHref(today, filterQuery), WeekHref(weekStart.AddDays(7), filterQuery),
-            ViewMode.Week, weekStart, filterQuery));
+            ViewMode.Week, weekStart, filter));
         sb.Append(AppendCategoryFilterForm(ViewMode.Week, weekStart, filter));
 
         AppendHourlyGrid(sb, days, view, showDayHeaders: true);
@@ -447,7 +501,7 @@ public static class PublicCalendarEndpoint
 
         sb.Append(NavBar(day.ToString("dddd, MMMM d, yyyy"),
             DayHref(day.AddDays(-1), filterQuery), DayHref(today, filterQuery), DayHref(day.AddDays(1), filterQuery),
-            ViewMode.Day, day, filterQuery));
+            ViewMode.Day, day, filter));
         sb.Append(AppendCategoryFilterForm(ViewMode.Day, day, filter));
 
         AppendHourlyGrid(sb, [day], view, showDayHeaders: false);

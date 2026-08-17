@@ -73,6 +73,42 @@ public class PublicCalendarEndpointTests
     }
 
     [Fact]
+    public void ResolveMonthAnchor_MonthParamWins_WhenBothArePresent()
+    {
+        // Every Prev/Today/Next and Month-tab link emits month=; the date-jump form emits date=.
+        // When a link carries both, the explicit month is the intent.
+        var result = PublicCalendarEndpoint.ResolveMonthAnchor("2026-09", "2026-11-15", Today);
+
+        Assert.Equal(new DateTime(2026, 9, 1), result);
+    }
+
+    [Fact]
+    public void ResolveMonthAnchor_FallsBackToDate_SoTheDatePickerWorksInMonthView()
+    {
+        // Regression test: the date-jump picker submits date= in every view. Month view originally
+        // read only month=, so a jump there silently landed back on today.
+        var result = PublicCalendarEndpoint.ResolveMonthAnchor(null, "2026-11-15", Today);
+
+        Assert.Equal(new DateTime(2026, 11, 15), result);
+    }
+
+    [Fact]
+    public void ResolveMonthAnchor_NeitherPresent_FallsBackToToday()
+    {
+        Assert.Equal(Today, PublicCalendarEndpoint.ResolveMonthAnchor(null, null, Today));
+    }
+
+    [Fact]
+    public void ResolveMonthAnchor_StillClampsAnOutOfRangeDate()
+    {
+        // The date= fallback must not become a way around the clamping that bounds the anonymous
+        // cache-key/Graph-fanout surface.
+        var result = PublicCalendarEndpoint.ResolveMonthAnchor(null, "2099-01-01", Today);
+
+        Assert.Equal(Today.AddYears(2), result);
+    }
+
+    [Fact]
     public void ParseFilter_NoFilterMarker_DefaultsToEverythingShown()
     {
         // A bare link (no ?filtered= at all) must behave exactly like it did before category
