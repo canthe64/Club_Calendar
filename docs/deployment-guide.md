@@ -32,8 +32,22 @@ The Global Admin involvement is a single click in Step 5. Everything ongoing aft
 Install-Module ExchangeOnlineManagement -Scope CurrentUser
 ```
 
+```bash
+winget install --exact --id Microsoft.AzureCLI
+```
+
 Plus the **.NET 10 SDK** on whatever machine will build and publish the app, and the repo cloned
 locally.
+
+**The Azure CLI (`az`) is not the Azure PowerShell module.** `Install-Module Az` gives you `Get-AzWebApp`
+and friends; it does **not** give you the `az` command this guide uses in Steps 9a and 11. They are
+separate installs with confusingly similar names, and installing the wrong one produces "'az' is not
+recognized". After installing, open a new shell so the PATH change takes effect, then `az login`.
+
+Everything the `az` commands here do is also available in the portal, so the CLI is a convenience,
+not a hard requirement. If you prefer Azure PowerShell, note that `Set-AzWebApp -AppSettings`
+**replaces the entire settings collection** rather than merging — read the existing settings, add
+yours, and write the whole hashtable back, or you will silently wipe the other keys.
 
 ### Fill these in once and paste into each PowerShell session
 
@@ -375,7 +389,7 @@ registration once the app's URL exists.
 1. **[portal.azure.com](https://portal.azure.com) → App Services → + Create → Web App.**
 2. **Basics:**
    - **Resource Group:** create one, e.g. `facility-scheduler-rg`
-   - **Name:** globally unique; becomes `https://<name>.azurewebsites.net`
+   - **Name:** globally unique. This is *not* the whole hostname — see step 5 below.
    - **Publish:** Code · **Runtime stack:** .NET 10 (or latest offered)
    - **Operating System:** Linux or Windows both work; Linux is cheaper at the same tier
    - **Region:** nearest the facility
@@ -383,7 +397,16 @@ registration once the app's URL exists.
    breaks Blazor Server's persistent SignalR circuit, has no custom domain support, and caps Linux
    apps at **five concurrent web socket connections** before returning HTTP 429 — one circuit per
    signed-in user means that's a five-user ceiling.
-4. **Create**, then **Go to resource** and note the URL from the Overview blade.
+4. **Create**, then **Go to resource**.
+5. **Copy the "Default domain" from the Overview blade.** Azure appends a generated suffix and a
+   region segment to the name you chose, so the real hostname looks like
+   `myapp-a1b2c3d4.canadacentral-01.azurewebsites.net`, **not** `myapp.azurewebsites.net`. Every
+   `<default-domain>` placeholder below means this exact string. Getting it wrong is the most likely
+   cause of `AADSTS50011` at first sign-in, because the guessed hostname looks so plausible.
+
+   ```bash
+   az webapp show --name <your-app-name> --resource-group facility-scheduler-rg --query defaultHostName --output tsv
+   ```
 
 ### 9a. Turn on the settings Blazor Server needs
 
@@ -515,6 +538,12 @@ the app is stable, Deployment Center can generate a GitHub Actions workflow that
 up. An `InvalidOperationException` naming a specific setting means Step 10 missed one of the
 load-bearing keys — that's the fail-fast validation working, not a deployment failure.
 
+**Check the timestamp on any exception you find.** A failing app restarts on a loop, so the stream
+fills with identical copies of the same error. After correcting a setting and restarting, only an
+entry newer than the restart means anything — an older one is just the crash you already fixed. The
+exception also names the key in colon form (`StaffAccess:StaffGroupId`); the environment variable
+needs the double-underscore form (`StaffAccess__StaffGroupId`).
+
 You can't sign in yet: the app registration has no redirect URI until Step 12. Browsing to the app
 now will fail at the Microsoft sign-in page, which is expected.
 
@@ -538,8 +567,8 @@ settings go in together:
 
 1. **Add Redirect URI → Web** (older portal versions label this **+ Add a platform → Web**).
 2. Enter the redirect URIs, using the real URL from Step 9:
-   - `https://<name>.azurewebsites.net/signin-oidc`
-   - `https://<name>.azurewebsites.net/signout-callback-oidc`
+   - `https://<default-domain>/signin-oidc`
+   - `https://<default-domain>/signout-callback-oidc`
 3. In the same panel, under **Implicit grant and hybrid flows**, tick **ID tokens**. Leave **Access
    tokens** unchecked — the app has no use for implicit access tokens.
 4. **Configure / Save.** Effective immediately, no restart.
@@ -553,7 +582,7 @@ needed at all.
 ### Add the custom domain's URIs now if you know it
 
 Redirect URIs are a list, and the only rule is that whatever hostname the browser is actually on must
-appear in it. The `azurewebsites.net` pair is enough to sign in and work through Step 13 before DNS
+appear in it. The `<default-domain>` pair is enough to sign in and work through Step 13 before DNS
 is cut over.
 
 But registration doesn't check that a host resolves — so if the final domain name is already decided,
@@ -562,7 +591,7 @@ add its pair here too and Step 14's redirect-URI step becomes a no-op:
 - `https://booking.yourclub.org/signin-oidc`
 - `https://booking.yourclub.org/signout-callback-oidc`
 
-Keep both sets registered afterwards; having the `azurewebsites.net` pair still working is useful for
+Keep both sets registered afterwards; having the `<default-domain>` pair still working is useful for
 telling a DNS problem apart from an app problem.
 
 ### If the labels have moved again
@@ -573,8 +602,8 @@ writing `redirectUris` creates the Web platform exactly as the button does:
 ```json
 "web": {
     "redirectUris": [
-        "https://<name>.azurewebsites.net/signin-oidc",
-        "https://<name>.azurewebsites.net/signout-callback-oidc"
+        "https://<default-domain>/signin-oidc",
+        "https://<default-domain>/signout-callback-oidc"
     ],
     "implicitGrantSettings": {
         "enableAccessTokenIssuance": false,
@@ -595,7 +624,7 @@ the portal hides until a Web platform with at least one redirect URI exists.
 
 ## Step 13 — Verify
 
-Work through this in order, against `https://<name>.azurewebsites.net`; each item has caught a real
+Work through this in order, against `https://<default-domain>` (Step 9); each item has caught a real
 failure at least once. If you bind a custom domain in Step 14, re-run the first item afterwards
 against the new hostname — that's the only one the domain change can break.
 
@@ -626,7 +655,7 @@ against the new hostname — that's the only one the domain change can break.
 
 ## Step 14 — Bind a custom domain (optional, expected for production)
 
-Everything works on `https://<name>.azurewebsites.net` without this. Do it when DNS is ready — it
+Everything works on `https://<default-domain>` without this. Do it when DNS is ready — it
 doesn't block anything above.
 
 1. **Custom domains → + Add** → enter the domain → add the TXT/CNAME record Azure shows you at your
@@ -636,7 +665,7 @@ doesn't block anything above.
 4. **Add the new domain's two redirect URIs** in the app registration (Step 12), or sign-in fails
    with `AADSTS50011` on the custom domain. Skip if you already registered them there.
 5. **Re-run Step 13's first item** on the custom domain: sign in and confirm `/calendar` loads.
-   Keep the `azurewebsites.net` URIs registered — having both hostnames working is what lets you
+   Keep the `<default-domain>` URIs registered — having both hostnames working is what lets you
    tell a DNS problem apart from an app problem.
 
 ---
@@ -737,7 +766,9 @@ so sign-in completes normally and this looks like an authentication problem when
 
 **The Azure log stream will not tell you why.** Nothing on this path writes to `ILogger`. The answer
 is in the app's own log file, and the Settings page that would show it is itself behind the policy
-you're locked out of. Read the file directly over SSH or Kudu (`https://<app>.scm.azurewebsites.net`):
+you're locked out of. Read the file directly over SSH or Kudu — the Kudu host is the default domain
+from Step 9 with `.scm` inserted after the app segment, e.g.
+`https://myapp-a1b2c3d4.scm.canadacentral-01.azurewebsites.net`:
 
 ```bash
 tail -50 <AppLog:LogDirectory>/app-*.log
@@ -782,6 +813,12 @@ the time instead.
 ### `AADSTS50011: The redirect URI … does not match`
 
 Step 12, or Step 14 if you've just bound a custom domain.
+
+**Check the hostname character by character before assuming the URI is missing.** Azure's default
+domain is the app name plus a generated suffix plus a region segment
+(`myapp-a1b2c3d4.canadacentral-01.azurewebsites.net`), and a registration built from the plausible-
+looking `myapp.azurewebsites.net` fails exactly this way. Step 9 has the `az` command that prints
+the real value.
 
 ### The app won't start at all
 

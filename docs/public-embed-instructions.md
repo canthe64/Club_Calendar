@@ -9,7 +9,8 @@ WordPress site - it's plain HTML/JS, portable to either):
 ```
 
 Replace `YOUR-APP-HOSTNAME` with wherever this app is actually hosted (e.g.
-`facilityscheduler.azurewebsites.net`, or a custom domain if one gets set up later). That's the
+`facilityscheduler-a1b2c3d4.westus-01.azurewebsites.net` — Azure's default domain carries a
+generated suffix — or a custom domain if one gets set up later). That's the
 only configuration needed - the widget figures out the API host itself from the script tag it was
 loaded from.
 
