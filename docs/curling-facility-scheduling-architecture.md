@@ -179,10 +179,10 @@ Every piece of booking data lives on the event object:
 | Business state | `showAs` | Category | Blocks other bookings? |
 |---|---|---|---|
 | Open / available | *(no event)* | — | No |
-| Hold | `tentative` | Group Event only | **Yes** (app-enforced) |
+| Hold | `tentative` | Group Event, or Practice Ice (§5.4.4) | **Yes** (app-enforced) |
 | Confirmed | `busy` | Any | Yes |
 
-- **Only Group Event can be a Hold** — every other category is always a hard (Confirmed) booking, enforced client-side (the Hold/Confirmed toggle and phone/email fields are hidden entirely for non-Group-Event categories) and coerced server-side.
+- **Group Event and Practice Ice are the only categories that can be a Hold.** On the staff booking form, the Hold/Confirmed toggle and phone/email fields are shown only for Group Event — every other staff-created category is always a hard (Confirmed) booking, enforced client-side and coerced server-side. Practice Ice is the one exception to that staff-facing rule, and it doesn't come through this form at all: a member's practice ice request (§5.4.4) writes a `PracticeIce`+`Hold` booking directly, pending staff approval via `/practice-ice/approvals`, which confirms or declines it. Conflict enforcement itself doesn't distinguish Hold from Confirmed either way — any existing event, of any category or state, blocks a new one on that sheet (§6.1); "Hold" is a business-state label on top of that, not a weaker booking.
 - **No category defaults on a new booking, series, or Club Event** — staff must explicitly pick one; Save/Create is disabled with a validation message until they do. This was added after live-testing feedback surfaced confusion from a silently-preselected category. Editing an existing item still loads its real stored category, unaffected.
 - **Hold vs. Confirmed also has no default** — a new Group Event booking's state is `null` until staff explicitly picks Hold or Confirmed.
 - Confirming a booking = update `showAs` `tentative` → `busy` on the existing event.
