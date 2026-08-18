@@ -5,15 +5,15 @@
 @if (IsOpen)
 {
     <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
-        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:620px;max-width:94vw;max-height:88vh;overflow:auto">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:720px;max-width:94vw;max-height:88vh;overflow:auto">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                <span style="font-size:15px;font-weight:600;color:#1e2a33">Create Recurring Booking</span>
-                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:14px;cursor:pointer;padding:2px 6px">&#10005;</span>
+                <span style="font-size:17px;font-weight:600;color:#1e2a33">Create Recurring Booking</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:16px;cursor:pointer;padding:2px 6px">&#10005;</span>
             </div>
 
             @if (Step == 1)
             {
-                <div style="display:flex;flex-direction:column;gap:11px;font-size:11px;color:#5a7183;margin-top:10px">
+                <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;color:#5a7183;margin-top:10px">
                     <div>
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
                         <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -29,7 +29,7 @@
                     </div>
 
                     <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Event Title</div>
-                        <input value="@Draft.RenterName" @oninput="e => Draft.RenterName = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                        <input value="@Draft.RenterName" @oninput="e => Draft.RenterName = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
 
                     <div>
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Sheets <span style="font-weight:400;color:#90a0ab">— tap to toggle</span></div>
@@ -38,7 +38,7 @@
                             {
                                 var isSelected = Draft.SelectedSheets.Contains(sheet);
                                 <span @onclick="() => ToggleSheet(sheet)"
-                                      style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:60px;text-align:center;border-radius:6px;font-weight:600;cursor:pointer">
+                                      style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:72px;text-align:center;border-radius:6px;font-weight:600;cursor:pointer">
                                     @DayGridSheetLabel(sheet)
                                 </span>
                             }
@@ -53,20 +53,20 @@
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">First date</div>
                             <input type="date" value="@Draft.FirstDate.ToString("yyyy-MM-dd")" @onchange="OnFirstDateChanged"
-                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box">
+                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
                         </div>
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Last date</div>
                             <input type="date" value="@Draft.LastDate.ToString("yyyy-MM-dd")" @onchange="OnLastDateChanged"
-                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box">
+                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
                         </div>
                     </div>
-                    <div style="font-size:10px;color:#90a0ab">Repeats weekly on @Draft.FirstDate.ToString("dddd")s, based on the first date above.</div>
+                    <div style="font-size:12px;color:#90a0ab">Repeats weekly on @Draft.FirstDate.ToString("dddd")s, based on the first date above.</div>
 
                     <div style="display:flex;gap:8px;align-items:end">
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
-                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                                 @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
                                     <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
@@ -75,7 +75,7 @@
                         </div>
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
-                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                                 @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
                                     <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
@@ -101,17 +101,17 @@
                         </div>
                         <div style="display:flex;gap:8px">
                             <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Phone <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                                <input value="@Draft.RenterPhone" @oninput="e => Draft.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                                <input value="@Draft.RenterPhone" @oninput="e => Draft.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                             <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Email <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                                <input value="@Draft.RenterEmail" @oninput="e => Draft.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                                <input value="@Draft.RenterEmail" @oninput="e => Draft.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                         </div>
                     }
 
                     <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Notes <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                        <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                        <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                 </div>
 
-                <div style="display:flex;gap:8px;margin-top:16px;font-size:12px;font-weight:600">
+                <div style="display:flex;gap:8px;margin-top:16px;font-size:14px;font-weight:600">
                     <span @onclick="HandlePreviewClick" style="flex:1;text-align:center;background:@(CanPreview ? "#c62f2f" : "#e8b4ae");color:#fff;padding:8px 0;border-radius:6px;cursor:@(CanPreview ? "pointer" : "default")">
                         @(IsLoadingPreview ? "Checking..." : $"Review {Draft.ComputeCandidateDates().Count} dates →")
                     </span>
@@ -119,24 +119,24 @@
                 </div>
                 @if (IsLoadingPreview)
                 {
-                    <div style="font-size:10px;color:#5a7183;margin-top:6px">Checking availability...</div>
+                    <div style="font-size:12px;color:#5a7183;margin-top:6px">Checking availability...</div>
                 }
                 else if (!HasValidSelection)
                 {
-                    <div style="font-size:10px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
+                    <div style="font-size:12px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
                 }
             }
             else
             {
-                <div style="font-size:11px;color:#5a7183;margin:10px 0">
+                <div style="font-size:13px;color:#5a7183;margin:10px 0">
                     <b style="color:#1e2a33">@(string.IsNullOrWhiteSpace(Draft.RenterName) ? Draft.Category.ToString() : Draft.RenterName)</b>
                     · @string.Join(", ", Draft.SelectedSheets.Select(DayGridSheetLabel))
                     · @CalendarStyles.FormatMinutes(Draft.StartMinutes)-@CalendarStyles.FormatMinutes(Draft.EndMinutes)
                 </div>
-                <div style="display:flex;align-items:center;gap:6px;background:@(ActiveConflictCount == 0 ? "#eaf6ec" : "#fdf1f0");border:1px solid @(ActiveConflictCount == 0 ? "#a8d5b5" : "#e8b4ae");border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:11px;font-weight:600;color:@(ActiveConflictCount == 0 ? "#2c7a43" : "#a02c21")">
+                <div style="display:flex;align-items:center;gap:6px;background:@(ActiveConflictCount == 0 ? "#eaf6ec" : "#fdf1f0");border:1px solid @(ActiveConflictCount == 0 ? "#a8d5b5" : "#e8b4ae");border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:13px;font-weight:600;color:@(ActiveConflictCount == 0 ? "#2c7a43" : "#a02c21")">
                     @(ActiveConflictCount == 0 ? "✓ No conflicts — clear to create" : $"⚠ {ActiveConflictCount} date(s) still have conflicts")
                 </div>
-                <div style="display:flex;flex-direction:column;gap:5px;font-size:11.5px;max-height:340px;overflow:auto">
+                <div style="display:flex;flex-direction:column;gap:5px;font-size:13.5px;max-height:340px;overflow:auto">
                     @foreach (var date in Draft.ComputeCandidateDates())
                     {
                         var isSkipped = Draft.SkippedDates.Contains(date);
@@ -146,20 +146,20 @@
                             <span style="display:flex;gap:8px;align-items:center">
                                 @if (hasConflict && !isSkipped)
                                 {
-                                    <span style="font-size:10px;color:#a02c21">conflicts with @conflictList!.Count booking(s)</span>
+                                    <span style="font-size:12px;color:#a02c21">conflicts with @conflictList!.Count booking(s)</span>
                                 }
-                                <span @onclick="() => ToggleSkip(date)" style="border:1px solid #d7dfe5;color:#2d5f8a;border-radius:5px;padding:2px 9px;font-weight:600;font-size:10.5px;cursor:pointer">@(isSkipped ? "Include" : "Skip")</span>
+                                <span @onclick="() => ToggleSkip(date)" style="border:1px solid #d7dfe5;color:#2d5f8a;border-radius:5px;padding:2px 9px;font-weight:600;font-size:12.5px;cursor:pointer">@(isSkipped ? "Include" : "Skip")</span>
                             </span>
                         </div>
                     }
                 </div>
-                <div style="display:flex;gap:8px;margin-top:14px;font-size:12px;font-weight:600">
+                <div style="display:flex;gap:8px;margin-top:14px;font-size:14px;font-weight:600">
                     <span @onclick="HandleCreateClick" style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : "#c62f2f");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving ? "default" : "pointer")">
                         @(IsSaving ? "Creating..." : $"Create series — {Draft.ComputeCandidateDates().Count - Draft.SkippedDates.Count} dates")
                     </span>
                     <span @onclick="() => OnBack.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 14px;border-radius:6px;cursor:pointer">&#8592; Back</span>
                 </div>
-                <div style="font-size:10px;color:#90a0ab;margin-top:8px">Skipping is always your explicit choice — conflicts are flagged, never auto-skipped.</div>
+                <div style="font-size:12px;color:#90a0ab;margin-top:8px">Skipping is always your explicit choice — conflicts are flagged, never auto-skipped.</div>
             }
         </div>
     </div>

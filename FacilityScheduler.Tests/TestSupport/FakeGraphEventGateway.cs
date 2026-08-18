@@ -18,8 +18,11 @@ namespace FacilityScheduler.Tests.TestSupport;
 ///    the read step of a check-then-act sequence, so a concurrency test can prove SheetLocks/
 ///    ExternalIdLocks actually serialize callers rather than passing by sheer luck on fast, fully
 ///    synchronous fake I/O.
-/// Recurring-series instance expansion (GetInstancesAsync) is deliberately NOT modeled - no test in
-/// this suite currently exercises CreateSeriesAsync's excluded-date deletion path.
+/// Recurring series are modeled for weekly patterns only - the one shape CreateSeriesAsync creates.
+/// A stored master expands into occurrences on read (calendarView never returns the master itself,
+/// matching real Graph), individual occurrences can be deleted without disturbing the rest, and
+/// GetInstancesAsync returns what is actually live. This is what makes UpdateSeriesAsync's
+/// add-a-sheet conflict check testable at all.
 /// </summary>
 public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
 {
@@ -46,6 +49,67 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
     /// snapshot it (Select(Clone).ToList()) instead, or a concurrent Add/Remove can tear the read.</summary>
     private List<Event> Mailbox(string mailbox) =>
         _mailboxes.TryGetValue(mailbox, out var list) ? list : _mailboxes[mailbox] = [];
+
+    /// <summary>Occurrence ids this fake has been told to delete. Real Graph removes a single
+    /// occurrence from an otherwise intact series; there is no stored object to remove here, so the
+    /// exclusion is recorded instead and applied on every subsequent expansion.</summary>
+    private readonly HashSet<string> _deletedOccurrences = [];
+
+    private const string OccurrenceIdSeparator = "::";
+
+    /// <summary>
+    /// Weekly-only expansion of a stored series master into the occurrences Graph would return.
+    /// Weekly is the only recurrence this app creates (SheetBookingService.CreateSeriesAsync), so
+    /// modelling just that keeps the fake honest without reimplementing Graph's pattern engine.
+    /// Caller must hold <see cref="_gate"/>.
+    /// </summary>
+    private List<Event> ExpandSeries(Event master)
+    {
+        var expanded = new List<Event>();
+        var range = master.Recurrence?.Range;
+        if (master.Id is null || range?.EndDate is not { } endDate || master.Start?.DateTime is null || master.End?.DateTime is null)
+        {
+            return expanded;
+        }
+
+        // Expand in facility-local wall-clock, not by adding 7 days to a UTC instant. Two reasons,
+        // both real: Graph itself recurs on local wall-clock (a 7pm league stays at 7pm across a DST
+        // boundary), and the recurrence Range's EndDate is a local calendar date. Comparing a UTC
+        // instant against it silently drops the final occurrence of any evening booking, since 7pm
+        // Pacific is already tomorrow in UTC - which is exactly what this originally did.
+        var duration = ToUtc(master.End) - ToUtc(master.Start);
+        var localStart = TimeZoneInfo.ConvertTimeFromUtc(ToUtc(master.Start), zone);
+        var lastLocalDate = new DateTime(endDate.Year, endDate.Month, endDate.Day);
+
+        for (var offset = 0; localStart.AddDays(offset).Date <= lastLocalDate; offset += 7)
+        {
+            var occurrenceLocalStart = localStart.AddDays(offset);
+            var id = $"{master.Id}{OccurrenceIdSeparator}{occurrenceLocalStart:yyyyMMdd}";
+            if (_deletedOccurrences.Contains(id))
+            {
+                continue;
+            }
+
+            var occurrenceUtcStart = TimeZoneInfo.ConvertTimeToUtc(
+                DateTime.SpecifyKind(occurrenceLocalStart, DateTimeKind.Unspecified), zone);
+
+            var occurrence = Clone(master);
+            occurrence.Id = id;
+            occurrence.SeriesMasterId = master.Id;
+            occurrence.Recurrence = null;
+            occurrence.Start = new DateTimeTimeZone { DateTime = occurrenceUtcStart.ToString("s"), TimeZone = "UTC" };
+            occurrence.End = new DateTimeTimeZone { DateTime = occurrenceUtcStart.Add(duration).ToString("s"), TimeZone = "UTC" };
+            expanded.Add(occurrence);
+        }
+
+        return expanded;
+    }
+
+    /// <summary>Caller must hold <see cref="_gate"/>. What a calendarView actually contains: one-off
+    /// events as stored, and recurring masters replaced by their occurrences - the master itself is
+    /// never returned by calendarView in real Graph.</summary>
+    private List<Event> ExpandedView(string mailbox) =>
+        Mailbox(mailbox).SelectMany(e => e.Recurrence is null ? [e] : ExpandSeries(e)).ToList();
 
     private DateTime ToUtc(DateTimeTimeZone? dtz)
     {
@@ -77,7 +141,7 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
 
         lock (_gate)
         {
-            return Mailbox(mailbox).Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start).Select(Clone).ToList();
+            return ExpandedView(mailbox).Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start).Select(Clone).ToList();
         }
     }
 
@@ -188,6 +252,17 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
     {
         lock (_gate)
         {
+            // Deleting one occurrence of a series removes only that date, leaving the master and
+            // every other occurrence intact - the excluded-dates path in CreateSeriesAsync and the
+            // gap-mirroring in UpdateSeriesAsync both depend on this behavior.
+            if (eventId.Contains(OccurrenceIdSeparator, StringComparison.Ordinal))
+            {
+                var masterId = eventId[..eventId.IndexOf(OccurrenceIdSeparator, StringComparison.Ordinal)];
+                _ = Mailbox(mailbox).FirstOrDefault(e => e.Id == masterId) ?? throw NotFound();
+                _deletedOccurrences.Add(eventId);
+                return Task.CompletedTask;
+            }
+
             var list = Mailbox(mailbox);
             var found = list.FirstOrDefault(e => e.Id == eventId) ?? throw NotFound();
             list.Remove(found);
@@ -195,8 +270,25 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
         }
     }
 
-    public Task<List<Event>> GetInstancesAsync(string mailbox, string eventId, string startUtc, string endUtc, CancellationToken ct = default) =>
-        Task.FromResult(new List<Event>());
+    public Task<List<Event>> GetInstancesAsync(string mailbox, string eventId, string startUtc, string endUtc, CancellationToken ct = default)
+    {
+        var start = DateTime.Parse(startUtc, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+        var end = DateTime.Parse(endUtc, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal);
+
+        lock (_gate)
+        {
+            var master = Mailbox(mailbox).FirstOrDefault(e => e.Id == eventId);
+            if (master?.Recurrence is null)
+            {
+                return Task.FromResult(new List<Event>());
+            }
+
+            return Task.FromResult(ExpandSeries(master)
+                .Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start)
+                .Select(Clone)
+                .ToList());
+        }
+    }
 
     // Real Graph normalizes whatever local-time-plus-zone an event is written with into UTC
     // internally, and the app's own FromGraphEvent unconditionally treats a read-back DateTime
@@ -226,6 +318,9 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
         End = e.End is null ? null : new DateTimeTimeZone { DateTime = e.End.DateTime, TimeZone = e.End.TimeZone },
         IsAllDay = e.IsAllDay,
         SeriesMasterId = e.SeriesMasterId,
+        // Reference-copied, not deep-cloned: nothing in these tests mutates a recurrence in place,
+        // and dropping it (as this did originally) makes every stored series look like a one-off.
+        Recurrence = e.Recurrence,
         Body = e.Body is null ? null : new ItemBody { ContentType = e.Body.ContentType, Content = e.Body.Content },
         SingleValueExtendedProperties = e.SingleValueExtendedProperties?.Select(p => new SingleValueLegacyExtendedProperty { Id = p.Id, Value = p.Value }).ToList()
     };

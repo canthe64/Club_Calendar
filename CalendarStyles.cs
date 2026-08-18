@@ -76,26 +76,40 @@ public static class CalendarStyles
         Enum.GetValues<BookingCategory>().Where(c => c != BookingCategory.Event).ToArray();
 
     /// <summary>
-    /// Club Events categories in the order they're offered in the picker. Deliberately its own list
-    /// rather than Enum.GetValues: ClubEventCategory is append-only because its ordinals are on the
-    /// public API wire (see that enum), so a new category lands at the end of the enum regardless of
-    /// where it belongs in front of a person. Meetings reads better beside Activities than after
-    /// Other. Every enum member must appear here - ClubEventCategoryTests enforces that.
+    /// Club Events categories in the order they're offered in the picker - deliberately its own list
+    /// rather than Enum.GetValues, so display order is a presentation decision rather than a
+    /// consequence of declaration order. Every enum member must appear here; ClubEventCategoryTests
+    /// enforces that, since one missing from this list would render on the calendar while being
+    /// impossible to select.
     /// </summary>
     public static readonly ClubEventCategory[] ClubEventCategories =
     [
-        ClubEventCategory.Bonspiel,
+        ClubEventCategory.OutOfTownBonspiels,
+        ClubEventCategory.Competitions,
         ClubEventCategory.Activities,
         ClubEventCategory.Meetings,
         ClubEventCategory.Closure,
         ClubEventCategory.Other
     ];
 
-    /// <summary>Club Events category colors: Bonspiel=orange (mirrors the Exchange master category
-    /// provisioned in Phase 1), Activities=teal, Meetings=cranberry, Closure=gray, Other=neutral.</summary>
+    /// <summary>
+    /// Display text for a club event category. Same split as CategoryLabel does for sheet
+    /// categories: the enum member name is the wire value (public API, and the literal string on
+    /// the Graph event), the label is what a person reads. Only multi-word categories need an entry.
+    /// </summary>
+    public static string ClubEventCategoryLabel(ClubEventCategory category) => category switch
+    {
+        ClubEventCategory.OutOfTownBonspiels => "Out of Town Bonspiels",
+        _ => category.ToString()
+    };
+
+    /// <summary>Club Events category colors: OutOfTownBonspiels=orange, Competitions=gold,
+    /// Activities=teal, Meetings=cranberry, Closure=gray, Other=neutral. Mirrored onto Exchange's
+    /// master category list by docs/provision-categories.ps1.</summary>
     public static string ClubEventCategoryColor(ClubEventCategory category) => category switch
     {
-        ClubEventCategory.Bonspiel => "#c2622f",
+        ClubEventCategory.OutOfTownBonspiels => "#c2622f",
+        ClubEventCategory.Competitions => "#b8860b",
         ClubEventCategory.Activities => "#2e7d8c",
         ClubEventCategory.Meetings => "#a63a5d",
         ClubEventCategory.Closure => "#6b7680",
@@ -105,7 +119,8 @@ public static class CalendarStyles
 
     public static string ClubEventCategoryLightBg(ClubEventCategory category) => category switch
     {
-        ClubEventCategory.Bonspiel => "#f7e8e0",
+        ClubEventCategory.OutOfTownBonspiels => "#f7e8e0",
+        ClubEventCategory.Competitions => "#f7f0d9",
         ClubEventCategory.Activities => "#e2eef0",
         ClubEventCategory.Meetings => "#f5e5eb",
         ClubEventCategory.Closure => "#eef0f2",

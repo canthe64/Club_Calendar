@@ -11,9 +11,13 @@ namespace FacilityScheduler.Domain;
 /// </summary>
 public enum ClubEventCategory
 {
-    Bonspiel,
+    /// <summary>Members travelling to a bonspiel elsewhere - deliberately NOT the same thing as
+    /// BookingCategory.Bonspiel, which is a bonspiel held on this club's own ice. The two sharing
+    /// the name "Bonspiel" confused staff in practice, hence the longer name here.</summary>
+    OutOfTownBonspiels,
     Activities,
     Closure,
     Other,
-    Meetings
+    Meetings,
+    Competitions
 }

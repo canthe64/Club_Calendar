@@ -4,24 +4,24 @@
 {
     var first = Group[0];
     <div style="position:fixed;inset:0;background:rgba(30,42,51,.55);display:flex;align-items:center;justify-content:center;z-index:60">
-        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.4);padding:18px 20px;width:380px">
-            <div style="font-size:14px;font-weight:600;color:#1e2a33;margin-bottom:4px">Cancel this booking?</div>
-            <div style="font-size:11px;color:#5a7183;margin-bottom:12px">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.4);padding:18px 20px;width:440px">
+            <div style="font-size:16px;font-weight:600;color:#1e2a33;margin-bottom:4px">Cancel this booking?</div>
+            <div style="font-size:13px;color:#5a7183;margin-bottom:12px">
                 @(string.IsNullOrWhiteSpace(first.RenterName) ? CalendarStyles.CategoryLabel(first.Category) : first.RenterName)
                 — @string.Join(", ", Group.Select(g => SheetLabel(g.SheetMailbox)))
                 · @first.Start.ToString("MMM d, h:mmtt")-@first.End.ToString("h:mmtt")
             </div>
-            <div style="display:flex;flex-direction:column;gap:7px;font-size:11.5px;font-weight:600">
+            <div style="display:flex;flex-direction:column;gap:7px;font-size:13.5px;font-weight:600">
                 @if (first.Category == BookingCategory.GroupEvent && first.State == BookingState.Confirmed)
                 {
                     <span @onclick="() => OnChoice.InvokeAsync(true)" style="border:1.5px solid #2d5f8a;background:#eaf1f8;color:#2d5f8a;border-radius:6px;padding:8px 12px;cursor:pointer">
                         Cancel &amp; reopen for group event<br>
-                        <span style="font-weight:400;font-size:10px;color:#5a7ba0">slot goes back to "Open" — publicly bookable again</span>
+                        <span style="font-weight:400;font-size:12px;color:#5a7ba0">slot goes back to "Open" — publicly bookable again</span>
                     </span>
                 }
                 <span @onclick="() => OnChoice.InvokeAsync(false)" style="border:1px solid #d7dfe5;color:#1e2a33;border-radius:6px;padding:8px 12px;cursor:pointer">
                     Cancel booking<br>
-                    <span style="font-weight:400;font-size:10px;color:#90a0ab">no longer offered — removes the slot entirely</span>
+                    <span style="font-weight:400;font-size:12px;color:#90a0ab">no longer offered — removes the slot entirely</span>
                 </span>
                 <span @onclick="() => OnKeep.InvokeAsync()" style="text-align:center;color:#90a0ab;padding:4px 0;cursor:pointer">Keep the booking</span>
             </div>

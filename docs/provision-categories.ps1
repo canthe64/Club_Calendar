@@ -42,11 +42,14 @@ $sheetCategories = @(
     @{ displayName = "Other";       color = "preset0"  }   # Red       - app #c0392b
 )
 $clubEventCategories = @(
-    @{ displayName = "Bonspiel";   color = "preset1"  },  # Orange    - app #c2622f
-    @{ displayName = "Activities"; color = "preset3"  },  # Yellow    - app #2e7d8c
-    @{ displayName = "Meetings";   color = "preset9"  },  # Cranberry - app #a63a5d
-    @{ displayName = "Closure";    color = "preset12" },  # Gray      - app #6b7680
-    @{ displayName = "Other";      color = "preset10" }   # Steel     - app #9c9690
+    # displayName must be the enum MEMBER NAME, not the display label - ClubEventService writes and
+    # parses the member name on the Graph event (so "OutOfTownBonspiels", not "Out of Town Bonspiels").
+    @{ displayName = "OutOfTownBonspiels"; color = "preset1"  },  # Orange    - app #c2622f
+    @{ displayName = "Competitions";       color = "preset3"  },  # Yellow    - app #b8860b
+    @{ displayName = "Activities";         color = "preset5"  },  # Teal      - app #2e7d8c
+    @{ displayName = "Meetings";           color = "preset9"  },  # Cranberry - app #a63a5d
+    @{ displayName = "Closure";            color = "preset12" },  # Gray      - app #6b7680
+    @{ displayName = "Other";              color = "preset10" }   # Steel     - app #9c9690
 )
 
 $results = @()

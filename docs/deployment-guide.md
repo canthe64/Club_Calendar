@@ -824,3 +824,78 @@ the real value.
 
 Check the log stream for an `InvalidOperationException` naming a specific setting — that's the
 fail-fast validation on the four load-bearing keys in Appendix A working as intended.
+
+---
+
+## Appendix D — Running locally
+
+For developing against the real tenant from a dev machine. Assumes Steps 1–8 are already done —
+local dev uses the same mailboxes, app registration, and staff group as the deployed app; only the
+web host differs.
+
+### Where each value comes from locally
+
+| Source | Carries | Tracked in git? |
+|---|---|---|
+| `appsettings.json` | Blank placeholders for every key | Yes — **leave the blanks alone**, never put real values here |
+| `appsettings.Development.json` | `Facility:*` and `AppLog:*` — non-secret, same for everyone | Yes |
+| **user-secrets** | Everything else: credentials, and `StaffAccess:StaffGroupId` | **No** — per machine *and* per user |
+
+The environment is `Development`, set by `Properties/launchSettings.json`, which is what makes
+`appsettings.Development.json` and user-secrets load at all. `dotnet run` and Visual Studio both pick
+this up automatically.
+
+### One-time setup on each dev machine
+
+Run from the project folder. **Colon form, not double underscore** — user-secrets is a JSON store;
+the `__` convention is only for environment variables.
+
+```bash
+dotnet user-secrets set "Graph:TenantId" "<directory (tenant) id>"
+dotnet user-secrets set "Graph:ClientId" "<application (client) id>"
+dotnet user-secrets set "Graph:ClientSecret" "<client secret>"
+dotnet user-secrets set "AzureAd:TenantId" "<same tenant id>"
+dotnet user-secrets set "AzureAd:ClientId" "<same client id>"
+dotnet user-secrets set "AzureAd:ClientSecret" "<same secret>"
+dotnet user-secrets set "StaffAccess:StaffGroupId" "<staff group object id>"
+```
+
+Optional, per feature:
+
+```bash
+dotnet user-secrets set "PracticeIce:ApproverDistributionEmail" "<your own mailbox, for local testing>"
+dotnet user-secrets set "PracticeIce:MailerMailbox" "<a mailbox in the access-policy group>"
+dotnet user-secrets set "Webhook:BreelySharedSecret" "<any value; only needed to exercise the webhook>"
+```
+
+Check what is actually set with `dotnet user-secrets list`.
+
+### Register the localhost redirect URIs, once
+
+Sign-in fails locally with `AADSTS50011` until the app registration knows about localhost. Add these
+alongside the deployed ones (Step 12) — they coexist, and localhost is exempt from the HTTPS-only
+rule Entra applies to other hosts:
+
+- `https://localhost:7218/signin-oidc`
+- `https://localhost:7218/signout-callback-oidc`
+
+The port comes from `launchSettings.json`; if you change the profile's `applicationUrl`, change these
+to match.
+
+### The failure you will actually hit
+
+```
+System.InvalidOperationException: StaffAccess:StaffGroupId is not configured.
+```
+
+**This is almost always a missing user-secret, not a wrong environment.** The four load-bearing keys
+are validated in order — `Facility:TenantDomain`, `Facility:SheetMailboxLocalParts`,
+`Facility:TimeZone`, then `StaffAccess:StaffGroupId` — and the first three come from the tracked
+`appsettings.Development.json`. If the app were somehow running as Production, it would fail on
+`Facility:TenantDomain` first. Reaching `StaffGroupId` proves Development config loaded fine and that
+one value simply isn't set on this machine.
+
+**This bites hardest on a second machine.** User-secrets live outside the repo
+(`%APPDATA%\Microsoft\UserSecrets\<UserSecretsId>\secrets.json`), so cloning gets you the code and
+none of the configuration. A machine set up before `StaffAccess:StaffGroupId` became load-bearing
+will have the six credential keys and not that one — which looks exactly like a broken build.

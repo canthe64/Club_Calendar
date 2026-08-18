@@ -3,29 +3,33 @@
 @if (IsOpen)
 {
     <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
-        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:400px;max-height:88vh;overflow:auto">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:460px;max-height:88vh;overflow:auto">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <span style="font-size:15px;font-weight:600;color:#1e2a33">@(Draft.EditingEvent is null ? "New Club Event" : "Edit Club Event")</span>
-                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:14px;cursor:pointer;padding:2px 6px">&#10005;</span>
+                <span style="font-size:17px;font-weight:600;color:#1e2a33">@(Draft.EditingEvent is null ? "New Club Event" : "Edit Club Event")</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:16px;cursor:pointer;padding:2px 6px">&#10005;</span>
             </div>
 
-            <div style="display:flex;flex-direction:column;gap:11px;font-size:11px;color:#5a7183">
+            <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;color:#5a7183">
                 <div>
                     <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
-                    <div style="display:flex;gap:6px">
+                    @* flex-wrap + nowrap on the chips: six categories, one of them "Out of Town
+                       Bonspiels", no longer fit on one row. Without wrap the row overflows the modal
+                       and clips the last chip; without nowrap the long label breaks across three
+                       lines and makes one chip three times the height of its neighbours. *@
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
                         @foreach (var cat in CalendarStyles.ClubEventCategories)
                         {
                             var isSelected = Draft.Category == cat;
                             <span @onclick="() => Draft.Category = cat"
-                                  style="background:@(isSelected ? CalendarStyles.ClubEventCategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.ClubEventCategoryColor(cat));border:1px solid @CalendarStyles.ClubEventCategoryColor(cat);padding:3px 12px;border-radius:12px;font-weight:600;cursor:pointer">
-                                @cat
+                                  style="background:@(isSelected ? CalendarStyles.ClubEventCategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.ClubEventCategoryColor(cat));border:1px solid @CalendarStyles.ClubEventCategoryColor(cat);padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+                                @CalendarStyles.ClubEventCategoryLabel(cat)
                             </span>
                         }
                     </div>
                 </div>
 
                 <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Event Title</div>
-                    <input value="@Draft.Title" @oninput="e => Draft.Title = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                    <input value="@Draft.Title" @oninput="e => Draft.Title = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
 
                 <div><span @onclick="() => Draft.IsAllDay = !Draft.IsAllDay" style="cursor:pointer;font-weight:600;color:#1e2a33">
                     <input type="checkbox" checked="@Draft.IsAllDay" style="pointer-events:none" /> All day
@@ -35,12 +39,12 @@
                     <div style="flex:1">
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Start date</div>
                         <input type="date" value="@Draft.StartDate.ToString("yyyy-MM-dd")" @onchange="OnStartDateChanged"
-                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box">
+                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
                     </div>
                     <div style="flex:1">
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">End date</div>
                         <input type="date" value="@Draft.EndDate.ToString("yyyy-MM-dd")" @onchange="OnEndDateChanged"
-                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box">
+                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
                     </div>
                 </div>
 
@@ -49,7 +53,7 @@
                     <div style="display:flex;gap:8px">
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
-                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                                 @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
                                     <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
@@ -58,7 +62,7 @@
                         </div>
                         <div style="flex:1">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
-                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                                 @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                                 {
                                     <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
@@ -73,23 +77,23 @@
                 </span></div>
 
                 <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Notes <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                    <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                    <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
             </div>
 
-            <div style="display:flex;gap:8px;margin-top:14px;font-size:12px;font-weight:600">
+            <div style="display:flex;gap:8px;margin-top:14px;font-size:14px;font-weight:600">
                 <span @onclick="HandleSaveClick" style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : CanSave ? "#c62f2f" : "#e8b4ae");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving || !CanSave ? "default" : "pointer")">@(IsSaving ? "Saving..." : "Save")</span>
                 <span @onclick="() => OnCancel.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 16px;border-radius:6px;cursor:pointer">Close</span>
             </div>
             @if (!CanSave)
             {
-                <div style="font-size:10px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
+                <div style="font-size:12px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
             }
 
             @if (Draft.EditingEvent is not null)
             {
                 @if (_confirmingDelete)
                 {
-                    <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:11px">
+                    <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:13px">
                         <div style="color:#a02c21;font-weight:600;margin-bottom:6px">Delete this club event? This can't be undone.</div>
                         <div style="display:flex;gap:8px;font-weight:600">
                             <span @onclick="HandleDeleteClick" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:6px 0;cursor:pointer">Yes, delete</span>
@@ -100,7 +104,7 @@
                 else
                 {
                     <div style="text-align:center;margin-top:10px">
-                        <span @onclick="() => _confirmingDelete = true" style="font-size:10.5px;color:#a02c21;cursor:pointer;text-decoration:underline">Delete Club Event</span>
+                        <span @onclick="() => _confirmingDelete = true" style="font-size:12.5px;color:#a02c21;cursor:pointer;text-decoration:underline">Delete Club Event</span>
                     </div>
                 }
             }

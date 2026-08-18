@@ -1,0 +1,183 @@
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject FacilityConfiguration Facility
+
+@* Whole-series edit. Deliberately has no time inputs: the operator ruled out moving a recurring
+   booking's time, since a series spans months and re-checking every occurrence against everything
+   else on the calendar is the change most likely to collide. Moving a single occurrence is still
+   available through the ordinary "Edit booking…" path. *@
+@if (Group is not null)
+{
+    <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:460px;max-height:88vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <span style="font-size:17px;font-weight:600;color:#1e2a33">Edit recurring series</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:16px;cursor:pointer;padding:2px 6px">&#10005;</span>
+            </div>
+            <div style="font-size:12.5px;color:#90a0ab;margin-bottom:12px">
+                Applies to every date in this series, past and future. @ScheduleSummary
+            </div>
+
+            <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;color:#5a7183">
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        @foreach (var cat in CalendarStyles.SheetCategories)
+                        {
+                            var isSelected = _category == cat;
+                            <span @onclick="() => _category = cat"
+                                  style="background:@(isSelected ? CalendarStyles.CategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.CategoryColor(cat));border:1px solid @CalendarStyles.CategoryColor(cat);padding:3px 12px;border-radius:12px;font-weight:600;cursor:pointer">
+                                @CalendarStyles.CategoryLabel(cat)
+                            </span>
+                        }
+                    </div>
+                </div>
+
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Title</div>
+                    <input value="@_renterName" @oninput="e => _renterName = e.Value?.ToString()"
+                           style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                </div>
+
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Notes <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                    <input value="@_notes" @oninput="e => _notes = e.Value?.ToString()"
+                           style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                </div>
+
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Sheets <span style="font-weight:400;color:#90a0ab">— tap to toggle</span></div>
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+                        @foreach (var sheet in Facility.SheetMailboxes)
+                        {
+                            var isSelected = _selectedSheets.Contains(sheet);
+                            <span @onclick="() => ToggleSheet(sheet)"
+                                  style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:72px;text-align:center;border-radius:6px;font-weight:600;cursor:pointer">
+                                @SheetLabel(sheet)
+                            </span>
+                        }
+                    </div>
+                    <div style="font-size:12px;color:#90a0ab;margin-top:5px">
+                        Removing a sheet drops every date of the series from it. Adding one is checked
+                        against every date first.
+                    </div>
+                </div>
+
+                <div style="background:#f6f8f9;border-radius:6px;padding:8px 10px;font-size:12.5px">
+                    <span style="font-weight:600;color:#1e2a33">Time can't be changed here.</span>
+                    To move one date, close this and use <em>Edit booking</em> on that date instead.
+                </div>
+            </div>
+
+            @if (Conflicts is { Count: > 0 })
+            {
+                <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:12.5px">
+                    <div style="color:#a02c21;font-weight:600;margin-bottom:5px">
+                        Can't add that sheet — it's already booked on @Conflicts.Count date@(Conflicts.Count == 1 ? "" : "s").
+                    </div>
+                    <div style="color:#5a7183">
+                        @foreach (var conflict in Conflicts.Take(6))
+                        {
+                            <div>@conflict.Start.ToString("ddd MMM d") — @(string.IsNullOrWhiteSpace(conflict.RenterName) ? CalendarStyles.CategoryLabel(conflict.Category) : conflict.RenterName)</div>
+                        }
+                        @if (Conflicts.Count > 6)
+                        {
+                            <div>…and @(Conflicts.Count - 6) more.</div>
+                        }
+                    </div>
+                    <div style="color:#5a7183;margin-top:5px">Nothing was changed.</div>
+                </div>
+            }
+
+            <div style="display:flex;gap:8px;margin-top:14px;font-size:14px;font-weight:600">
+                <span @onclick="HandleSaveClick"
+                      style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : CanSave ? "#c62f2f" : "#e8b4ae");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving || !CanSave ? "default" : "pointer")">
+                    @(IsSaving ? "Saving..." : "Save series")
+                </span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 16px;border-radius:6px;cursor:pointer">Close</span>
+            </div>
+            @if (!CanSave)
+            {
+                <div style="font-size:12px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public List<SheetBooking>? Group { get; set; }
+    [Parameter] public List<SheetBooking>? Conflicts { get; set; }
+    [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public EventCallback<SeriesEdit> OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+
+    private BookingCategory? _category;
+    private string? _renterName;
+    private string? _notes;
+    private readonly HashSet<string> _selectedSheets = [];
+    private Guid? _loadedFor;
+
+    /// <summary>
+    /// Reloads only when a different series is opened. OnParametersSet fires on every render of the
+    /// parent, so keying off the group id is what stops a re-render mid-edit from discarding what
+    /// the user has typed - including the re-render that delivers a conflict list back.
+    /// </summary>
+    protected override void OnParametersSet()
+    {
+        if (Group is null or [])
+        {
+            _loadedFor = null;
+            return;
+        }
+
+        var groupId = Group[0].BookingGroupId;
+        if (_loadedFor == groupId)
+        {
+            return;
+        }
+
+        _loadedFor = groupId;
+        _category = Group[0].Category;
+        _renterName = Group[0].RenterName;
+        _notes = Group[0].Notes;
+        _selectedSheets.Clear();
+        foreach (var member in Group)
+        {
+            _selectedSheets.Add(member.SheetMailbox);
+        }
+    }
+
+    private string ScheduleSummary => Group is null or []
+        ? ""
+        : $"{Group[0].Start:dddd}s, {Group[0].Start:h:mmtt}–{Group[0].End:h:mmtt}.";
+
+    private bool CanSave => _category.HasValue
+        && !string.IsNullOrWhiteSpace(_renterName)
+        && _selectedSheets.Count > 0;
+
+    private string ValidationMessage =>
+        !_category.HasValue ? "Choose a category." :
+        string.IsNullOrWhiteSpace(_renterName) ? "A title is required." :
+        "Select at least one sheet — to remove the series entirely, use Cancel entire series.";
+
+    private void ToggleSheet(string sheet)
+    {
+        if (!_selectedSheets.Remove(sheet))
+        {
+            _selectedSheets.Add(sheet);
+        }
+    }
+
+    private string SheetLabel(string mailbox)
+    {
+        var index = Array.IndexOf(Facility.SheetMailboxes, mailbox);
+        return index >= 0 ? $"Sheet {index + 1}" : mailbox;
+    }
+
+    private Task HandleSaveClick() =>
+        IsSaving || !CanSave
+            ? Task.CompletedTask
+            : OnSave.InvokeAsync(new SeriesEdit(_category!.Value, _renterName, _notes, [.. _selectedSheets]));
+
+    public record SeriesEdit(BookingCategory Category, string? RenterName, string? Notes, List<string> Sheets);
+}

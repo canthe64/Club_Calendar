@@ -5,32 +5,32 @@
 @if (IsOpen)
 {
     <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
-        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:620px;max-width:94vw;max-height:88vh;overflow:auto">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:720px;max-width:94vw;max-height:88vh;overflow:auto">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
-                <span style="font-size:15px;font-weight:600;color:#1e2a33">@(Draft.EditingGroup is null ? "New Booking" : "Edit Booking")</span>
-                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:14px;cursor:pointer;padding:2px 6px">&#10005;</span>
+                <span style="font-size:17px;font-weight:600;color:#1e2a33">@(Draft.EditingGroup is null ? "New Booking" : "Edit Booking")</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:16px;cursor:pointer;padding:2px 6px">&#10005;</span>
             </div>
 
             @if (Conflicts.Count > 0)
             {
                 <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-bottom:12px">
-                    <div style="font-size:12px;font-weight:600;color:#a02c21;margin-bottom:4px">This time conflicts with:</div>
+                    <div style="font-size:14px;font-weight:600;color:#a02c21;margin-bottom:4px">This time conflicts with:</div>
                     @foreach (var c in Conflicts)
                     {
                         @if (string.IsNullOrEmpty(c.SheetMailbox))
                         {
-                            <div style="font-size:11px;color:#8a5049;line-height:1.5">Club event "@c.RenterName": @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") — closes all sheets</div>
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">Club event "@c.RenterName": @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") — closes all sheets</div>
                         }
                         else
                         {
-                            <div style="font-size:11px;color:#8a5049;line-height:1.5">@DayGridSheetLabel(c.SheetMailbox): @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") (@c.Category)</div>
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">@DayGridSheetLabel(c.SheetMailbox): @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") (@c.Category)</div>
                         }
                     }
-                    <div style="font-size:10px;color:#8a5049;margin-top:4px">Nothing was saved — deselect the sheet, or change the time.</div>
+                    <div style="font-size:12px;color:#8a5049;margin-top:4px">Nothing was saved — deselect the sheet, or change the time.</div>
                 </div>
             }
 
-            <div style="display:flex;flex-direction:column;gap:11px;font-size:11px;color:#5a7183">
+            <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;color:#5a7183">
                 <div>
                     <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
                     <div style="display:flex;gap:6px;flex-wrap:wrap">
@@ -52,7 +52,7 @@
                         {
                             var isSelected = Draft.SelectedSheets.Contains(sheet);
                             <span @onclick="() => ToggleSheet(sheet)"
-                                  style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:60px;text-align:center;border-radius:6px;font-weight:600;cursor:pointer">
+                                  style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:72px;text-align:center;border-radius:6px;font-weight:600;cursor:pointer">
                                 @DayGridSheetLabel(sheet)
                             </span>
                         }
@@ -67,11 +67,11 @@
                     <div style="flex:1.2">
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Date</div>
                         <input type="date" value="@Draft.Date.ToString("yyyy-MM-dd")" @onchange="OnDateChanged"
-                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box">
+                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
                     </div>
                     <div style="flex:1">
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
-                        <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                        <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                             @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                             {
                                 <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
@@ -80,7 +80,7 @@
                     </div>
                     <div style="flex:1">
                         <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
-                        <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:11px;width:100%">
+                        <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                             @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                             {
                                 <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
@@ -107,29 +107,29 @@
                 }
 
                 <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Event Title</div>
-                    <input value="@Draft.RenterName" @oninput="e => Draft.RenterName = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                    <input value="@Draft.RenterName" @oninput="e => Draft.RenterName = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
 
                 @if (Draft.Category == BookingCategory.GroupEvent)
                 {
                     <div style="display:flex;gap:8px">
                         <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Phone <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                            <input value="@Draft.RenterPhone" @oninput="e => Draft.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                            <input value="@Draft.RenterPhone" @oninput="e => Draft.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                         <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Email <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                            <input value="@Draft.RenterEmail" @oninput="e => Draft.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                            <input value="@Draft.RenterEmail" @oninput="e => Draft.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                     </div>
                 }
 
                 <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Notes <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                    <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:11px;width:100%;box-sizing:border-box"></div>
+                    <input value="@Draft.Notes" @oninput="e => Draft.Notes = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
             </div>
 
-            <div style="display:flex;gap:8px;margin-top:14px;font-size:12px;font-weight:600">
+            <div style="display:flex;gap:8px;margin-top:14px;font-size:14px;font-weight:600">
                 <span @onclick="HandleSaveClick" style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : CanSave ? "#c62f2f" : "#e8b4ae");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving || !CanSave ? "default" : "pointer")">@(IsSaving ? "Saving..." : "Save")</span>
                 <span @onclick="() => OnCancel.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 16px;border-radius:6px;cursor:pointer">Cancel</span>
             </div>
             @if (!CanSave)
             {
-                <div style="font-size:10px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
+                <div style="font-size:12px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
             }
         </div>
     </div>

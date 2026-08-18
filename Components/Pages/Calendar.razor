@@ -80,7 +80,8 @@
 <BookingFormModal IsOpen="_formOpen" Draft="_draft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" />
 <ClubEventFormModal IsOpen="_clubEventFormOpen" Draft="_clubEventDraft" IsSaving="_isSavingClubEvent" OnSave="SaveClubEventDraft" OnCancel="CloseClubEventForm" OnDelete="DeleteClubEventDraft" />
 <ClubEventDetailModal ClubEvent="_clubEventDetail" OnClose="() => _clubEventDetail = null" OnEdit="StartEditClubEvent" OnDelete="DeleteClubEventDirect" />
-<BookingDetailModal Group="_detailGroup" OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" />
+<BookingDetailModal Group="_detailGroup" OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" OnEditSeries="StartEditSeries" />
+<SeriesEditModal Group="_seriesEditGroup" Conflicts="_seriesEditConflicts" IsSaving="_isSavingSeriesEdit" OnSave="SaveSeries" OnCancel="CloseSeriesEdit" />
 <CancelChoiceModal Group="_cancelGroup" OnChoice="ApplyCancelChoice" OnKeep="() => _cancelGroup = null" />
 <SeriesWizardModal IsOpen="_seriesWizardOpen" Draft="_seriesDraft" Step="_seriesStep" Conflicts="_seriesConflicts"
                     IsLoadingPreview="_isLoadingSeriesPreview" IsSaving="_isSavingSeries"
@@ -127,6 +128,9 @@
     private ClubEvent? _clubEventDetail;
 
     private List<SheetBooking>? _detailGroup;
+    private List<SheetBooking>? _seriesEditGroup;
+    private List<SheetBooking> _seriesEditConflicts = [];
+    private bool _isSavingSeriesEdit;
     private List<SheetBooking>? _cancelGroup;
     private List<SheetBooking>? _cancelSeriesGroup;
 
@@ -302,6 +306,71 @@
     {
         _detailGroup = null;
         _cancelGroup = group;
+    }
+
+    private void StartEditSeries(List<SheetBooking> group)
+    {
+        _detailGroup = null;
+        _seriesEditConflicts = [];
+        _seriesEditGroup = group;
+    }
+
+    private void CloseSeriesEdit()
+    {
+        _seriesEditGroup = null;
+        _seriesEditConflicts = [];
+    }
+
+    /// <summary>
+    /// Whole-series save. Unlike SaveDraft there is no time to validate and no closure check to run:
+    /// the series already occupies these times, and this edit can't move them - the only thing that
+    /// can newly collide is a sheet being added, which UpdateSeriesAsync checks across every
+    /// occurrence and refuses as a whole.
+    /// </summary>
+    private async Task SaveSeries(SeriesEditModal.SeriesEdit edit)
+    {
+        if (_seriesEditGroup is null || _isSavingSeriesEdit)
+        {
+            return;
+        }
+
+        _isSavingSeriesEdit = true;
+        _seriesEditConflicts = [];
+        StateHasChanged();
+
+        try
+        {
+            var actingUser = await GetCurrentUserNameAsync();
+            var result = await BookingService.UpdateSeriesAsync(
+                _seriesEditGroup,
+                new SheetBooking
+                {
+                    SheetMailbox = "",
+                    Start = default,
+                    End = default,
+                    Category = edit.Category,
+                    State = _seriesEditGroup[0].State,
+                    RenterName = edit.RenterName,
+                    RenterPhone = _seriesEditGroup[0].RenterPhone,
+                    RenterEmail = _seriesEditGroup[0].RenterEmail,
+                    Notes = edit.Notes
+                },
+                edit.Sheets,
+                actingUser);
+
+            if (!result.IsSuccess)
+            {
+                _seriesEditConflicts = result.Conflicts.ToList();
+                return;
+            }
+
+            CloseSeriesEdit();
+            await LoadAsync();
+        }
+        finally
+        {
+            _isSavingSeriesEdit = false;
+        }
     }
 
     private void CloseForm()

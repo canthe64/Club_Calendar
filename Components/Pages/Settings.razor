@@ -10,7 +10,7 @@
 <div style="padding:16px 24px;max-width:900px">
     <h1>Settings</h1>
 
-    <div style="color:#5a7183;font-size:13px;margin:-6px 0 22px">
+    <div style="color:#5a7183;font-size:15px;margin:-6px 0 22px">
         <span style="font-weight:600;color:#1e2a33">@AppVersion.Display</span>
         @if (AppVersion.BuiltUtc is DateTime built)
         {
@@ -19,16 +19,16 @@
     </div>
 
     <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
-        <h2 style="font-size:16px;margin-bottom:8px">Practice Ice Requests</h2>
-        <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">
+        <h2 style="font-size:18px;margin-bottom:8px">Practice Ice Requests</h2>
+        <p style="color:#5a7183;font-size:15px;margin-bottom:10px;max-width:640px">
             Review and approve or decline member requests to host practice ice.
         </p>
         <a href="/practice-ice/approvals" class="btn btn-secondary">View requests</a>
     </section>
 
     <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
-        <h2 style="font-size:16px;margin-bottom:8px">Logging Level</h2>
-        <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">
+        <h2 style="font-size:18px;margin-bottom:8px">Logging Level</h2>
+        <p style="color:#5a7183;font-size:15px;margin-bottom:10px;max-width:640px">
             <strong>Standard</strong> (the default) logs definitive actions only - bookings, series,
             and club events created, edited, or canceled, with who did it. <strong>Debug</strong> adds
             staff sign-in events and full detail on every Breely webhook call, including the raw data
@@ -43,11 +43,11 @@
         <button class="btn btn-primary" style="margin-left:16px" @onclick="SaveLevel" disabled="@_saving">Save</button>
         @if (_savedMessage is not null)
         {
-            <span style="margin-left:10px;color:#2d7a3f;font-size:13px">@_savedMessage</span>
+            <span style="margin-left:10px;color:#2d7a3f;font-size:15px">@_savedMessage</span>
         }
         @if (_level == AppLogLevel.Debug)
         {
-            <div style="margin-top:10px;padding:8px 12px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:6px;color:#a02c21;font-size:12px;max-width:640px">
+            <div style="margin-top:10px;padding:8px 12px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:6px;color:#a02c21;font-size:14px;max-width:640px">
                 <strong>Debug mode may log customer names, emails, and phone numbers</strong> from
                 Breely bookings. Turn it back to <strong>Standard</strong> once you're done
                 troubleshooting - don't leave it on.
@@ -56,8 +56,8 @@
     </section>
 
     <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
-        <h2 style="font-size:16px;margin-bottom:8px">Minimum group event booking interval</h2>
-        <p style="color:#5a7183;font-size:13px;margin-bottom:10px;max-width:640px">
+        <h2 style="font-size:18px;margin-bottom:8px">Minimum group event booking interval</h2>
+        <p style="color:#5a7183;font-size:15px;margin-bottom:10px;max-width:640px">
             When a Breely booking claims part of an open Group Event hold, whatever time is left
             over before and/or after it is offered as its own bookable slot - unless it's shorter
             than this many minutes, in which case that leftover time is dropped instead of offered.
@@ -71,18 +71,18 @@
         <button class="btn btn-primary" style="margin-left:16px" @onclick="SaveMinimumInterval" disabled="@_savingInterval">Save</button>
         @if (_intervalSavedMessage is not null)
         {
-            <span style="margin-left:10px;color:#2d7a3f;font-size:13px">@_intervalSavedMessage</span>
+            <span style="margin-left:10px;color:#2d7a3f;font-size:15px">@_intervalSavedMessage</span>
         }
     </section>
 
     <section>
-        <h2 style="font-size:16px;margin-bottom:8px">Recent Activity</h2>
-        <p style="color:#5a7183;font-size:13px;margin-bottom:8px">Most recent 500 log lines.</p>
+        <h2 style="font-size:18px;margin-bottom:8px">Recent Activity</h2>
+        <p style="color:#5a7183;font-size:15px;margin-bottom:8px">Most recent 500 log lines.</p>
         <div style="margin-bottom:8px">
             <button class="btn btn-secondary" @onclick="RefreshTail">Refresh</button>
-            <a href="/settings/logs/download" style="margin-left:12px;font-size:13px;color:#2d5f8a" target="_blank">Download full log archive (.zip)</a>
+            <a href="/settings/logs/download" style="margin-left:12px;font-size:15px;color:#2d5f8a" target="_blank">Download full log archive (.zip)</a>
         </div>
-        <pre style="background:#0f1720;color:#d7e2ea;border-radius:8px;padding:12px;max-height:520px;overflow:auto;font-size:12px;line-height:1.5;white-space:pre-wrap;word-break:break-all">@string.Join("\n", _tail)</pre>
+        <pre style="background:#0f1720;color:#d7e2ea;border-radius:8px;padding:12px;max-height:520px;overflow:auto;font-size:14px;line-height:1.5;white-space:pre-wrap;word-break:break-all">@string.Join("\n", _tail)</pre>
     </section>
 </div>
 

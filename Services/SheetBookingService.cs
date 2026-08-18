@@ -742,6 +742,229 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
     }
 
     /// <summary>
+    /// Edits a recurring series as a whole: metadata on every occurrence (past included), plus
+    /// adding and removing sheets. Time is deliberately not editable - moving a whole series is the
+    /// operation most likely to collide with everything else on the calendar, so the operator ruled
+    /// it out; <see cref="UpdateGroupAsync"/> still moves a single occurrence.
+    ///
+    /// Each sheet carries its own native Graph series (Graph has no cross-mailbox recurrence), so
+    /// "the series" is really N series sharing a BookingGroupId:
+    ///  - kept sheets    - PATCH the series master, which Graph propagates to every occurrence.
+    ///  - removed sheets - DELETE the series master, taking all of its occurrences with it. Never
+    ///    conflicts, so it needs no check.
+    ///  - added sheets   - conflict-check EVERY occurrence window first, all-or-nothing, then
+    ///    replicate the reference master's recurrence onto the new sheet.
+    /// </summary>
+    public async Task<GroupBookingResult> UpdateSeriesAsync(
+        IEnumerable<SheetBooking> members, SheetBooking updatedFields, IEnumerable<string> targetSheetMailboxes,
+        string actingUser, CancellationToken ct = default)
+    {
+        var memberList = members.Where(m => m.SeriesMasterId is not null).ToList();
+        if (memberList.Count == 0)
+        {
+            return GroupBookingResult.Success([]);
+        }
+
+        var existingSheets = memberList.Select(m => m.SheetMailbox).ToHashSet();
+        var targets = targetSheetMailboxes.Distinct().ToHashSet();
+
+        // Unticking every sheet would be a disguised "cancel the series" - no-op rather than let a
+        // stray form state quietly delete the lot. CancelSeriesAsync is the explicit path for that.
+        if (targets.Count == 0)
+        {
+            return GroupBookingResult.Success([]);
+        }
+
+        var toKeep = memberList.Where(m => targets.Contains(m.SheetMailbox)).ToList();
+        var toRemove = memberList.Where(m => !targets.Contains(m.SheetMailbox)).ToList();
+        var toAdd = targets.Where(t => !existingSheets.Contains(t)).OrderBy(s => s, StringComparer.Ordinal).ToList();
+
+        var orderedSheets = existingSheets.Concat(toAdd).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
+        var sems = orderedSheets.Select(s => SheetLocks.GetOrAdd(s, _ => new SemaphoreSlim(1, 1))).ToList();
+        foreach (var sem in sems)
+        {
+            await sem.WaitAsync(ct);
+        }
+
+        var groupId = memberList[0].BookingGroupId;
+        var created = new List<SheetBooking>();
+
+        try
+        {
+            // One sheet's master defines the shape of the whole thing - the recurrence to replicate
+            // and the occurrence windows to conflict-check against. Prefer a sheet that is staying,
+            // so a "swap sheet A for sheet B" edit doesn't read its template from a master it is
+            // about to delete.
+            var reference = toKeep.FirstOrDefault() ?? memberList[0];
+            var referenceMaster = await graph.GetEventAsync(reference.SheetMailbox, reference.SeriesMasterId!, ExtendedPropertiesExpand, ct);
+            var occurrences = await SeriesOccurrenceWindowsAsync(reference, referenceMaster, ct);
+
+            if (toAdd.Count > 0)
+            {
+                if (referenceMaster?.Recurrence is null || occurrences.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Cannot add sheets to this series: no recurrence could be read from {reference.SheetMailbox}.");
+                }
+
+                var conflicts = new List<SheetBooking>();
+                foreach (var sheet in toAdd)
+                {
+                    foreach (var (start, end) in occurrences)
+                    {
+                        var overlapping = await GetEventsInRangeAsync(sheet, start, end, ct);
+                        conflicts.AddRange(overlapping.Select(e => FromGraphEvent(sheet, e)));
+                    }
+                }
+
+                // All-or-nothing, matching every other multi-sheet write here: one colliding date on
+                // one sheet refuses the whole edit rather than adding the sheet for the dates that
+                // happen to be free. A series with holes is harder to reason about than a refusal.
+                if (conflicts.Count > 0)
+                {
+                    return GroupBookingResult.Conflict(conflicts);
+                }
+            }
+
+            var updated = new List<SheetBooking>();
+            foreach (var member in toKeep)
+            {
+                var merged = MergeSeriesFields(member, updatedFields, groupId);
+                await graph.PatchEventAsync(member.SheetMailbox, member.SeriesMasterId!, ToGraphEvent(merged, includeTime: false), ct);
+                merged.EventId = member.EventId;
+                updated.Add(merged);
+            }
+
+            foreach (var member in toRemove)
+            {
+                await graph.DeleteEventAsync(member.SheetMailbox, member.SeriesMasterId!, ct);
+            }
+
+            foreach (var sheet in toAdd)
+            {
+                var booking = MergeSeriesFields(reference, updatedFields, groupId);
+                booking.SheetMailbox = sheet;
+
+                var graphEvent = ToGraphEvent(booking);
+                graphEvent.Recurrence = referenceMaster!.Recurrence;
+
+                var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
+                booking.EventId = result?.Id;
+                booking.ICalUId = result?.ICalUId;
+                created.Add(booking);
+                updated.Add(booking);
+
+                // Mirror the reference series' own gaps. Occurrences staff excluded at creation
+                // (SeriesWizard) were deleted individually, so replaying the recurrence verbatim
+                // would give the new sheet dates none of the other sheets have.
+                if (result?.Id is not null)
+                {
+                    await MirrorExcludedOccurrencesAsync(sheet, result.Id, occurrences, ct);
+                }
+            }
+
+            InvalidateViewCache();
+            await log.LogActionAsync("SeriesUpdated", actingUser,
+                string.Join(",", memberList.Select(m => m.SeriesMasterId)),
+                string.Join(",", orderedSheets),
+                $"{updatedFields.Category}, {occurrences.Count} occurrence(s)"
+                    + (toAdd.Count > 0 ? $", added {string.Join("/", toAdd)}" : "")
+                    + (toRemove.Count > 0 ? $", removed {string.Join("/", toRemove.Select(r => r.SheetMailbox))}" : ""), ct);
+
+            return GroupBookingResult.Success(updated);
+        }
+        catch (Exception ex)
+        {
+            // Only newly created series are rolled back, same rule as UpdateGroupAsync: a
+            // half-applied PATCH still leaves a real booking on a real sheet, whereas a phantom
+            // series on a sheet the caller was told didn't save blocks that slot every week.
+            await RollbackCreatedAsync(created, actingUser, ex, ct);
+            throw;
+        }
+        finally
+        {
+            foreach (var sem in sems)
+            {
+                sem.Release();
+            }
+        }
+    }
+
+    private static SheetBooking MergeSeriesFields(SheetBooking source, SheetBooking updatedFields, Guid groupId) =>
+        new()
+        {
+            SheetMailbox = source.SheetMailbox,
+            // Carried through unchanged - UpdateSeriesAsync never moves a series, and kept sheets
+            // are patched with includeTime:false so these never reach Graph at all.
+            Start = source.Start,
+            End = source.End,
+            Category = updatedFields.Category,
+            State = source.State,
+            RenterName = updatedFields.RenterName,
+            RenterPhone = updatedFields.RenterPhone,
+            RenterEmail = updatedFields.RenterEmail,
+            Notes = updatedFields.Notes,
+            BookedBy = source.BookedBy,
+            BookingGroupId = groupId
+        };
+
+    /// <summary>
+    /// The (start, end) window of every live occurrence of a series, read from Graph rather than
+    /// recomputed from the recurrence pattern - so occurrences that were individually deleted are
+    /// reflected as they actually are, not as the pattern says they should be.
+    /// </summary>
+    private async Task<List<(DateTime Start, DateTime End)>> SeriesOccurrenceWindowsAsync(
+        SheetBooking reference, Event? master, CancellationToken ct)
+    {
+        if (master?.Recurrence?.Range is null)
+        {
+            return [];
+        }
+
+        var range = master.Recurrence.Range;
+        var from = range.StartDate is { } sd ? new DateTime(sd.Year, sd.Month, sd.Day) : reference.Start.Date;
+        // NoEnd/Numbered ranges carry no EndDate. This app only ever creates EndDate series
+        // (CreateSeriesAsync), so the two-year ceiling is a guard for hand-edited data, not a
+        // supported shape.
+        var to = range.EndDate is { } ed ? new DateTime(ed.Year, ed.Month, ed.Day) : from.AddYears(2);
+
+        var instances = await graph.GetInstancesAsync(reference.SheetMailbox, reference.SeriesMasterId!,
+            facility.ToUtcQueryString(from), facility.ToUtcQueryString(to.AddDays(1)), ct);
+
+        return instances
+            .Where(i => i.Start?.DateTime is not null && i.End?.DateTime is not null)
+            .Select(i => (Start: facility.FromUtcResponseString(i.Start!.DateTime!), End: facility.FromUtcResponseString(i.End!.DateTime!)))
+            .OrderBy(w => w.Start)
+            .ToList();
+    }
+
+    private async Task MirrorExcludedOccurrencesAsync(
+        string sheet, string newMasterId, List<(DateTime Start, DateTime End)> keep, CancellationToken ct)
+    {
+        if (keep.Count == 0)
+        {
+            return;
+        }
+
+        var keepDates = keep.Select(w => w.Start.Date).ToHashSet();
+        var instances = await graph.GetInstancesAsync(sheet, newMasterId,
+            facility.ToUtcQueryString(keep[0].Start.Date), facility.ToUtcQueryString(keep[^1].Start.Date.AddDays(1)), ct);
+
+        foreach (var instance in instances)
+        {
+            if (instance.Start?.DateTime is null || instance.Id is null)
+            {
+                continue;
+            }
+
+            if (!keepDates.Contains(facility.FromUtcResponseString(instance.Start.DateTime).Date))
+            {
+                await graph.DeleteEventAsync(sheet, instance.Id, ct);
+            }
+        }
+    }
+
+    /// <summary>
     /// Deletes the entire recurring series (all occurrences, past and future) for every sheet in
     /// the group. This is the "backdoor" for correcting a data-entry mistake at series creation -
     /// deliberately not a primary UX path. No-op for members that aren't part of a series.

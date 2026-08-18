@@ -120,7 +120,7 @@ public class PracticeIceAvailabilityTests
         await clubEventService.CreateAsync(new ClubEvent
         {
             Title = "Bonspiel Announcement",
-            Category = ClubEventCategory.Bonspiel,
+            Category = ClubEventCategory.OutOfTownBonspiels,
             Start = day,
             End = day,
             IsAllDay = true,

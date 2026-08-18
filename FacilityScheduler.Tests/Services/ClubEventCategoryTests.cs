@@ -23,11 +23,12 @@ public class ClubEventCategoryTests
     }
 
     [Theory]
-    [InlineData(ClubEventCategory.Bonspiel, "Bonspiel")]
+    [InlineData(ClubEventCategory.OutOfTownBonspiels, "OutOfTownBonspiels")]
     [InlineData(ClubEventCategory.Activities, "Activities")]
     [InlineData(ClubEventCategory.Closure, "Closure")]
     [InlineData(ClubEventCategory.Other, "Other")]
     [InlineData(ClubEventCategory.Meetings, "Meetings")]
+    [InlineData(ClubEventCategory.Competitions, "Competitions")]
     public void MemberNames_AreStable_BecauseTheyAreThePublishedWireValue(ClubEventCategory category, string expected)
     {
         // Since D79 these names are what /api/public/availability puts on the wire, and they're also
@@ -80,6 +81,26 @@ public class ClubEventCategoryTests
 
         Assert.Equal(colors.Count, colors.Distinct().Count());
         Assert.Equal(backgrounds.Count, backgrounds.Distinct().Count());
+    }
+
+    [Fact]
+    public void OutOfTownBonspiels_DisplaysAsWordsButStoresAsOneToken()
+    {
+        // The rename exists to stop staff confusing this with BookingCategory.Bonspiel (a bonspiel on
+        // this club's own ice). The label is what they read; the member name is what Graph stores and
+        // what provision-categories.ps1 must create as the Exchange master category.
+        Assert.Equal("Out of Town Bonspiels",
+            CalendarStyles.ClubEventCategoryLabel(ClubEventCategory.OutOfTownBonspiels));
+        Assert.Equal("OutOfTownBonspiels", ClubEventCategory.OutOfTownBonspiels.ToString());
+    }
+
+    [Fact]
+    public void EveryCategory_HasANonEmptyLabel()
+    {
+        foreach (var category in CalendarStyles.ClubEventCategories)
+        {
+            Assert.False(string.IsNullOrWhiteSpace(CalendarStyles.ClubEventCategoryLabel(category)));
+        }
     }
 
     [Fact]

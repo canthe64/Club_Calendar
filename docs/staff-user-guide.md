@@ -105,17 +105,29 @@ or a closure Club Event) are flagged per date but **never automatically skipped*
 per date, using the **Skip**/**Include** toggle next to each one. Click **Create series** once you're
 satisfied with the selection.
 
-**Editing a series** is per-occurrence only — click a single occurrence on the calendar and edit it
-like a normal booking; there's no "edit the whole series" action. **Canceling an entire series** is a
-separate, deliberately de-emphasized action available from that occurrence's detail view (§3.2) —
-meant for correcting a data-entry mistake at the start of a season, not routine cancellations, since
-it deletes every occurrence, past and future, on every sheet involved.
+**Editing a series** has two paths, both from an occurrence's detail view (§3.2):
+
+- **Edit booking…** — the ordinary single-occurrence edit. Changes only the date you clicked,
+  including its time.
+- **Edit whole series…** — applies to every date, past and future. You can change the title, notes,
+  category, and which sheets the series occupies, but **not the time** — a series can span months, so
+  a time change would mean re-checking every date against everything else on the calendar, which was
+  judged too easy to get wrong. To move a series, edit each occurrence you need to move individually,
+  or cancel and re-create it.
+  - Removing a sheet drops every date of the series from it — this can never conflict.
+  - Adding a sheet is checked against every date first; if any date collides with something already
+    on that sheet, the whole change is refused and nothing is saved. Fix or skip that date's conflict
+    first (by editing that one occurrence, or removing it), then try adding the sheet again.
+
+**Canceling an entire series** is a separate, deliberately de-emphasized action, also from the
+occurrence's detail view — meant for correcting a data-entry mistake at the start of a season, not
+routine cancellations, since it deletes every occurrence, past and future, on every sheet involved.
 
 ### 3.2 Editing or canceling a booking
 
-Click any booking chip to open its detail view, which offers **Edit booking…**, **Cancel Booking**,
-and (only if the booking is part of a recurring series, shown as a smaller link below the main
-buttons) the option to cancel the entire series instead.
+Click any booking chip to open its detail view, which offers **Edit booking…** and **Cancel Booking**.
+If the booking is part of a recurring series, a second row appears below those with **Edit whole
+series…** and **Cancel entire series** (§4).
 
 - **Edit booking…** reopens the same form, pre-filled. If you deselect a sheet that was previously part of a
   multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
@@ -147,7 +159,9 @@ specific sheet. Reach them either via the **Club Events** button in the calendar
 dedicated `/club-events` list page) or by clicking a Club Event chip directly on the calendar, which
 opens the same edit form inline without leaving the calendar page.
 
-- **Category** — Bonspiel, Activities, Meetings, Closure, or Other. Required, no default.
+- **Category** — Out of Town Bonspiels, Competitions, Activities, Meetings, Closure, or Other.
+  Required, no default. "Out of Town Bonspiels" is members travelling to play elsewhere — not to be
+  confused with a bonspiel category on a sheet booking, which is one held on this club's own ice.
 - **Event Title** — required.
 - **All day** — toggle on/off. When off, set **From**/**To** times (same 30-minute increments as
   bookings).
