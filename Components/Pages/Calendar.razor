@@ -38,6 +38,7 @@
                 <div style="position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #d7dfe5;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);z-index:20;min-width:170px;overflow:hidden">
                     <div @onclick="SelectNewBooking" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer">New Booking</div>
                     <div @onclick="SelectNewSeries" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">New Series</div>
+                    <div @onclick="SelectNewClubEvent" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">New Club Event</div>
                 </div>
             }
         </div>
@@ -275,6 +276,23 @@
     {
         _newMenuOpen = false;
         OpenSeriesWizard();
+    }
+
+    private void SelectNewClubEvent()
+    {
+        _newMenuOpen = false;
+        OpenCreateClubEventForm();
+    }
+
+    // Anchored on _anchorDate (what's currently in view), not Facility.Today - same spirit as
+    // OpenCreateForm's use of _anchorDate for a new single booking. The standalone Club Events
+    // page's own "+ New Club Event" has no "currently in view" concept, so it anchors on today
+    // instead - that's a different, equally correct default for a different context.
+    private void OpenCreateClubEventForm()
+    {
+        _clubEventDraft = new ClubEventDraft();
+        _clubEventDraft.Reset(_anchorDate);
+        _clubEventFormOpen = true;
     }
 
     private void OpenCreateForm()
