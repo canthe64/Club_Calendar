@@ -57,9 +57,11 @@ public class ClubEventDraft
         IsAllDay = clubEvent.IsAllDay;
         StartDate = clubEvent.Start.Date;
         EndDate = clubEvent.End.Date;
-        // Relative to Start's own date so an end time crossing midnight reads as 1440, not 0.
+        // Each Minutes field relative to its own Date field (not the other side's), matching how
+        // the End/Start getters reconstruct them - otherwise a multi-day event's EndMinutes would
+        // carry the day offset while EndDate is already advanced, double-counting it on save.
         StartMinutes = clubEvent.IsAllDay ? 9 * 60 : (int)(clubEvent.Start - clubEvent.Start.Date).TotalMinutes;
-        EndMinutes = clubEvent.IsAllDay ? 17 * 60 : (int)(clubEvent.End - clubEvent.Start.Date).TotalMinutes;
+        EndMinutes = clubEvent.IsAllDay ? 17 * 60 : (int)(clubEvent.End - clubEvent.End.Date).TotalMinutes;
         MarksSheetsUnavailable = clubEvent.MarksSheetsUnavailable;
         Notes = clubEvent.Notes;
         EditingEvent = clubEvent;
