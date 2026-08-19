@@ -68,14 +68,40 @@
                     </div>
                 </div>
 
-                <div style="display:flex;gap:8px;align-items:end">
-                    <div style="flex:1.2">
-                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Date</div>
-                        <input type="date" value="@Draft.Date.ToString("yyyy-MM-dd")" @onchange="OnDateChanged"
-                               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                <div>
+                    <div style="display:flex;gap:8px">
+                        <div style="flex:1">
+                            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Start date</div>
+                            <input type="date" value="@Draft.StartDate.ToString("yyyy-MM-dd")" @onchange="OnStartDateChanged"
+                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                        </div>
+                        <div style="flex:1">
+                            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">End date</div>
+                            <input type="date" value="@Draft.EndDate.ToString("yyyy-MM-dd")" @onchange="OnEndDateChanged"
+                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                        </div>
                     </div>
+                    @* Only shown once the two dates actually differ - the common single-day booking
+                       stays exactly as compact as before this feature existed. *@
+                    @if (Draft.EndDate.Date != Draft.StartDate.Date)
+                    {
+                        var days = (Draft.EndDate.Date - Draft.StartDate.Date).Days + 1;
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:6px 10px;background:#eaf1f8;border-radius:6px;font-size:12.5px;color:#2d5f8a;font-weight:600">
+                            <span>&#8505;</span>
+                            <span>Spans @days days — @Draft.StartDate.ToString("ddd, MMM d") through @Draft.EndDate.ToString("ddd, MMM d")</span>
+                        </div>
+                    }
+                </div>
+
+                <div style="display:flex;gap:8px">
                     <div style="flex:1">
-                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">
+                            From
+                            @if (Draft.EndDate.Date != Draft.StartDate.Date)
+                            {
+                                <span style="font-weight:400;color:#90a0ab">(on the start date)</span>
+                            }
+                        </div>
                         <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                             @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                             {
@@ -84,7 +110,13 @@
                         </select>
                     </div>
                     <div style="flex:1">
-                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">
+                            To
+                            @if (Draft.EndDate.Date != Draft.StartDate.Date)
+                            {
+                                <span style="font-weight:400;color:#90a0ab">(on the end date)</span>
+                            }
+                        </div>
                         <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
                             @foreach (var m in CalendarStyles.TimeOptionsMinutes)
                             {
@@ -148,10 +180,18 @@
     [Parameter] public EventCallback OnSave { get; set; }
     [Parameter] public EventCallback OnCancel { get; set; }
 
+    // A soft guard against a fat-fingered end date (e.g. picking next year by mistake), not a real
+    // technical limit - a validation message only, same as every other check here. Generous enough
+    // that no real bonspiel or club rental should ever hit it.
+    private const int MaxSpanDays = 14;
+
+    private bool SpanTooLong => (Draft.EndDate.Date - Draft.StartDate.Date).Days > MaxSpanDays;
+
     private bool CanSave => Draft.Category.HasValue
         && Draft.SelectedSheets.Count > 0
         && !string.IsNullOrWhiteSpace(Draft.RenterName)
         && Draft.End > Draft.Start
+        && !SpanTooLong
         && (Draft.Category != BookingCategory.GroupEvent || Draft.CreateAsConfirmed.HasValue);
 
     private string ValidationMessage =>
@@ -159,6 +199,7 @@
         Draft.SelectedSheets.Count == 0 ? "Select at least one sheet." :
         string.IsNullOrWhiteSpace(Draft.RenterName) ? "Event title is required." :
         Draft.End <= Draft.Start ? "The end time must be after the start time." :
+        SpanTooLong ? $"A booking can span at most {MaxSpanDays} days." :
         "Choose Hold for future group event or Confirmed booking.";
 
     private Task HandleSaveClick() => (IsSaving || !CanSave) ? Task.CompletedTask : OnSave.InvokeAsync();
@@ -173,11 +214,19 @@
 
     private void SelectAllSheets() => Draft.SelectedSheets = [.. Facility.SheetMailboxes];
 
-    private void OnDateChanged(ChangeEventArgs e)
+    private void OnStartDateChanged(ChangeEventArgs e)
     {
         if (DateTime.TryParse(e.Value?.ToString(), out var d))
         {
-            Draft.Date = d;
+            Draft.StartDate = d;
+        }
+    }
+
+    private void OnEndDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var d))
+        {
+            Draft.EndDate = d;
         }
     }
 

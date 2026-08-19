@@ -19,15 +19,22 @@ public class BookingDraft
     /// forced to true otherwise.</summary>
     public bool? CreateAsConfirmed { get; set; }
 
-    // Placeholder only - always overwritten by Reset()/LoadForEdit() before this draft is ever
+    // Placeholders only - always overwritten by Reset()/LoadForEdit() before this draft is ever
     // shown (every construction site calls one or the other immediately). Deliberately not defaulted
     // from DateTime.UtcNow here - this class has no DI access to the facility's time zone, and a
     // domain object silently reaching for server-UTC "today" is exactly the bug class fixed elsewhere
     // (FacilityConfiguration.Today).
-    public DateTime Date { get; set; } = DateTime.MinValue;
+    //
+    // Separate StartDate/EndDate (not one Date field) so a booking can span multiple calendar days -
+    // added for multi-day bookings (e.g. a weekend bonspiel), mirroring ClubEventDraft's own
+    // StartDate/EndDate split. EndDate defaults to StartDate in Reset(), so the by-far-more-common
+    // single-day booking costs nothing extra.
+    public DateTime StartDate { get; set; } = DateTime.MinValue;
+    public DateTime EndDate { get; set; } = DateTime.MinValue;
 
     /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
-    /// 1440 represents midnight at the end of <see cref="Date"/>, not the start of it.</summary>
+    /// 1440 represents midnight at the end of <see cref="StartDate"/>/<see cref="EndDate"/>
+    /// respectively, not the start of it.</summary>
     public int StartMinutes { get; set; } = 18 * 60;
     public int EndMinutes { get; set; } = 20 * 60;
     public string? RenterName { get; set; }
@@ -35,8 +42,8 @@ public class BookingDraft
     public string? RenterEmail { get; set; }
     public string? Notes { get; set; }
 
-    public DateTime Start => Date.Date.AddMinutes(StartMinutes);
-    public DateTime End => Date.Date.AddMinutes(EndMinutes);
+    public DateTime Start => StartDate.Date.AddMinutes(StartMinutes);
+    public DateTime End => EndDate.Date.AddMinutes(EndMinutes);
 
     /// <summary>Non-null when editing an existing booking - the sibling events sharing its BookingGroupId.</summary>
     public List<SheetBooking>? EditingGroup { get; set; }
@@ -72,7 +79,8 @@ public class BookingDraft
         Category = null;
         CreateAsConfirmed = null;
         var effectiveStart = initialStart ?? today.AddDays(1);
-        Date = effectiveStart.Date;
+        StartDate = effectiveStart.Date;
+        EndDate = effectiveStart.Date;
         StartMinutes = initialStart.HasValue ? initialStart.Value.Hour * 60 + initialStart.Value.Minute : 18 * 60;
         EndMinutes = StartMinutes + 120;
         RenterName = null;
@@ -88,11 +96,14 @@ public class BookingDraft
         SelectedSheets = [.. group.Select(b => b.SheetMailbox)];
         Category = first.Category;
         CreateAsConfirmed = first.Category != BookingCategory.GroupEvent || first.State == BookingState.Confirmed;
-        Date = first.Start.Date;
-        // Relative to Start's own date (not End's Hour/Minute) so an end time that rolls into the
-        // next calendar day - i.e. midnight - reads as 1440, not 0.
+        StartDate = first.Start.Date;
+        EndDate = first.End.Date;
+        // Each Minutes field relative to its OWN Date field, not the other side's - otherwise a
+        // multi-day booking's EndMinutes would carry the day offset while EndDate is already
+        // advanced, double-counting it back into a wrong End on save. (This exact bug shipped in
+        // ClubEventDraft.LoadForEdit and was found/fixed while designing this - not repeated here.)
         StartMinutes = (int)(first.Start - first.Start.Date).TotalMinutes;
-        EndMinutes = (int)(first.End - first.Start.Date).TotalMinutes;
+        EndMinutes = (int)(first.End - first.End.Date).TotalMinutes;
         RenterName = first.RenterName;
         RenterPhone = first.RenterPhone;
         RenterEmail = first.RenterEmail;

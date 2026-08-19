@@ -87,6 +87,54 @@ public class SheetBookingServiceTests
     }
 
     [Fact]
+    public async Task CreateAcrossSheetsAsync_MultiDaySpan_SucceedsAcrossAllSheetsAndDays()
+    {
+        // Nothing in the service layer assumes same-day - proving that here rather than only
+        // assuming it, per the multi-day booking plan. A 3-day bonspiel across 2 sheets.
+        var (service, gateway, facility, _) = Build();
+        var sheets = TestFacility.SheetMailboxes;
+        var start = facility.Today.AddDays(1).AddHours(18);
+        var end = facility.Today.AddDays(3).AddHours(20);
+
+        var result = await service.CreateAcrossSheetsAsync([sheets[0], sheets[1]], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = end, Category = BookingCategory.Bonspiel, State = BookingState.Confirmed, RenterName = "Fall Mixed Bonspiel"
+        }, "tester");
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(gateway.Events(sheets[0]));
+        Assert.Single(gateway.Events(sheets[1]));
+        var writtenEnd = facility.FromUtcResponseString(gateway.Events(sheets[0])[0].End!.DateTime!);
+        Assert.Equal(end, writtenEnd); // the full 3-day span, not truncated to one day
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_MultiDaySpan_ConflictOnLaterDayOfOneSheet_CreatesNothingOnAnySheet()
+    {
+        var (service, gateway, facility, _) = Build();
+        var sheets = TestFacility.SheetMailboxes;
+
+        // Pre-existing booking on sheet[1], on the SECOND day of the span the multi-day booking
+        // below will request - only reachable if the conflict check looks past day one.
+        var existingStart = facility.Today.AddDays(2).AddHours(19);
+        await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheets[1], Start = existingStart, End = existingStart.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed
+        }, "tester");
+
+        var spanStart = facility.Today.AddDays(1).AddHours(18);
+        var spanEnd = facility.Today.AddDays(3).AddHours(20);
+        var result = await service.CreateAcrossSheetsAsync([sheets[0], sheets[1]], new SheetBooking
+        {
+            SheetMailbox = "", Start = spanStart, End = spanEnd, Category = BookingCategory.Bonspiel, State = BookingState.Confirmed
+        }, "tester");
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(gateway.Events(sheets[0])); // all-or-nothing: sheet[0] was free but nothing was written there either
+        Assert.Single(gateway.Events(sheets[1])); // only the pre-existing booking, no new one
+    }
+
+    [Fact]
     public async Task UpdateGroupAsync_DoesNotConflictWithItsOwnUnmovedEvent()
     {
         var (service, _, facility, _) = Build();

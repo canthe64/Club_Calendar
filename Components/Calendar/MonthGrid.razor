@@ -14,7 +14,7 @@
             @{
                 var dayClubEvents = ClubEvents.Where(ce => ce.Start.Date <= cell.Date && cell.Date <= ce.End.Date).ToList();
                 var dayBookings = Bookings
-                    .Where(b => b.Start.Date == cell.Date)
+                    .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, cell.Date))
                     .GroupBy(DedupeKey)
                     .Select(g => g.First())
                     .ToList();
@@ -33,10 +33,9 @@
                 }
                 else if (item.Booking is { } b)
                 {
+                    var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, cell.Date);
                     <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">
-                        @BookingTitle(b)
-                    </div>
+                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">@(contBefore ? "← " : "")@BookingTitle(b)@(contAfter ? " →" : "")</div>
                 }
             }
             @if (!isExpanded && dayItems.Count > 3)

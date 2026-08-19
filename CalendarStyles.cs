@@ -247,6 +247,25 @@ public static class CalendarStyles
         return segments;
     }
 
+    /// <summary>Whether an item spanning [start, end] (inclusive, by date) occurs on <paramref name="day"/> -
+    /// the range-containment form every multi-day rendering filter needs. Club Events already used this
+    /// shape inline; Bookings were fixed to match here, since a same-day-only equality check silently
+    /// dropped a multi-day booking after its first day.</summary>
+    public static bool OccursOnDay(DateTime start, DateTime end, DateTime day) =>
+        start.Date <= day.Date && day.Date <= end.Date;
+
+    /// <summary>
+    /// Whether a multi-day item's chip on <paramref name="day"/> should show a continuation mark:
+    /// ShowsBefore when part of the item happened on an earlier day, ShowsAfter when more of it
+    /// continues on a later day (both can be true on a middle day). Single-day items
+    /// (Start.Date == End.Date) never show either. Shared by every Month/Week rendering spot (staff
+    /// and public) so a multi-sheet, multi-day booking doesn't read as unrelated repeated chips.
+    /// </summary>
+    public static (bool ShowsBefore, bool ShowsAfter) ContinuationMarks(DateTime start, DateTime end, DateTime day) =>
+        start.Date == end.Date
+            ? (false, false)
+            : (day.Date > start.Date, day.Date < end.Date);
+
     /// <summary>
     /// Classic calendar-view lane layout, generic so both the staff Week grid and the public Week
     /// view use the exact same algorithm instead of each maintaining their own copy: walk items in

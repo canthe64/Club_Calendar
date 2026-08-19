@@ -412,7 +412,7 @@ public static class PublicCalendarEndpoint
         var inMonth = cell.Month == anchorMonth.Month;
         var dayClubEvents = view.ClubEvents.Where(ce => ce.Start.Date <= cell.Date && cell.Date <= ce.End.Date).ToList();
         var dayBookings = view.Bookings
-            .Where(b => b.Start.Date == cell.Date)
+            .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, cell.Date))
             .Distinct()
             .OrderBy(b => b.Start)
             .ToList();
@@ -445,7 +445,8 @@ public static class PublicCalendarEndpoint
             var extraClass = extra ? " pub-cal-extra" : "";
             var display = extra ? "none" : "block";
 
-            var cellTitle = $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {b.Title}";
+            var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, cell.Date);
+            var cellTitle = $"{(contBefore ? "← " : "")}{CalendarStyles.CellStartTimeLabel(b.Start)} - {b.Title}{(contAfter ? " →" : "")}";
             sb.Append($"""
                 <div class="pub-cal-chip{extraClass}" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(time)}" data-note=""
                      style="display:{display};background:{bg};color:{textColor};border:{border};border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
@@ -605,7 +606,8 @@ public static class PublicCalendarEndpoint
                 var border = b.IsConfirmed ? $"1.5px solid {color}" : $"1.5px dashed {color}";
                 var subtitle = $"{CalendarStyles.CategoryLabel(category)} · {(b.IsConfirmed ? "Confirmed" : "Hold")}";
                 var timeText = $"{b.Start:dddd, MMM d} · {b.Start:h:mmtt}-{b.End:h:mmtt}";
-                var title = $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {b.Title}";
+                var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, day);
+                var title = $"{(contBefore ? "← " : "")}{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {b.Title}{(contAfter ? " →" : "")}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(timeText)}" data-note=""
                          style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:1;border-radius:5px;background:{bg};border:{border};color:{textColor};padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
@@ -637,7 +639,7 @@ public static class PublicCalendarEndpoint
             .Select(ce => new DayItem(ce.Start, ce.End, ce, null));
 
         var bookings = view.Bookings
-            .Where(b => b.Start.Date == day.Date)
+            .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, day.Date))
             .Distinct()
             .Select(b => new DayItem(b.Start, b.End, null, b));
 

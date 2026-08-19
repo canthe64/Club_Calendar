@@ -341,6 +341,46 @@ Two independent staff-configurable date settings, both owned by a new `Schedulin
 
 **`GetPracticeIceWindowsAsync`'s season clamp reuses its own existing horizon-clamp shape** (`earliestStart`/`latestEnd`) rather than adding a second, independent filter — a season start pushes `earliestStart` forward, a season end pulls `latestEnd` back to that date's exclusive midnight boundary, and the method's existing final per-window clamp already drops anything that ends up with `End <= Start` as a result, with no extra filtering pass needed.
 
+### 4.11 Multi-Day Sheet Bookings (added 2026-08-19)
+
+Staff feedback: a booking (the motivating case is a bonspiel running Friday evening through Sunday
+afternoon across several sheets at once) needed to span multiple calendar days with custom
+start/end times — previously `BookingDraft` had a single `Date` field, so every sheet booking was
+implicitly same-day.
+
+**Most of the stack already supported this by construction.** `SheetBooking.Start`/`End` are plain
+`DateTime`s with no same-day constraint; every `SheetBookingService` conflict check
+(`CreateAcrossSheetsAsync`, `GetEventsInRangeAsync`, `UpdateGroupAsync`) is a generic Graph
+`calendarView` overlap query, span-length-agnostic. `CalendarStyles.TopPx`/`HeightPx` already clip
+an event to the day column being rendered (an `anchorDate` parameter) rather than to the event's own
+start date — proven before this feature existed, since a non-all-day Club Event could already span
+multiple days and render correctly, clipped per day, on the hourly grids.
+
+**The actual gap was narrower: `BookingDraft` itself, and four rendering filters.** `BookingDraft`
+now splits `Date` into `StartDate`/`EndDate` (mirroring `ClubEventDraft`'s own split, §4.4), with
+`Start`/`End` computed the same way (`StartDate.Date.AddMinutes(StartMinutes)` /
+`EndDate.Date.AddMinutes(EndMinutes)`) and `LoadForEdit` computing each `Minutes` field relative to
+its *own* date — the exact bug found and fixed in `ClubEventDraft.LoadForEdit` (computing
+`EndMinutes` off `Start`'s date instead of `End`'s, silently drifting the end time on re-save) is
+not repeated here. `Reset()` defaults `EndDate = StartDate`, so the common same-day case costs
+nothing extra. A ~14-day span is a soft validation-message cap (not a technical limit) guarding
+against a fat-fingered end date.
+
+Four booking-membership filters, in `MonthGrid.razor`, `WeekGrid.razor`, and twice in
+`PublicCalendarEndpoint.cs` (Month's day-cell builder, and the `TimedItemsForDay` shared by public
+Week and Day), had compared `b.Start.Date == day.Date` — exact-date equality, unlike the
+range-containment form Club Events used two lines away in the same files. All four now go through
+`CalendarStyles.OccursOnDay(start, end, day)` (`start.Date <= day.Date && day.Date <= end.Date`), a
+shared pure function so the four call sites can't drift apart the way a duplicated policy has
+before (D75). A companion `CalendarStyles.ContinuationMarks(start, end, day)` returns which of a
+`→` (more of the booking follows on a later day) or `←` (part of it happened on an earlier day) mark
+a chip should show — both can apply on a middle day of a longer span — so a multi-sheet, multi-day
+booking's chips read as one continuous event rather than a wall of unrelated same-titled repeats.
+Deliberately scoped to sheet bookings only: New Series (`SeriesDraft`) is untouched, a separate type
+with its own single-occurrence-per-date model with no interaction to design around, and Club Events
+already rendered multi-day spans without a continuation mark before this feature and still do —
+adding one there was out of scope for what was asked.
+
 ---
 
 ## 5. API Interactions

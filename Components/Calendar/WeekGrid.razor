@@ -53,9 +53,10 @@
                         }
                         else if (laid.Item.Booking is { } b)
                         {
+                            var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, day);
                             <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
                                  style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(b);border:@CalendarStyles.BorderStyle(b);color:@CalendarStyles.TextColorStyle(b);padding:2px 5px;overflow:hidden;cursor:pointer">
-                                <div style="font-size:12px;font-weight:600">@($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}")</div>
+                                <div style="font-size:12px;font-weight:600">@(contBefore ? "← " : "")@($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}")@(contAfter ? " →" : "")</div>
                             </div>
                         }
                     }
@@ -126,7 +127,7 @@
             .Select(ce => new DayItem(ce.Start, ce.End, ce, null, 0));
 
         var consolidatedBookings = Bookings
-            .Where(b => b.Start.Date == day.Date)
+            .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, day.Date))
             .GroupBy(DedupeKey)
             .Select(g => new DayItem(g.First().Start, g.First().End, null, g.First(), g.Count()));
 
