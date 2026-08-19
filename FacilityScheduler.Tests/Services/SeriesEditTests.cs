@@ -18,7 +18,9 @@ public class SeriesEditTests
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
-        return (new SheetBookingService(gateway, cache, facility, TestAppLog.Create(), new ViewCacheRegistry(cache)), gateway, facility);
+        var appLog = TestAppLog.Create();
+        var viewCache = new ViewCacheRegistry(cache);
+        return (new SheetBookingService(gateway, cache, facility, appLog, viewCache, new SchedulingWindowService(appLog, viewCache)), gateway, facility);
     }
 
     /// <summary>A 4-week Tuesday-evening league on the first two sheets.</summary>

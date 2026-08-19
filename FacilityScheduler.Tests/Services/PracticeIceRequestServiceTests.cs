@@ -10,10 +10,10 @@ public class PracticeIceRequestServiceTests
     private const string HostName = "Jane Curler";
     private const string HostEmail = "jane@example.com";
 
-    private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail)
+    private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail, SchedulingWindowService Window)
         Build(PracticeIceOptions? practiceIce = null) => Build(out _, practiceIce);
 
-    private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail)
+    private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail, SchedulingWindowService Window)
         Build(out FakeGraphEventGateway gateway, PracticeIceOptions? practiceIce = null)
     {
         var facility = TestFacility.Create(practiceIce: practiceIce);
@@ -21,18 +21,19 @@ public class PracticeIceRequestServiceTests
         var cache = new MemoryCache(new MemoryCacheOptions());
         var appLog = TestAppLog.Create(facility);
         var viewCache = new ViewCacheRegistry(cache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache);
+        var window = new SchedulingWindowService(appLog, viewCache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
         var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var availability = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache);
+        var availability = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
         var mail = new FakeGraphMailGateway();
         var requestService = new PracticeIceRequestService(bookingService, availability, mail, facility, appLog);
-        return (requestService, bookingService, availability, facility, mail);
+        return (requestService, bookingService, availability, facility, mail, window);
     }
 
     [Fact]
     public async Task Submit_MailNotConfigured_IsBlockedAndCreatesNothing()
     {
-        var (requestService, bookingService, _, facility, mail) = Build(practiceIce: new PracticeIceOptions());
+        var (requestService, bookingService, _, facility, mail, _) = Build(practiceIce: new PracticeIceOptions());
         var day = facility.Today.AddDays(5);
 
         var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
@@ -47,7 +48,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_NotCertified_IsRejected()
     {
-        var (requestService, _, _, facility, mail) = Build();
+        var (requestService, _, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: false, notes: null);
@@ -59,7 +60,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_MissingHostEmail_IsRejected()
     {
-        var (requestService, _, _, facility, _) = Build();
+        var (requestService, _, _, facility, _, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, "", certified: true, notes: null);
@@ -70,7 +71,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_StartOutsideEligibleHours_IsRejected()
     {
-        var (requestService, _, _, facility, _) = Build();
+        var (requestService, _, _, facility, _, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var result = await requestService.SubmitAsync(day.AddHours(23), 60, HostName, HostEmail, certified: true, notes: null);
@@ -82,7 +83,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_DurationLongerThanTheOpenWindow_IsRejected()
     {
-        var (requestService, _, _, facility, _) = Build();
+        var (requestService, _, _, facility, _, _) = Build();
         var day = facility.Today.AddDays(5);
 
         // The default eligible window is 6:00-22:00 (960 minutes) - 990 doesn't fit.
@@ -98,7 +99,7 @@ public class PracticeIceRequestServiceTests
         // The one free-text field a non-staff member can write into the system of record. Unbounded,
         // it can overflow the extended-property blob and fail the Graph write partway through a
         // five-sheet create - rejecting up front is both a better message and avoids that path.
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail,
@@ -113,7 +114,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_NotesExactlyAtTheCap_IsAccepted()
     {
-        var (requestService, _, _, facility, _) = Build();
+        var (requestService, _, _, facility, _, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail,
@@ -127,7 +128,7 @@ public class PracticeIceRequestServiceTests
     {
         // The public cache used to expire on TTL only, on the reasoning that nothing wrote through
         // it - practice ice made that false, so a just-claimed slot kept showing as free.
-        var (requestService, _, availability, facility, _) = Build();
+        var (requestService, _, availability, facility, _, _) = Build();
         var day = facility.Today.AddDays(5);
         var start = day.AddHours(10);
 
@@ -144,7 +145,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task Submit_Success_CreatesHoldAcrossEverySheetAndNotifiesApprovers()
     {
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5);
         var start = day.AddHours(10);
 
@@ -179,7 +180,7 @@ public class PracticeIceRequestServiceTests
         // harden the public open-slot computation against. (Writing it through bookingService would
         // now invalidate the public cache, so the courtesy check would catch it first and this path
         // would never be reached.)
-        var (requestService, _, availability, facility, mail) = Build(out var gateway);
+        var (requestService, _, availability, facility, mail, _) = Build(out var gateway);
         var day = facility.Today.AddDays(5);
         var start = day.AddHours(10);
 
@@ -208,7 +209,7 @@ public class PracticeIceRequestServiceTests
         // make an already-successful booking write look like a failure - the write happened, and
         // is what SubmitAsync's caller should be told, with the notification failure surfaced
         // separately rather than as an unhandled exception.
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         mail.ThrowOnSend = true;
         var day = facility.Today.AddDays(5);
 
@@ -222,7 +223,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task ApproveAsync_MailSendFails_StillConfirmsTheGroup()
     {
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5).AddHours(10);
 
         var created = await bookingService.CreateAcrossSheetsAsync(TestFacility.SheetMailboxes, new SheetBooking
@@ -244,7 +245,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task DeclineAsync_MailSendFails_StillCancelsTheGroup()
     {
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5).AddHours(10);
 
         var created = await bookingService.CreateAcrossSheetsAsync(TestFacility.SheetMailboxes, new SheetBooking
@@ -264,7 +265,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task GetPendingAsync_OnlyIncludesPracticeIceHolds_OrderedByUpcomingStart()
     {
-        var (requestService, bookingService, _, facility, _) = Build();
+        var (requestService, bookingService, _, facility, _, _) = Build();
         var soon = facility.Today.AddDays(2).AddHours(10);
         var later = facility.Today.AddDays(6).AddHours(10);
 
@@ -295,7 +296,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task ApproveAsync_ConfirmsEveryMemberAndNotifiesTheVolunteer()
     {
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5).AddHours(10);
 
         var created = await bookingService.CreateAcrossSheetsAsync(TestFacility.SheetMailboxes, new SheetBooking
@@ -320,7 +321,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task ApproveAsync_UnknownGroup_ReturnsFailure()
     {
-        var (requestService, _, _, _, _) = Build();
+        var (requestService, _, _, _, _, _) = Build();
 
         var result = await requestService.ApproveAsync(Guid.NewGuid(), "staff-user");
 
@@ -331,7 +332,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task DeclineAsync_EmptyReason_Throws()
     {
-        var (requestService, _, _, _, _) = Build();
+        var (requestService, _, _, _, _, _) = Build();
 
         await Assert.ThrowsAsync<ArgumentException>(() => requestService.DeclineAsync(Guid.NewGuid(), "  ", "staff-user"));
     }
@@ -339,7 +340,7 @@ public class PracticeIceRequestServiceTests
     [Fact]
     public async Task DeclineAsync_RemovesTheHoldAndNotifiesTheVolunteerWithTheReason()
     {
-        var (requestService, bookingService, _, facility, mail) = Build();
+        var (requestService, bookingService, _, facility, mail, _) = Build();
         var day = facility.Today.AddDays(5).AddHours(10);
 
         var created = await bookingService.CreateAcrossSheetsAsync(TestFacility.SheetMailboxes, new SheetBooking

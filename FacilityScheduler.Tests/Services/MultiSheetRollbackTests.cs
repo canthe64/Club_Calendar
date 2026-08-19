@@ -18,7 +18,9 @@ public class MultiSheetRollbackTests
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var service = new SheetBookingService(gateway, cache, facility, TestAppLog.Create(), new ViewCacheRegistry(cache));
+        var appLog = TestAppLog.Create();
+        var viewCache = new ViewCacheRegistry(cache);
+        var service = new SheetBookingService(gateway, cache, facility, appLog, viewCache, new SchedulingWindowService(appLog, viewCache));
         return (service, gateway, facility);
     }
 

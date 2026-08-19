@@ -5,6 +5,7 @@ using FacilityScheduler.Tests.TestSupport;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
@@ -18,6 +19,9 @@ namespace FacilityScheduler.Tests.Components;
 /// </summary>
 public class MainLayoutTests : BunitContext
 {
+    private SchedulingWindowService Window = null!;
+    private FacilityConfiguration Facility = null!;
+
     private FakeAuthStateProvider Arrange(bool isStaff)
     {
         var auth = new FakeAuthStateProvider { IsStaff = isStaff, DisplayName = "Jane Curler" };
@@ -31,6 +35,14 @@ public class MainLayoutTests : BunitContext
         Services.RemoveAll<IAuthorizationService>();
         Services.AddAuthorizationCore(StaffAuthorizationPolicies.Configure);
         Services.AddCascadingAuthenticationState();
+
+        Facility = TestFacility.Create();
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var appLog = TestAppLog.Create(Facility);
+        Window = new SchedulingWindowService(appLog, new ViewCacheRegistry(cache));
+        Services.AddSingleton(Facility);
+        Services.AddSingleton(Window);
+
         return auth;
     }
 
@@ -117,5 +129,110 @@ public class MainLayoutTests : BunitContext
 
         Assert.Contains("Jane Curler", greeting);
         Assert.DoesNotContain("tester@example.com", greeting);
+    }
+
+    [Fact]
+    public async Task StaffMember_CutoffWithin30Days_SeesTheBanner()
+    {
+        Arrange(isStaff: true);
+        await Window.SetPublicCutoffAsync(Facility.Today.AddDays(10), "tester");
+
+        var cut = Render<MainLayout>();
+
+        Assert.Contains("only shows bookings through", cut.Markup);
+    }
+
+    [Fact]
+    public async Task StaffMember_CutoffFarInTheFuture_NoBanner()
+    {
+        Arrange(isStaff: true);
+        await Window.SetPublicCutoffAsync(Facility.Today.AddDays(60), "tester");
+
+        var cut = Render<MainLayout>();
+
+        Assert.DoesNotContain("only shows bookings through", cut.Markup);
+    }
+
+    [Fact]
+    public void StaffMember_NoCutoffConfigured_NoBanner()
+    {
+        Arrange(isStaff: true);
+
+        var cut = Render<MainLayout>();
+
+        Assert.DoesNotContain("only shows bookings through", cut.Markup);
+    }
+
+    [Fact]
+    public async Task StaffMember_CutoffAlreadyPassed_BannerStillShows()
+    {
+        // Operator decision: stays visible past the cutoff date itself, not just during the
+        // 30-day countdown - a season left hidden with nobody having updated it deserves an
+        // ongoing reminder, not a one-time heads-up.
+        Arrange(isStaff: true);
+        await Window.SetPublicCutoffAsync(Facility.Today.AddDays(-5), "tester");
+
+        var cut = Render<MainLayout>();
+
+        Assert.Contains("only shows bookings through", cut.Markup);
+    }
+
+    [Fact]
+    public async Task NonStaffMember_NeverSeesTheBanner_EvenWithACutoffConfigured()
+    {
+        Arrange(isStaff: false);
+        await Window.SetPublicCutoffAsync(Facility.Today.AddDays(1), "tester");
+
+        var cut = Render<MainLayout>();
+
+        Assert.DoesNotContain("only shows bookings through", cut.Markup);
+    }
+
+    // --- Pure date-math helpers behind the banner, tested directly for exact boundary behavior
+    // rather than only through a full render (same reasoning as ResolveMonthAnchor). ---
+
+    [Theory]
+    [InlineData(-31, false)] // today is 31 days before cutoff - outside the 30-day window
+    [InlineData(-30, true)]  // exactly 30 days before - the edge, included
+    [InlineData(0, true)]    // today is the cutoff date itself
+    [InlineData(365, true)]  // today is long past the cutoff - stays visible (operator decision)
+    public void ShouldShowCutoffBanner_ThirtyDayWindow_StaysTrueForever(int todaysOffsetFromCutoffDays, bool expected)
+    {
+        var cutoff = new DateTime(2026, 8, 30);
+        var today = cutoff.AddDays(todaysOffsetFromCutoffDays);
+
+        Assert.Equal(expected, MainLayout.ShouldShowCutoffBanner(cutoff, today));
+    }
+
+    [Fact]
+    public void CutoffBannerMessage_FutureDate_SaysDaysFromToday()
+    {
+        var message = MainLayout.CutoffBannerMessage(new DateTime(2026, 8, 30), new DateTime(2026, 8, 20));
+
+        Assert.Contains("Aug 30, 2026", message);
+        Assert.Contains("10 days from today", message);
+    }
+
+    [Fact]
+    public void CutoffBannerMessage_Today_SaysToday()
+    {
+        var message = MainLayout.CutoffBannerMessage(new DateTime(2026, 8, 30), new DateTime(2026, 8, 30));
+
+        Assert.Contains("(today)", message);
+    }
+
+    [Fact]
+    public void CutoffBannerMessage_AlreadyPassed_SaysDaysAgo()
+    {
+        var message = MainLayout.CutoffBannerMessage(new DateTime(2026, 8, 30), new DateTime(2026, 9, 4));
+
+        Assert.Contains("5 days ago", message);
+    }
+
+    [Fact]
+    public void CutoffBannerMessage_SingularDay_NotPluralized()
+    {
+        Assert.Contains("1 day from today", MainLayout.CutoffBannerMessage(new DateTime(2026, 8, 30), new DateTime(2026, 8, 29)));
+        Assert.Contains("1 day ago", MainLayout.CutoffBannerMessage(new DateTime(2026, 8, 30), new DateTime(2026, 8, 31)));
     }
 }

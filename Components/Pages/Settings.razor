@@ -4,6 +4,7 @@
 @inject AppLogService LogService
 @inject SheetBookingService BookingService
 @inject AuthenticationStateProvider AuthProvider
+@inject SchedulingWindowService Window
 
 <PageTitle>Settings</PageTitle>
 
@@ -75,6 +76,62 @@
         }
     </section>
 
+    <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
+        <h2 style="font-size:18px;margin-bottom:8px">Public Calendar Visibility</h2>
+        <p style="color:#5a7183;font-size:15px;margin-bottom:10px;max-width:640px">
+            Hides anything starting after this date from the public calendar and the club-website
+            widget only - staff still see and edit everything on the staff calendar regardless.
+            Leave blank to show everything publicly, same as today.
+        </p>
+        <div style="font-size:15px;color:#1e2a33;font-weight:600;margin-bottom:8px">
+            @(Window.PublicCutoffDate is { } cutoff ? $"Currently hiding anything after {cutoff:MMM d, yyyy}." : "Currently showing everything.")
+        </div>
+        <input type="date" value="@(_cutoffDraft?.ToString("yyyy-MM-dd"))" @onchange="OnCutoffDateChanged"
+               style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:15px">
+        <button class="btn btn-primary" style="margin-left:16px" @onclick="SaveCutoff" disabled="@_savingCutoff">Apply</button>
+        <button class="btn btn-secondary" @onclick="ClearCutoff" disabled="@(_savingCutoff || _cutoffDraft is null)">Clear</button>
+        @if (_cutoffSavedMessage is not null)
+        {
+            <span style="margin-left:10px;color:#2d7a3f;font-size:15px">@_cutoffSavedMessage</span>
+        }
+    </section>
+
+    <section style="margin-bottom:28px;padding-bottom:20px;border-bottom:1px solid #e7ecef">
+        <h2 style="font-size:18px;margin-bottom:8px">Booking Season</h2>
+        <p style="color:#5a7183;font-size:15px;margin-bottom:10px;max-width:640px">
+            Rejects new sheet bookings (staff bookings, series, and practice ice requests) outside
+            this window, and stops advertising off-season slots on the public search tool, the
+            widget, and practice ice. <strong>Club Events are exempt</strong> - closures, off-season
+            meetings, and next season's planning still go on the calendar regardless. Leave either
+            date blank to leave that side unrestricted.
+        </p>
+        <div style="font-size:15px;color:#1e2a33;font-weight:600;margin-bottom:8px">
+            @SeasonSummary
+        </div>
+        <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+            <div>
+                <div style="font-size:12px;color:#90a0ab;margin-bottom:2px">Season start</div>
+                <input type="date" value="@(_seasonStartDraft?.ToString("yyyy-MM-dd"))" @onchange="OnSeasonStartChanged"
+                       style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:15px">
+            </div>
+            <div>
+                <div style="font-size:12px;color:#90a0ab;margin-bottom:2px">Season end</div>
+                <input type="date" value="@(_seasonEndDraft?.ToString("yyyy-MM-dd"))" @onchange="OnSeasonEndChanged"
+                       style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:15px">
+            </div>
+            <button class="btn btn-primary" @onclick="SaveSeasonWindow" disabled="@(_savingSeason || !SeasonIsValid)">Save</button>
+            <button class="btn btn-secondary" @onclick="ClearSeasonWindow" disabled="@(_savingSeason || (_seasonStartDraft is null && _seasonEndDraft is null))">Clear</button>
+        </div>
+        @if (!SeasonIsValid)
+        {
+            <div style="font-size:13px;color:#a02c21;margin-top:6px">The season end must be on or after the season start.</div>
+        }
+        @if (_seasonSavedMessage is not null)
+        {
+            <span style="color:#2d7a3f;font-size:15px">@_seasonSavedMessage</span>
+        }
+    </section>
+
     <section>
         <h2 style="font-size:18px;margin-bottom:8px">Recent Activity</h2>
         <p style="color:#5a7183;font-size:15px;margin-bottom:8px">Most recent 500 log lines.</p>
@@ -97,6 +154,25 @@
     private bool _savingInterval;
     private string? _intervalSavedMessage;
 
+    private DateTime? _cutoffDraft;
+    private bool _savingCutoff;
+    private string? _cutoffSavedMessage;
+
+    private DateTime? _seasonStartDraft;
+    private DateTime? _seasonEndDraft;
+    private bool _savingSeason;
+    private string? _seasonSavedMessage;
+
+    private bool SeasonIsValid => _seasonStartDraft is null || _seasonEndDraft is null || _seasonEndDraft >= _seasonStartDraft;
+
+    private string SeasonSummary => (Window.SeasonStartDate, Window.SeasonEndDate) switch
+    {
+        ({ } s, { } e) => $"Currently {s:MMM d, yyyy} – {e:MMM d, yyyy}.",
+        ({ } s, null) => $"Currently starts {s:MMM d, yyyy}, no end date set.",
+        (null, { } e) => $"Currently ends {e:MMM d, yyyy}, no start date set.",
+        _ => "Currently unrestricted - bookings allowed any time.",
+    };
+
     protected override async Task OnInitializedAsync()
     {
         _level = LogService.CurrentLevel;
@@ -108,7 +184,70 @@
             ? current
             : MinimumIntervalChoices.OrderBy(m => Math.Abs(m - current)).First();
 
+        _cutoffDraft = Window.PublicCutoffDate;
+        _seasonStartDraft = Window.SeasonStartDate;
+        _seasonEndDraft = Window.SeasonEndDate;
+
         await RefreshTail();
+    }
+
+    private void OnCutoffDateChanged(ChangeEventArgs e) =>
+        _cutoffDraft = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+
+    private void OnSeasonStartChanged(ChangeEventArgs e) =>
+        _seasonStartDraft = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+
+    private void OnSeasonEndChanged(ChangeEventArgs e) =>
+        _seasonEndDraft = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+
+    private async Task SaveCutoff()
+    {
+        _savingCutoff = true;
+        _cutoffSavedMessage = null;
+        try
+        {
+            var actor = await GetCurrentUserNameAsync();
+            await Window.SetPublicCutoffAsync(_cutoffDraft, actor);
+            _cutoffSavedMessage = "Saved.";
+        }
+        finally
+        {
+            _savingCutoff = false;
+        }
+    }
+
+    private async Task ClearCutoff()
+    {
+        _cutoffDraft = null;
+        await SaveCutoff();
+    }
+
+    private async Task SaveSeasonWindow()
+    {
+        if (!SeasonIsValid)
+        {
+            return;
+        }
+
+        _savingSeason = true;
+        _seasonSavedMessage = null;
+        try
+        {
+            var actor = await GetCurrentUserNameAsync();
+            await Window.SetSeasonWindowAsync(_seasonStartDraft, _seasonEndDraft, actor);
+            _seasonSavedMessage = "Saved.";
+        }
+        finally
+        {
+            _savingSeason = false;
+        }
+    }
+
+    private async Task ClearSeasonWindow()
+    {
+        _seasonStartDraft = null;
+        _seasonEndDraft = null;
+        await SaveSeasonWindow();
     }
 
     private async Task SaveMinimumInterval()

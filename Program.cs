@@ -42,6 +42,7 @@ builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphGroupGatewa
 builder.Services.AddSingleton<FacilityScheduler.Services.FacilityConfiguration>();
 builder.Services.AddSingleton<FacilityScheduler.Services.ViewCacheRegistry>();
 builder.Services.AddSingleton<FacilityScheduler.Services.AppLogService>();
+builder.Services.AddSingleton<FacilityScheduler.Services.SchedulingWindowService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.StaffAccessService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.SheetBookingService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();

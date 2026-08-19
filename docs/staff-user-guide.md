@@ -105,6 +105,12 @@ or a closure Club Event) are flagged per date but **never automatically skipped*
 per date, using the **Skip**/**Include** toggle next to each one. Click **Create series** once you're
 satisfied with the selection.
 
+If a **Booking Season** is configured (Settings, §7), any of your requested dates that fall outside
+it are shown separately, marked *"outside the booking season"* with no Skip/Include toggle — these
+are never created, and it isn't a choice you can override here. Your First date/Last date on Step 1
+are never changed by this; only which dates actually get created is affected. If every date ends up
+skipped or outside the season, **Create series** is disabled until you adjust the range.
+
 **Editing a series** has two paths, both from an occurrence's detail view (§3.2):
 
 - **Edit booking…** — the ordinary single-occurrence edit. Changes only the date you clicked,
@@ -213,6 +219,29 @@ and/or after it is normally offered as its own bookable slot (titled "Available 
 §3.2) — unless it's shorter than this many minutes, in which case that leftover time is dropped
 instead of offered as an unusably short sliver. Choose 30, 60, 90, or 120 minutes and click **Save**
 — it takes effect immediately, no restart needed.
+
+### Public Calendar Visibility
+
+Hides anything starting after a chosen date from the **public** calendar and the club-website widget
+only — you still see and edit everything on the staff calendar regardless. Useful for building out
+next season's schedule ahead of time without members seeing a half-finished calendar. Pick a date and
+click **Apply**; click **Clear** to go back to showing everything publicly. Leave it blank (the
+default) and nothing is hidden.
+
+### Booking Season
+
+Rejects new bookings — the staff form, series, and member practice ice requests — outside a
+start/end window, and stops the public search tool, the widget, and practice ice from advertising
+off-season slots in the first place. **Club Events are exempt** — closures, off-season committee
+meetings, and next season's planning still go on the calendar regardless of this setting. Either date
+can be left blank to leave that side unrestricted (e.g. a start date with no end lets bookings begin
+once the season opens, with no cutoff on how far out they can go). Set one or both dates and click
+**Save**; **Clear** removes the restriction entirely.
+
+Once you're within 30 days of a configured public-calendar cutoff, a reminder banner appears at the
+top of every staff page until you update or clear the date — it stays up even after the date itself
+passes, since a season quietly staying hidden with nobody having noticed is worth flagging for longer
+than a one-time heads-up. The season start/end window has no equivalent banner.
 
 ### Activity Log
 

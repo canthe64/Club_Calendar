@@ -8,19 +8,22 @@ namespace FacilityScheduler.Tests.Services;
 
 public class SheetBookingServiceTests
 {
-    private static (SheetBookingService Service, FakeGraphEventGateway Gateway, FacilityConfiguration Facility) Build()
+    private static (SheetBookingService Service, FakeGraphEventGateway Gateway, FacilityConfiguration Facility, SchedulingWindowService Window) Build()
     {
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var service = new SheetBookingService(gateway, cache, facility, TestAppLog.Create(), new ViewCacheRegistry(cache));
-        return (service, gateway, facility);
+        var appLog = TestAppLog.Create();
+        var viewCache = new ViewCacheRegistry(cache);
+        var window = new SchedulingWindowService(appLog, viewCache);
+        var service = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
+        return (service, gateway, facility, window);
     }
 
     [Fact]
     public async Task CreateAsync_OverlappingTimeOnSameSheet_ReturnsConflictAndWritesNothing()
     {
-        var (service, gateway, facility) = Build();
+        var (service, gateway, facility, _) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(18);
 
@@ -43,7 +46,7 @@ public class SheetBookingServiceTests
     [Fact]
     public async Task CreateAsync_NonOverlappingTime_Succeeds()
     {
-        var (service, _, facility) = Build();
+        var (service, _, facility, _) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(9);
 
@@ -63,7 +66,7 @@ public class SheetBookingServiceTests
     [Fact]
     public async Task CreateAcrossSheetsAsync_ConflictOnOneSheet_CreatesNothingOnAnySheet()
     {
-        var (service, gateway, facility) = Build();
+        var (service, gateway, facility, _) = Build();
         var sheets = TestFacility.SheetMailboxes;
         var start = facility.Today.AddDays(1).AddHours(18);
 
@@ -86,7 +89,7 @@ public class SheetBookingServiceTests
     [Fact]
     public async Task UpdateGroupAsync_DoesNotConflictWithItsOwnUnmovedEvent()
     {
-        var (service, _, facility) = Build();
+        var (service, _, facility, _) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(18);
 
@@ -108,7 +111,7 @@ public class SheetBookingServiceTests
     [Fact]
     public async Task ClaimHoldAsync_DropsRemainderShorterThanMinimumInterval_KeepsRemainderAtOrAboveIt()
     {
-        var (service, gateway, facility) = Build();
+        var (service, gateway, facility, _) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var holdStart = facility.Today.AddDays(1).AddHours(9);
         var holdEnd = holdStart.AddHours(3); // 9:00-12:00
@@ -142,7 +145,7 @@ public class SheetBookingServiceTests
         // Regression test for H1: a reopened hold must not keep the departed booking's BookedBy/
         // ExternalBookingId - Graph's PATCH only upserts extended properties it includes, so the fix
         // must explicitly send an empty value rather than omitting them.
-        var (service, gateway, facility) = Build();
+        var (service, gateway, facility, _) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(19);
         var end = start.AddHours(2);
@@ -169,7 +172,7 @@ public class SheetBookingServiceTests
     [Fact]
     public async Task CancelAsync_AlreadyGone_IsTreatedAsNoOpNotAnError()
     {
-        var (service, gateway, facility) = Build();
+        var (service, gateway, facility, _) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(9);
         var created = await service.CreateHoldAsync(new SheetBooking
@@ -184,5 +187,120 @@ public class SheetBookingServiceTests
 
         await service.CancelAsync(sheet, eventId, "tester"); // must not throw
         Assert.Empty(gateway.Events(sheet));
+    }
+
+    // --- Season window: CreateAcrossSheetsAsync only - the single low-level write both the staff
+    // form and PracticeIceRequestService.SubmitAsync go through. Deliberately not exercised against
+    // CreateHoldAsync/CreateConfirmedAsync here: those route through a separate CreateAsync and
+    // aren't called anywhere in production code (verified by grep) - only CreateAcrossSheetsAsync
+    // is a real write path this check needs to cover. ---
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_BeforeTheSeasonStarts_IsRejectedAndWritesNothing()
+    {
+        var (service, gateway, facility, window) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(18);
+        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
+
+        var result = await service.CreateAcrossSheetsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Too Early"
+        }, "tester");
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(gateway.Events(sheet));
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_AfterTheSeasonEnds_IsRejectedAndWritesNothing()
+    {
+        var (service, gateway, facility, window) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(300).AddHours(18);
+        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
+
+        var result = await service.CreateAcrossSheetsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Too Late"
+        }, "tester");
+
+        Assert.False(result.IsSuccess);
+        Assert.Empty(gateway.Events(sheet));
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_InsideTheSeason_Succeeds()
+    {
+        var (service, gateway, facility, window) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(100).AddHours(18);
+        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
+
+        var result = await service.CreateAcrossSheetsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "In Season"
+        }, "tester");
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(gateway.Events(sheet));
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_ExactlyOnTheSeasonBoundaryDates_Succeeds()
+    {
+        var (service, _, facility, window) = Build();
+        var sheets = TestFacility.SheetMailboxes;
+        var seasonStart = facility.Today.AddDays(30);
+        var seasonEnd = facility.Today.AddDays(200);
+        await window.SetSeasonWindowAsync(seasonStart, seasonEnd, "tester");
+
+        var onStart = await service.CreateAcrossSheetsAsync([sheets[0]], new SheetBooking
+        {
+            SheetMailbox = "", Start = seasonStart.AddHours(18), End = seasonStart.AddHours(19), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Opening Day"
+        }, "tester");
+        var onEnd = await service.CreateAcrossSheetsAsync([sheets[1]], new SheetBooking
+        {
+            SheetMailbox = "", Start = seasonEnd.AddHours(18), End = seasonEnd.AddHours(19), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Closing Day"
+        }, "tester");
+
+        Assert.True(onStart.IsSuccess);
+        Assert.True(onEnd.IsSuccess);
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_NoSeasonConfigured_NoRestriction()
+    {
+        var (service, gateway, facility, _) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(400).AddHours(18); // far future - would fail if some default season applied
+
+        var result = await service.CreateAcrossSheetsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Whenever"
+        }, "tester");
+
+        Assert.True(result.IsSuccess);
+        Assert.Single(gateway.Events(sheet));
+    }
+
+    [Fact]
+    public async Task CreateAcrossSheetsAsync_RejectedOffSeason_TheConflictMessageNamesTheSeasonDates()
+    {
+        var (service, _, facility, window) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(18);
+        var seasonStart = facility.Today.AddDays(30);
+        var seasonEnd = facility.Today.AddDays(200);
+        await window.SetSeasonWindowAsync(seasonStart, seasonEnd, "tester");
+
+        var result = await service.CreateAcrossSheetsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = start, End = start.AddHours(1), Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Too Early"
+        }, "tester");
+
+        var conflict = Assert.Single(result.Conflicts);
+        Assert.Contains(seasonStart.ToString("MMM d, yyyy"), conflict.RenterName);
+        Assert.Contains(seasonEnd.ToString("MMM d, yyyy"), conflict.RenterName);
     }
 }

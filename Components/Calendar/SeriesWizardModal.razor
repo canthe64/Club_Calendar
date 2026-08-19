@@ -133,33 +133,56 @@
                     · @string.Join(", ", Draft.SelectedSheets.Select(DayGridSheetLabel))
                     · @CalendarStyles.FormatMinutes(Draft.StartMinutes)-@CalendarStyles.FormatMinutes(Draft.EndMinutes)
                 </div>
+                @if (!string.IsNullOrWhiteSpace(SeasonWarning))
+                {
+                    <div style="display:flex;align-items:center;gap:6px;background:#fdf8ec;border:1px solid #f0d58c;border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:12.5px;color:#8a6d1f">
+                        @SeasonWarning
+                    </div>
+                }
                 <div style="display:flex;align-items:center;gap:6px;background:@(ActiveConflictCount == 0 ? "#eaf6ec" : "#fdf1f0");border:1px solid @(ActiveConflictCount == 0 ? "#a8d5b5" : "#e8b4ae");border-radius:6px;padding:7px 10px;margin-bottom:8px;font-size:13px;font-weight:600;color:@(ActiveConflictCount == 0 ? "#2c7a43" : "#a02c21")">
-                    @(ActiveConflictCount == 0 ? "✓ No conflicts — clear to create" : $"⚠ {ActiveConflictCount} date(s) still have conflicts")
+                    @StatusBannerText
                 </div>
                 <div style="display:flex;flex-direction:column;gap:5px;font-size:13.5px;max-height:340px;overflow:auto">
                     @foreach (var date in Draft.ComputeCandidateDates())
                     {
+                        var isSeasonExcluded = SeasonExcludedDates.Contains(date);
                         var isSkipped = Draft.SkippedDates.Contains(date);
                         var hasConflict = Conflicts.TryGetValue(date, out var conflictList) && conflictList.Count > 0;
-                        <div style="display:flex;justify-content:space-between;align-items:center;background:@(isSkipped ? "#f6f8f9" : hasConflict ? "#fdf1f0" : "#eaf1f8");border:1px solid @(isSkipped ? "#e7ecef" : hasConflict ? "#e8b4ae" : "#a9c7e4");border-radius:6px;padding:7px 10px">
-                            <span style="color:@(isSkipped ? "#90a0ab" : "#1e2a33");text-decoration:@(isSkipped ? "line-through" : "none")">@date.ToString("ddd, MMM d")</span>
-                            <span style="display:flex;gap:8px;align-items:center">
-                                @if (hasConflict && !isSkipped)
-                                {
-                                    <span style="font-size:12px;color:#a02c21">conflicts with @conflictList!.Count booking(s)</span>
-                                }
-                                <span @onclick="() => ToggleSkip(date)" style="border:1px solid #d7dfe5;color:#2d5f8a;border-radius:5px;padding:2px 9px;font-weight:600;font-size:12.5px;cursor:pointer">@(isSkipped ? "Include" : "Skip")</span>
-                            </span>
+                        <div style="display:flex;justify-content:space-between;align-items:center;background:@(isSeasonExcluded ? "#f1efec" : isSkipped ? "#f6f8f9" : hasConflict ? "#fdf1f0" : "#eaf1f8");border:1px solid @(isSeasonExcluded ? "#c1ccd4" : isSkipped ? "#e7ecef" : hasConflict ? "#e8b4ae" : "#a9c7e4");border-radius:6px;padding:7px 10px">
+                            <span style="color:@(isSeasonExcluded || isSkipped ? "#90a0ab" : "#1e2a33");text-decoration:@(isSeasonExcluded || isSkipped ? "line-through" : "none")">@date.ToString("ddd, MMM d")</span>
+                            @if (isSeasonExcluded)
+                            {
+                                @* No Skip/Include toggle - unlike a real conflict, an out-of-season date isn't
+                                   staff's call to override, so there's nothing to toggle back to Include. *@
+                                <span style="font-size:12px;color:#5a7183;font-style:italic">outside the booking season</span>
+                            }
+                            else
+                            {
+                                <span style="display:flex;gap:8px;align-items:center">
+                                    @if (hasConflict && !isSkipped)
+                                    {
+                                        <span style="font-size:12px;color:#a02c21">conflicts with @conflictList!.Count booking(s)</span>
+                                    }
+                                    <span @onclick="() => ToggleSkip(date)" style="border:1px solid #d7dfe5;color:#2d5f8a;border-radius:5px;padding:2px 9px;font-weight:600;font-size:12.5px;cursor:pointer">@(isSkipped ? "Include" : "Skip")</span>
+                                </span>
+                            }
                         </div>
                     }
                 </div>
                 <div style="display:flex;gap:8px;margin-top:14px;font-size:14px;font-weight:600">
-                    <span @onclick="HandleCreateClick" style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : "#c62f2f");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving ? "default" : "pointer")">
-                        @(IsSaving ? "Creating..." : $"Create series — {Draft.ComputeCandidateDates().Count - Draft.SkippedDates.Count} dates")
+                    <span @onclick="HandleCreateClick" style="flex:1;text-align:center;background:@(IsSaving || DatesToCreateCount == 0 ? "#d98e8e" : "#c62f2f");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving || DatesToCreateCount == 0 ? "default" : "pointer")">
+                        @(IsSaving ? "Creating..." : $"Create series — {DatesToCreateCount} dates")
                     </span>
                     <span @onclick="() => OnBack.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 14px;border-radius:6px;cursor:pointer">&#8592; Back</span>
                 </div>
-                <div style="font-size:12px;color:#90a0ab;margin-top:8px">Skipping is always your explicit choice — conflicts are flagged, never auto-skipped.</div>
+                @if (DatesToCreateCount == 0)
+                {
+                    <div style="font-size:12px;color:#a02c21;margin-top:8px">Every date is skipped or outside the booking season - nothing would be created.</div>
+                }
+                else
+                {
+                    <div style="font-size:12px;color:#90a0ab;margin-top:8px">Skipping is always your explicit choice — conflicts are flagged, never auto-skipped.</div>
+                }
             }
         </div>
     </div>
@@ -172,6 +195,8 @@
     [Parameter] public Dictionary<DateTime, List<SheetBooking>> Conflicts { get; set; } = [];
     [Parameter] public bool IsLoadingPreview { get; set; }
     [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public string? SeasonWarning { get; set; }
+    [Parameter] public HashSet<DateTime> SeasonExcludedDates { get; set; } = [];
     [Parameter] public EventCallback OnPreview { get; set; }
     [Parameter] public EventCallback OnBack { get; set; }
     [Parameter] public EventCallback OnCreate { get; set; }
@@ -198,8 +223,25 @@
         .Where(d => !Draft.SkippedDates.Contains(d))
         .Count(d => Conflicts.TryGetValue(d, out var c) && c.Count > 0);
 
+    private int DatesToCreateCount => Draft.ComputeCandidateDates().Count - Draft.SkippedDates.Count;
+
+    private string StatusBannerText => BuildStatusBannerText(ActiveConflictCount, SeasonExcludedDates.Count);
+
+    // "Clear to create" is only accurate when every candidate date will actually be created - with
+    // season exclusions in play that's no longer guaranteed even at zero scheduling conflicts, and
+    // saying so unconditionally read as contradicting the season warning directly above it (live-found
+    // 2026-08-18: staff saw a green "clear to create" banner sitting right beside a yellow one saying
+    // a date would be dropped). internal static, reached via InternalsVisibleTo, so testable directly.
+    internal static string BuildStatusBannerText(int activeConflictCount, int seasonExcludedCount) =>
+        (activeConflictCount, seasonExcludedCount) switch
+        {
+            (0, 0) => "✓ No conflicts — clear to create",
+            (0, > 0) => $"✓ No scheduling conflicts — {seasonExcludedCount} date(s) below excluded for being outside the season",
+            _ => $"⚠ {activeConflictCount} date(s) still have conflicts",
+        };
+
     private Task HandlePreviewClick() => CanPreview ? OnPreview.InvokeAsync() : Task.CompletedTask;
-    private Task HandleCreateClick() => IsSaving ? Task.CompletedTask : OnCreate.InvokeAsync();
+    private Task HandleCreateClick() => IsSaving || DatesToCreateCount == 0 ? Task.CompletedTask : OnCreate.InvokeAsync();
 
     private void ToggleSheet(string sheet)
     {

@@ -15,7 +15,7 @@ namespace FacilityScheduler.Services;
 /// Booking Attendant (confirmed via spike, architecture doc D3/S6.1), so this service is the
 /// only thing standing between two overlapping bookings on the same sheet.
 /// </summary>
-public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log, ViewCacheRegistry viewCache)
+public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, FacilityConfiguration facility, AppLogService log, ViewCacheRegistry viewCache, SchedulingWindowService window)
 {
     // Title given to a leftover Group Event hold created/kept by TrimHoldAsync when claiming a
     // Breely booking (architecture doc §4.8) - distinguishes an app-generated "the rest of this slot
@@ -189,6 +189,18 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
     /// </summary>
     public async Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser, CancellationToken ct = default)
     {
+        // Cheap short-circuit before any lock/Graph call - covers both the staff booking form and
+        // PracticeIceRequestService.SubmitAsync (which calls this same method), so gating it here
+        // is sufficient for both without touching PracticeIceRequestService at all. Deliberately does
+        // NOT cover Breely (BreelyBookingProcessor writes through ClaimHoldAsync, a different method)
+        // or edits (UpdateGroupAsync/UpdateSeriesAsync, also different methods) - both excluded by
+        // construction, matching the operator's "new creations only, not Breely" decision with no
+        // special-casing needed.
+        if (window.IsOutsideSeason(template.Start))
+        {
+            return GroupBookingResult.Conflict([OutOfSeasonConflict(template.Start, template.End, window.SeasonStartDate, window.SeasonEndDate)]);
+        }
+
         // Sorted lock order avoids deadlock if two staff book overlapping multi-sheet requests
         // that share some sheets but list them in a different order.
         var orderedSheets = sheetMailboxes.Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
@@ -1374,6 +1386,28 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
 
         return graphEvent;
     }
+
+    // Sentinel SheetMailbox, matching the class of trick ClosureConflict already uses for a
+    // non-sheet blocker shown through the same conflict-rendering UI as a real double-booking - but
+    // distinct from ClosureConflict's own "" sentinel, since that one renders hardcoded "closes all
+    // sheets" wording in BookingFormModal that would be wrong here.
+    private const string SeasonConflictSheetMailbox = "__season__";
+
+    private static SheetBooking OutOfSeasonConflict(DateTime start, DateTime end, DateTime? seasonStart, DateTime? seasonEnd) => new()
+    {
+        SheetMailbox = SeasonConflictSheetMailbox,
+        Start = start,
+        End = end,
+        Category = BookingCategory.Other,
+        State = BookingState.Confirmed,
+        RenterName = (seasonStart, seasonEnd) switch
+        {
+            ({ } s, { } e) => $"Outside the booking season ({s:MMM d, yyyy} – {e:MMM d, yyyy})",
+            ({ } s, null) => $"Before the booking season starts ({s:MMM d, yyyy})",
+            (null, { } e) => $"After the booking season ends ({e:MMM d, yyyy})",
+            _ => "Outside the booking season",
+        },
+    };
 
     private SheetBooking FromGraphEvent(string sheetMailbox, Event e)
     {

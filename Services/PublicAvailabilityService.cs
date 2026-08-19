@@ -11,7 +11,7 @@ namespace FacilityScheduler.Services;
 /// than computing complementary free time, and more correct: unbooked League/Bonspiel/practice time
 /// isn't necessarily something staff want the public renting.
 /// </summary>
-public class PublicAvailabilityService(SheetBookingService bookingService, ClubEventService clubEventService, IMemoryCache cache, FacilityConfiguration facility, ViewCacheRegistry viewCache)
+public class PublicAvailabilityService(SheetBookingService bookingService, ClubEventService clubEventService, IMemoryCache cache, FacilityConfiguration facility, ViewCacheRegistry viewCache, SchedulingWindowService window)
 {
     private const int DefaultDays = 30;
     private const int MaxDays = 60;
@@ -39,9 +39,16 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
     private async Task<PublicAvailabilityResponse> ComputeAvailabilityAsync(DateTime start, DateTime end, CancellationToken ct)
     {
-        var openSlots = await GetOpenSlotsAsync(start, end, ct);
+        // Publish-cutoff filtering happens here, not inside GetOpenSlotsAsync - that method is
+        // shared with GetConcurrentAvailabilityAsync (/public/search), which the cutoff deliberately
+        // does not apply to (season filtering, applied inside GetOpenSlotsAsync itself, does cover
+        // both). Season filtering already ran by the time openSlots gets here.
+        var openSlots = (await GetOpenSlotsAsync(start, end, ct))
+            .Where(s => !window.IsPastPublicCutoff(s.Start))
+            .ToList();
 
-        var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
+        var clubEvents = (await clubEventService.GetEventsAsync(start, end, ct))
+            .Where(ce => !window.IsPastPublicCutoff(ce.Start));
         var eventLabels = clubEvents
             .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
             .OrderBy(e => e.Start)
@@ -90,6 +97,14 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             foreach (var (segStart, segEnd) in openSegments)
             {
                 if (segEnd <= segStart)
+                {
+                    continue;
+                }
+
+                // Season filtering, not cutoff - this method feeds both the JSON widget and
+                // /public/search, and the season window (unlike the publish cutoff) applies to
+                // both: a member should never find and click a slot the facility isn't open for.
+                if (window.IsOutsideSeason(segStart))
                 {
                     continue;
                 }
@@ -216,6 +231,23 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var earliestStart = RoundUpToGrid(now.AddHours(facility.PracticeIceMinLeadHours), PracticeIceRules.SlotIntervalMinutes);
         var latestEnd = RoundDownToGrid(now.AddDays(facility.PracticeIceMaxHorizonDays), PracticeIceRules.SlotIntervalMinutes);
 
+        // Season window layered on top of the existing lead-time/horizon clamp, same shape: a
+        // member should never be offered (or able to submit against) a practice ice slot the
+        // facility isn't operating for. The final per-window clamp below already drops anything
+        // that ends up with End <= Start after this, so no separate filter is needed past this point.
+        if (window.SeasonStartDate is { } seasonStart && earliestStart < seasonStart)
+        {
+            earliestStart = seasonStart;
+        }
+        if (window.SeasonEndDate is { } seasonEnd)
+        {
+            var seasonEndExclusive = seasonEnd.Date.AddDays(1);
+            if (latestEnd > seasonEndExclusive)
+            {
+                latestEnd = seasonEndExclusive;
+            }
+        }
+
         var rangeStart = facility.Today;
         var rangeEnd = latestEnd.Date.AddDays(1);
         var cacheKey = $"practice-ice-windows:{rangeStart:yyyyMMdd}:{rangeEnd:yyyyMMdd}";
@@ -335,8 +367,16 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             return cached;
         }
 
-        var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
-        var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
+        // Cutoff, not season - this feeds /public/calendar, which is display of what's actually on
+        // the books (already impossible to create off-season going forward), not "advertised open
+        // inventory". A club event straddling the cutoff shows if it starts on or before it, same
+        // rule IsPastPublicCutoff already encodes (> cutoff, not >=).
+        var bookings = (await bookingService.GetBookingsForAllSheetsAsync(start, end, ct))
+            .Where(b => !window.IsPastPublicCutoff(b.Start))
+            .ToList();
+        var clubEvents = (await clubEventService.GetEventsAsync(start, end, ct))
+            .Where(ce => !window.IsPastPublicCutoff(ce.Start))
+            .ToList();
 
         // Consolidates a multi-sheet booking's sibling sheet-events into one label, same as the
         // staff Week/Day grids (WeekGrid.razor/MonthGrid.razor's own DedupeKey) - the public

@@ -15,23 +15,24 @@ namespace FacilityScheduler.Tests.Services;
 /// </summary>
 public class PracticeIceAvailabilityTests
 {
-    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, ClubEventService ClubEventService, FacilityConfiguration Facility) Build(PracticeIceOptions? practiceIce = null)
+    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, ClubEventService ClubEventService, FacilityConfiguration Facility, SchedulingWindowService Window) Build(PracticeIceOptions? practiceIce = null)
     {
         var facility = TestFacility.Create(practiceIce: practiceIce);
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
         var appLog = TestAppLog.Create(facility);
         var viewCache = new ViewCacheRegistry(cache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache);
+        var window = new SchedulingWindowService(appLog, viewCache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
         var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache);
-        return (publicService, bookingService, clubEventService, facility);
+        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
+        return (publicService, bookingService, clubEventService, facility, window);
     }
 
     [Fact]
     public async Task NoActivityAnywhere_WholeEligibleHoursWindowIsOffered()
     {
-        var (publicService, _, _, facility) = Build();
+        var (publicService, _, _, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var windows = await publicService.GetPracticeIceWindowsAsync();
@@ -45,7 +46,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task ConfirmedBookingOnOneSheet_BlocksThatTimeAcrossEverySheet()
     {
-        var (publicService, bookingService, _, facility) = Build();
+        var (publicService, bookingService, _, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         await bookingService.CreateConfirmedAsync(new SheetBooking
@@ -71,7 +72,7 @@ public class PracticeIceAvailabilityTests
     {
         // The clarification behind this design: group events take priority even as an unsold hold -
         // practice ice is only offered when NOTHING is planned, confirmed or not.
-        var (publicService, bookingService, _, facility) = Build();
+        var (publicService, bookingService, _, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         await bookingService.CreateHoldAsync(new SheetBooking
@@ -93,7 +94,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task IceBlockingClubEvent_ClosesTheWholeDay()
     {
-        var (publicService, _, clubEventService, facility) = Build();
+        var (publicService, _, clubEventService, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         await clubEventService.CreateAsync(new ClubEvent
@@ -114,7 +115,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task NonBlockingClubEvent_DoesNotAffectAvailability()
     {
-        var (publicService, _, clubEventService, facility) = Build();
+        var (publicService, _, clubEventService, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         await clubEventService.CreateAsync(new ClubEvent
@@ -138,7 +139,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task CustomEligibleHours_ClipsToConfiguredWindow()
     {
-        var (publicService, _, _, facility) = Build(new PracticeIceOptions
+        var (publicService, _, _, facility, _) = Build(new PracticeIceOptions
         {
             EligibleStartHour = 8,
             EligibleEndHour = 20,
@@ -158,7 +159,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task NoWindowStartsBeforeTheConfiguredLeadTime()
     {
-        var (publicService, _, _, facility) = Build();
+        var (publicService, _, _, facility, _) = Build();
         var before = facility.Now;
 
         var windows = await publicService.GetPracticeIceWindowsAsync();
@@ -170,7 +171,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task NoWindowExtendsBeyondTheConfiguredHorizon()
     {
-        var (publicService, _, _, facility) = Build();
+        var (publicService, _, _, facility, _) = Build();
         var before = facility.Now;
 
         var windows = await publicService.GetPracticeIceWindowsAsync();
@@ -182,7 +183,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task GapShorterThanMinSessionLength_IsNotOffered()
     {
-        var (publicService, bookingService, _, facility) = Build();
+        var (publicService, bookingService, _, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         // Every sheet booked 6:00-13:00 and 13:30-22:00, leaving exactly a 30-minute gap - below
@@ -209,7 +210,7 @@ public class PracticeIceAvailabilityTests
     [Fact]
     public async Task FindPracticeIceWindowContainingAsync_MatchesAnOpenTime_AndMissesTimeOutsideEligibleHours()
     {
-        var (publicService, _, _, facility) = Build();
+        var (publicService, _, _, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
         var found = await publicService.FindPracticeIceWindowContainingAsync(day.AddHours(10));

@@ -7,6 +7,7 @@
 @inject ClubEventService ClubEventService
 @inject AuthenticationStateProvider AuthProvider
 @inject FacilityConfiguration Facility
+@inject SchedulingWindowService Window
 
 <PageTitle>Calendar</PageTitle>
 
@@ -85,7 +86,8 @@
 <SeriesEditModal Group="_seriesEditGroup" Conflicts="_seriesEditConflicts" IsSaving="_isSavingSeriesEdit" OnSave="SaveSeries" OnCancel="CloseSeriesEdit" />
 <CancelChoiceModal Group="_cancelGroup" OnChoice="ApplyCancelChoice" OnKeep="() => _cancelGroup = null" />
 <SeriesWizardModal IsOpen="_seriesWizardOpen" Draft="_seriesDraft" Step="_seriesStep" Conflicts="_seriesConflicts"
-                    IsLoadingPreview="_isLoadingSeriesPreview" IsSaving="_isSavingSeries"
+                    IsLoadingPreview="_isLoadingSeriesPreview" IsSaving="_isSavingSeries" SeasonWarning="@_seriesSeasonWarning"
+                    SeasonExcludedDates="_seasonExcludedDates"
                     OnPreview="PreviewSeries" OnBack="() => _seriesStep = 1" OnCreate="CreateSeries" OnCancel="CloseSeriesWizard" />
 
 @if (_cancelSeriesGroup is not null)
@@ -141,6 +143,8 @@
     private Dictionary<DateTime, List<SheetBooking>> _seriesConflicts = [];
     private bool _isLoadingSeriesPreview;
     private bool _isSavingSeries;
+    private string? _seriesSeasonWarning;
+    private HashSet<DateTime> _seasonExcludedDates = [];
 
     private DateTime WeekStart => _anchorDate.Date.AddDays(-(int)_anchorDate.DayOfWeek);
 
@@ -524,6 +528,8 @@
         _seriesDraft = new SeriesDraft();
         _seriesDraft.Reset(Facility.Today);
         _seriesConflicts = [];
+        _seriesSeasonWarning = null;
+        _seasonExcludedDates = [];
         _seriesStep = 1;
         _seriesWizardOpen = true;
     }
@@ -533,7 +539,45 @@
         _seriesWizardOpen = false;
         _seriesStep = 1;
         _seriesConflicts = [];
+        _seriesSeasonWarning = null;
+        _seasonExcludedDates = [];
     }
+
+    /// <summary>
+    /// Which of <paramref name="candidateDates"/> fall outside the configured season, and a
+    /// human-readable summary - or an empty set/null if none do. Never touches the dates staff
+    /// actually typed on Step 1 (First date/Last date stay exactly what they entered, even after
+    /// this runs) - out-of-season dates are excluded the same way a staff-chosen Skip is (removed
+    /// from what gets created), but flagged as system-forced rather than a toggle staff can flip
+    /// back to Include, since unlike a real scheduling conflict this isn't staff's call to override.
+    /// Internal static (not a service method) so it's directly unit-testable via
+    /// InternalsVisibleTo - it's page-level orchestration, the same reasoning that already keeps
+    /// closure cross-checking here rather than inside SheetBookingService (architecture doc D13).
+    /// </summary>
+    internal static (HashSet<DateTime> ExcludedDates, string? Warning) ApplySeasonToCandidates(
+        List<DateTime> candidateDates, DateTime? seasonStart, DateTime? seasonEnd)
+    {
+        var excluded = candidateDates.Where(d => IsOutsideSeason(d, seasonStart, seasonEnd)).ToHashSet();
+        if (excluded.Count == 0)
+        {
+            return ([], null);
+        }
+
+        var bounds = (seasonStart, seasonEnd) switch
+        {
+            ({ } s, { } e) => $"the current booking season ({s:MMM d, yyyy} – {e:MMM d, yyyy})",
+            ({ } s, null) => $"the current booking season (starts {s:MMM d, yyyy})",
+            (null, { } e) => $"the current booking season (ends {e:MMM d, yyyy})",
+            _ => "the current booking season",
+        };
+        var warning = excluded.Count == 1
+            ? $"1 date below falls outside {bounds} and won't be created."
+            : $"{excluded.Count} dates below fall outside {bounds} and won't be created.";
+        return (excluded, warning);
+    }
+
+    private static bool IsOutsideSeason(DateTime date, DateTime? seasonStart, DateTime? seasonEnd) =>
+        (seasonStart is { } start && date.Date < start.Date) || (seasonEnd is { } end && date.Date > end.Date);
 
     private async Task PreviewSeries()
     {
@@ -542,7 +586,25 @@
 
         try
         {
+            // Computed from whatever staff actually typed on Step 1 - First date/Last date are
+            // never touched by the season check below, only what gets created out of this list is.
             var candidateDates = _seriesDraft.ComputeCandidateDates();
+
+            // Drops any skip (staff-chosen or a previous pass's season exclusion) for a date that
+            // isn't even a candidate anymore, e.g. staff went Back and narrowed the range - without
+            // this a stale entry would keep silently undercounting "Create series - N dates" even
+            // though it no longer corresponds to anything in the list below.
+            _seriesDraft.SkippedDates.IntersectWith(candidateDates);
+
+            var (seasonExcluded, seasonWarning) = ApplySeasonToCandidates(candidateDates, Window.SeasonStartDate, Window.SeasonEndDate);
+            _seasonExcludedDates = seasonExcluded;
+            _seriesSeasonWarning = seasonWarning;
+            // Excluded from creation the same way a staff-chosen Skip is (CreateSeriesAsync takes
+            // SkippedDates as its excludedDates verbatim) - but staff can't toggle these back to
+            // Include, unlike a real conflict; SeriesWizardModal renders _seasonExcludedDates rows
+            // with no toggle at all.
+            _seriesDraft.SkippedDates.UnionWith(seasonExcluded);
+
             _seriesConflicts = await BookingService.PreviewSeriesConflictsAsync(
                 _seriesDraft.SelectedSheets,
                 candidateDates,

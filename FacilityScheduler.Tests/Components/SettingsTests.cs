@@ -12,19 +12,22 @@ namespace FacilityScheduler.Tests.Components;
 
 public class SettingsTests : BunitContext
 {
-    private (SheetBookingService BookingService, AppLogService LogService) RegisterServices()
+    private (SheetBookingService BookingService, AppLogService LogService, SchedulingWindowService Window) RegisterServices()
     {
         var facility = TestFacility.Create();
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var logService = TestAppLog.Create();
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var bookingService = new SheetBookingService(gateway, cache, facility, logService, new ViewCacheRegistry(cache));
+        var viewCache = new ViewCacheRegistry(cache);
+        var window = new SchedulingWindowService(logService, viewCache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, logService, viewCache, window);
 
         Services.AddSingleton(logService);
         Services.AddSingleton(bookingService);
+        Services.AddSingleton(window);
         Services.AddSingleton<AuthenticationStateProvider>(new FakeAuthStateProvider());
 
-        return (bookingService, logService);
+        return (bookingService, logService, window);
     }
 
     [Fact]
@@ -51,7 +54,7 @@ public class SettingsTests : BunitContext
     [Fact]
     public async Task SavingDebugLevel_PersistsToAppLogService()
     {
-        var (_, logService) = RegisterServices();
+        var (_, logService, _) = RegisterServices();
         var cut = Render<Settings>();
 
         var debugRadio = cut.FindAll("input[type=radio]")[1];
@@ -66,7 +69,7 @@ public class SettingsTests : BunitContext
     [Fact]
     public void Render_MinimumIntervalDropdown_DefaultsToPersistedValue()
     {
-        var (bookingService, _) = RegisterServices();
+        var (bookingService, _, _) = RegisterServices();
         var cut = Render<Settings>();
 
         var select = cut.Find("select");
@@ -77,7 +80,7 @@ public class SettingsTests : BunitContext
     [Fact]
     public async Task SavingMinimumInterval_PersistsToSheetBookingService()
     {
-        var (bookingService, _) = RegisterServices();
+        var (bookingService, _, _) = RegisterServices();
         var cut = Render<Settings>();
 
         var select = cut.Find("select");

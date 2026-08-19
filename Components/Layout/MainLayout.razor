@@ -1,5 +1,7 @@
 ﻿@inherits LayoutComponentBase
 @using FacilityScheduler.Services
+@inject SchedulingWindowService Window
+@inject FacilityConfiguration Facility
 
 <header class="app-header">
     @* Wraps the trigger and the panel so the panel can position itself against the button. *@
@@ -51,6 +53,23 @@
         </AuthorizeView>
     </div>
 </header>
+
+@* Staff-only reminder that the public calendar's cutoff is approaching or has passed - not shown
+   to the one non-staff authenticated page (/practice-ice/request) that shares this layout, same
+   AuthorizeView gating the menu items above already use. Deliberately stays visible past the
+   cutoff date itself, not just during the 30-day countdown - a season quietly staying hidden with
+   nobody having updated it is worth flagging for longer than a one-time heads-up (operator
+   decision). Settings has no equivalent banner for the season start/end window. *@
+<AuthorizeView Policy="@StaffAuthorizationPolicies.StaffOnly" Context="cutoffBanner">
+    <Authorized>
+        @if (Window.PublicCutoffDate is { } cutoff && ShouldShowCutoffBanner(cutoff, Facility.Today))
+        {
+            <div style="margin:10px 24px 0;padding:8px 12px;border:1px solid #f0d58c;background:#fdf8ec;border-radius:6px;color:#8a6d1f;font-size:13px">
+                @CutoffBannerMessage(cutoff, Facility.Today) <a href="/settings" style="color:#8a6d1f;font-weight:600">Update in Settings</a>.
+            </div>
+        }
+    </Authorized>
+</AuthorizeView>
 
 @* Catches an unhandled exception thrown from a page's own event handler (e.g. a Graph 404, a bad
    input like a negative number reaching a service call) so it shows a recoverable in-page message
@@ -107,4 +126,21 @@
     // Resets the boundary so the page's own OnInitializedAsync (etc.) runs again in place, rather
     // than forcing a full browser reload the way the circuit-level error banner above does.
     private void Recover() => _errorBoundary?.Recover();
+
+    // internal static, not private, so these are directly unit-testable via InternalsVisibleTo -
+    // same reasoning as PublicCalendarEndpoint.ResolveMonthAnchor: pure date math pulled out of
+    // markup rather than asserted only through a full render.
+    internal static bool ShouldShowCutoffBanner(DateTime cutoff, DateTime today) => today >= cutoff.AddDays(-30);
+
+    internal static string CutoffBannerMessage(DateTime cutoff, DateTime today)
+    {
+        var days = (cutoff.Date - today.Date).Days;
+        var when = days switch
+        {
+            > 0 => $"{days} day{(days == 1 ? "" : "s")} from today",
+            0 => "today",
+            _ => $"{-days} day{(-days == 1 ? "" : "s")} ago",
+        };
+        return $"The public calendar only shows bookings through {cutoff:MMM d, yyyy} ({when}).";
+    }
 }

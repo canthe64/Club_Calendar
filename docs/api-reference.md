@@ -355,7 +355,7 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 |---|---|---|
 | `CreateHoldAsync` | `Task<BookingResult> CreateHoldAsync(SheetBooking booking, string actingUser)` | Creates a single-sheet booking in `Hold` state. Conflict-checked against that sheet's existing events; returns `BookingResult.Conflict` (no write) if anything overlaps. Logs `BookingCreated` on success (`actingUser`, architecture doc §4.9). |
 | `CreateConfirmedAsync` | `Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, string actingUser)` | Same as above, in `Confirmed` state. |
-| `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. |
+| `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. Season-gated (architecture doc §4.10, D84) - a request outside the configured booking season is rejected up front, before any lock or Graph call, via a synthetic `GroupBookingResult.Conflict` entry (`SheetMailbox = "__season__"`). Called by both the staff booking form and `PracticeIceRequestService.SubmitAsync`, so this one check covers both. |
 | `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
 | `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId, string actingUser)` | Hard-deletes a single event. Tolerates a `404` from Graph as "already gone" (e.g. the Breely webhook already claimed/trimmed it) rather than throwing (architecture doc D37) - logged at Debug tier as a no-op in that case, `BookingCancelled` at Standard tier otherwise. |
 | `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state), and creates fresh events for any sheet in `newSheetMailboxes` that isn't already a member (added 2026-08-03 - a sheet added mid-edit previously had no existing event to update and was silently dropped). Re-checks conflicts against the new time before writing, for both existing and new sheets; all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched; new sheets join whichever group id the rest of the edit settles on. |
@@ -476,3 +476,22 @@ Graph calls into this one after a successful write.
 Log lines are single-line, space-separated `key=value` pairs (timestamp, tier, `action`, `actor`,
 optionally `eventId`/`sheet`/`details`) - human-readable and grep-able, not JSON. Files rotate daily
 (`app-yyyy-MM-dd.log`) and are deleted automatically past `AppLog:RetentionDays` (default 30).
+
+### `SchedulingWindowService`
+
+The publish cutoff and booking season (architecture doc §4.10) backing the Settings page's "Public
+Calendar Visibility" and "Booking Season" sections. Persists all three values as one JSON file
+(`scheduling-window.json`, D83) in the same log directory `AppLogService` uses.
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `PublicCutoffDate` / `SeasonStartDate` / `SeasonEndDate` | `DateTime? {name} { get; }` | Current values, `null` if unconfigured. |
+| `IsPastPublicCutoff` | `bool IsPastPublicCutoff(DateTime date)` | `date.Date > PublicCutoffDate?.Date` - null-safe, always `false` if no cutoff is set. A date exactly on the cutoff is not past it. Consulted by `PublicAvailabilityService.GetRangeViewAsync`/`ComputeAvailabilityAsync`. |
+| `IsOutsideSeason` | `bool IsOutsideSeason(DateTime date)` | True if `date` is before `SeasonStartDate` or after `SeasonEndDate`, either bound independently null-safe. Consulted by `SheetBookingService.CreateAcrossSheetsAsync`, `PublicAvailabilityService.GetOpenSlotsAsync`, and (via a horizon-clamp adjustment rather than a direct call) `GetPracticeIceWindowsAsync`. |
+| `SetPublicCutoffAsync` | `Task SetPublicCutoffAsync(DateTime? date, string actor, CancellationToken ct = default)` | Called by the Settings page's Apply/Clear buttons. Updates in-memory immediately, persists best-effort, invalidates the public view cache, and logs `PublicCutoffChanged` if the value actually changed. |
+| `SetSeasonWindowAsync` | `Task SetSeasonWindowAsync(DateTime? start, DateTime? end, string actor, CancellationToken ct = default)` | Sets both bounds together (Settings page's single Save/Clear for the pair). Same invalidation/logging pattern; logs `SeasonWindowChanged`. |
+
+Not consulted by `/public/search` or `/public/practice-ice`'s cutoff behavior (the publish cutoff
+deliberately doesn't apply there - architecture doc §4.10), and not called at all from
+`CreateSeriesAsync` - season exclusion for a series happens client-side in the wizard's preview step
+instead (architecture doc §4.5/§4.10, D85), not as a service-layer check.

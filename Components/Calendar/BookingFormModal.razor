@@ -17,7 +17,12 @@
                     <div style="font-size:14px;font-weight:600;color:#a02c21;margin-bottom:4px">This time conflicts with:</div>
                     @foreach (var c in Conflicts)
                     {
-                        @if (string.IsNullOrEmpty(c.SheetMailbox))
+                        @if (c.SheetMailbox == "__season__")
+                        {
+                            @* SheetBookingService.SeasonConflictSheetMailbox - not a real closure, no sheet/time to show, just the reason. *@
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">@c.RenterName</div>
+                        }
+                        else if (string.IsNullOrEmpty(c.SheetMailbox))
                         {
                             <div style="font-size:13px;color:#8a5049;line-height:1.5">Club event "@c.RenterName": @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") — closes all sheets</div>
                         }
