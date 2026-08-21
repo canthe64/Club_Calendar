@@ -44,6 +44,7 @@
             }
         </div>
         <a href="/club-events" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none">Club Events</a>
+        <a href="/search" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none">Search</a>
     </div>
 
     <div style="background:#fff;border-bottom:1px solid #e2e8ec;padding:9px 0;display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap;margin-bottom:12px">
@@ -105,9 +106,22 @@
 }
 
 @code {
-    private enum ViewMode { Month, Week, Day }
+    // internal (not private) so EventSearch.razor's "Open on calendar" link target and
+    // ResolveDeepLink's own tests can both name it - the same reasoning PublicCalendarEndpoint's own
+    // ViewMode is internal.
+    internal enum ViewMode { Month, Week, Day }
 
     private ViewMode View = ViewMode.Month;
+
+    // Populated from ?date=/?view= when this page is reached via a deep link (currently only
+    // EventSearch's "Open on calendar") - resolved once in OnInitializedAsync via ResolveDeepLink.
+    // A bare /calendar visit (no query string) leaves both null, resolving to today/Month exactly as
+    // before this existed.
+    [SupplyParameterFromQuery(Name = "date")]
+    public string? QueryDate { get; set; }
+
+    [SupplyParameterFromQuery(Name = "view")]
+    public string? QueryView { get; set; }
 
     // Placeholder only, overwritten in OnInitializedAsync - a field initializer runs before Blazor
     // sets @inject properties, so Facility.Today isn't available here yet.
@@ -163,8 +177,30 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _anchorDate = Facility.Today;
+        (_anchorDate, View) = ResolveDeepLink(QueryDate, QueryView, Facility.Today);
         await LoadAsync();
+    }
+
+    /// <summary>
+    /// Resolves this page's own <c>?date=</c>/<c>?view=</c> query parameters into a starting anchor
+    /// and view - mirrors <see cref="FacilityScheduler.Endpoints.PublicCalendarEndpoint"/>'s
+    /// <c>ParseDate</c>/<c>ParseView</c>, which already supports exactly this on the public calendar.
+    /// Unlike that anonymous surface, no range clamping here: this page is staff-only and the
+    /// existing date-jump picker already accepts any date unclamped, so a deep link is no wider a
+    /// surface than a staff member typing a date directly. A missing/unparsable date falls back to
+    /// <paramref name="today"/>, same as a bare <c>/calendar</c> visit always has.
+    /// </summary>
+    internal static (DateTime Anchor, ViewMode View) ResolveDeepLink(string? date, string? view, DateTime today)
+    {
+        var anchor = DateTime.TryParse(date, out var parsed) ? parsed.Date : today;
+        var resolvedView = view?.ToLowerInvariant() switch
+        {
+            "week" => ViewMode.Week,
+            "day" => ViewMode.Day,
+            _ => ViewMode.Month,
+        };
+
+        return (anchor, resolvedView);
     }
 
     private async Task LoadAsync()
@@ -246,27 +282,10 @@
         }
     }
 
-    private void OpenDetail(SheetBooking booking)
-    {
-        // A Guid.Empty BookingGroupId isn't a real, shared identity - it's the default for an
-        // untouched occurrence of a recurring series (the property only reliably persists once an
-        // occurrence has been individually PATCHed, e.g. via an edit; live-confirmed 2026-07-16).
-        // Matching on it directly would risk bundling this booking with a completely unrelated one
-        // that happens to share the same empty default AND the same start/end time by coincidence -
-        // treat it as a lone booking instead of guessing at siblings.
-        if (booking.BookingGroupId == Guid.Empty)
-        {
-            _detailGroup = [booking];
-            return;
-        }
-
-        // Scoped by date/time as well as group id - a multi-week recurring series shares one
-        // BookingGroupId across every occurrence, and Month view can have several weeks of the
-        // same series loaded at once. Without this, clicking one occurrence could pull in other
-        // weeks' occurrences too. WeekGrid/MonthGrid already filter by date before grouping chips;
-        // this brings the detail lookup in line with that.
-        _detailGroup = _allBookings.Where(b => b.BookingGroupId == booking.BookingGroupId && b.Start == booking.Start && b.End == booking.End).ToList();
-    }
+    // See CalendarStyles.SiblingGroup for why this needs more than a bare BookingGroupId match
+    // (a Guid.Empty default on an untouched series occurrence, and a multi-week series sharing one
+    // group id across occurrences that can be loaded together in Month view).
+    private void OpenDetail(SheetBooking booking) => _detailGroup = CalendarStyles.SiblingGroup(_allBookings, booking);
 
     private void ToggleNewMenu() => _newMenuOpen = !_newMenuOpen;
 
