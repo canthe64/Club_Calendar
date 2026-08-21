@@ -1,7 +1,7 @@
 # GCC Ice & Event Calendar — Staff User Guide
 
 **Audience:** staff who create, edit, and cancel bookings through the app.
-**Scope:** everything on the staff-facing `/calendar`, `/club-events`, `/settings`, and
+**Scope:** everything on the staff-facing `/calendar`, `/club-events`, `/search`, `/settings`, and
 `/practice-ice/approvals` pages. The public calendar members see is read-only and needs no
 instructions.
 
@@ -25,9 +25,10 @@ Everything is behind the **menu button** (the three-line icon at the top left):
 | **Staff Calendar** | The main working page (§2) |
 | **Public Calendar** | What members see — opens in a new tab |
 | **Club Events** | Whole-club events and closures (§5) |
+| **Search** | Find a booking or Club Event by day, category, or title (§6) |
 | **Practice Ice** | The member-facing page showing open practice ice times — opens in a new tab |
-| **Practice Ice Approvals** | Pending member requests to host (§9) |
-| **Settings** | Booking rules and the activity log (§7) |
+| **Practice Ice Approvals** | Pending member requests to host (§10) |
+| **Settings** | Booking rules and the activity log (§8) |
 | **Sign out** | |
 
 The two "opens in a new tab" items are the member-facing views, so you can check what members are
@@ -113,7 +114,7 @@ or a closure Club Event) are flagged per date but **never automatically skipped*
 per date, using the **Skip**/**Include** toggle next to each one. Click **Create series** once you're
 satisfied with the selection.
 
-If a **Booking Season** is configured (Settings, §7), any of your requested dates that fall outside
+If a **Booking Season** is configured (Settings, §8), any of your requested dates that fall outside
 it are shown separately, marked *"outside the booking season"* with no Skip/Include toggle — these
 are never created, and it isn't a choice you can override here. Your First date/Last date on Step 1
 are never changed by this; only which dates actually get created is affected. If every date ends up
@@ -202,7 +203,46 @@ delete it once you've verified or corrected the booking it refers to.
 
 ---
 
-## 6. Understanding Conflict Warnings
+## 6. Searching for an Event
+
+Reach **Search** from the menu. Unlike the calendar, which only ever shows the day/week/month
+currently in view, this searches a wide date range at once (30 days back through a year ahead by
+default) so you can find something without already knowing roughly when it happened.
+
+Type a search and press **Enter** or click **Search**. Nothing is fetched until you do — opening the
+page or adjusting the date range alone doesn't search on its own.
+
+**Search terms:**
+
+| Term | Matches |
+|---|---|
+| `category:bonspiel` | A category — bookings and Club Events both use this prefix, e.g. `league`, `bonspiel`, `practiceice`, `closure` |
+| `day:saturday` | A day of the week — full name or 3-letter abbreviation (`sat`) |
+| `type:booking` / `type:clubevent` | Restrict results to just sheet bookings or just Club Events |
+| any other word | Matches the title — a renter's name for a booking, the event name for a Club Event |
+
+Terms combine — `category:league day:tuesday junior` finds Tuesday league bookings with "junior" in
+the name. Multiple `day:` or `category:` terms combine as *either*: `day:saturday day:sunday` finds
+anything on the weekend.
+
+`category:bonspiel` deliberately matches **both** a sheet-booking Bonspiel and a Club Event under "Out
+of Town Bonspiels" — a note explains this and suggests `category:outoftownbonspiels` or
+`type:booking` if you meant just one.
+
+Search only looks at **titles and categories** — not phone numbers, email addresses, or notes. Open a
+result to see that information; it was never meant to be searchable text.
+
+**Start date** / **End date** narrow or widen the window searched. A window wider than 400 days is
+automatically limited to 400, with a banner saying so — your typed dates are never silently changed,
+only what's actually searched.
+
+Click a result to see its detail. From there, **Open on calendar** takes you to that day on the
+Calendar page, where you can edit or cancel it the normal way — Search itself is read-only, so you
+always jump to the same working edit screen you'd use from the calendar directly.
+
+---
+
+## 7. Understanding Conflict Warnings
 
 Whenever a red conflict banner appears, it lists one of two kinds of conflict:
 
@@ -217,7 +257,7 @@ choose per date whether to skip it or include it anyway.
 
 ---
 
-## 7. Settings
+## 8. Settings
 
 The **Settings** page (menu button, top left) controls booking behavior and shows a record of what's actually
 happened in the app.
@@ -286,7 +326,7 @@ to whoever's helping troubleshoot something.
 
 ---
 
-## 8. "Something went wrong" message
+## 9. "Something went wrong" message
 
 If a page shows **"Something went wrong loading this page"** instead of its usual content, click
 **Try again**. This is usually a one-off (a transient Graph hiccup, a stale view) and clicking Try
@@ -295,7 +335,7 @@ elsewhere. If it keeps happening on the same action, that's worth reporting.
 
 ---
 
-## 9. Practice Ice Requests
+## 10. Practice Ice Requests
 
 Any properly-trained member can volunteer to host a practice ice session open to the whole club, at
 a time when nothing else is on the calendar. Members find open times and submit a request at

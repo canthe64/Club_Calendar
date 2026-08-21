@@ -408,6 +408,99 @@ made together once staff started actually using multi-day bookings:
    date genuinely passes it. This is a UX default, not a silent correction of a value staff typed
    directly into End date itself.
 
+### 4.12 Staff Event Search (added 2026-08-21)
+
+Staff feedback: there was no way to find a booking or Club Event without already knowing roughly
+when it was — the calendar only ever loads the window currently in view, and the only list surface
+(`Components/Pages/ClubEvents.razor`) covers Club Events alone with no search box. `/search`, a new
+staff-only Blazor page (D86), searches both across a wide date range with a small keyword grammar.
+
+**The `$top` fix is a prerequisite, not a tuning knob (D87).** `GraphEventGateway.GetCalendarViewAsync`
+previously set only `StartDateTime`/`EndDateTime`/`Expand`, so Graph served its small default page
+size, and the `@odata.nextLink` loop drained it serially. `calendarView` also expands recurring
+series into occurrences, so a weekly league contributes ~50 events per sheet per year. A search-sized
+sweep (today−30d → today+366d, every sheet) was therefore on the order of 100 sequential round-trips
+*per sheet* before this — the search feature would have been unusably slow without it. Setting
+`$top = 200` shrinks that to a handful of round-trips per sheet; the returned set is identical, since
+the nextLink loop still drains to exhaustion regardless — this only changes how many requests that
+takes. The change applies to every caller of `GetCalendarViewAsync` (both `SheetBookingService` and
+`ClubEventService`), not just the search page, so ordinary calendar loads and conflict checks get
+incidentally faster too.
+
+**Grammar**: `category:<value>` (resolved across both `BookingCategory` and `ClubEventCategory`),
+`day:<value>` (full weekday name or 3-letter abbreviation), `type:booking`/`type:clubevent`
+(restricts to one record kind), and a bare word or `"quoted phrase"` matching the display title only
+— never `RenterPhone`, `RenterEmail`, or `Notes` (a deliberate privacy scope decision the help card
+states explicitly, since staff can already see all of that once they open a result). Terms combine
+with AND across fields and OR within one field (`day:saturday day:sunday` means the weekend, which is
+why there's no separate `day:weekend` alias). Value matching is normalized (lowercase, non-alphanumerics
+stripped), so `practiceice`, `"practice ice"`, and `Practice-Ice` all resolve identically. An
+unrecognized prefix (`foo:bar`) falls back to literal title text plus a notice, since real titles can
+contain colons; a recognized prefix with an unresolvable value (`category:zamboni`) matches nothing
+plus a notice, since that's a clear intent that shouldn't be silently reinterpreted as text. The date
+range is deliberately *not* part of the grammar — it stays two date inputs, since it's the one input
+that costs Graph calls and is subject to the clamp below, which needs a visible control to be honest
+about.
+
+**The bonspiel category collision (D89).** `category:bonspiel` resolves to *both*
+`BookingCategory.Bonspiel` and `ClubEventCategory.OutOfTownBonspiels`, with an inline note pointing at
+`category:outoftownbonspiels` or `type:booking` to narrow. This isn't a special case — the vocabulary
+resolver (`Domain/Search/SearchCategoryVocabulary.cs`) returns whichever enum families a normalized
+token happens to hit, so `category:other` (present in both enums) collides identically with zero extra
+code, and the parser's collision notice fires whenever a resolution spans more than one family. Union
+rather than picking one: the two result kinds are already visually distinct in a result row (a colored
+category chip plus an explicit "Club event" marker for the latter), and D81 renamed that Club Event
+category specifically because staff conflate the two — the correct response to a known conflation is
+to show both and say so, not guess.
+
+**Range default and clamp** (`Domain/Search/SearchRange.cs`): today−30d → today+366d by default (396
+days, the same width `ClubEvents.razor` already sweeps in production), bounded to today−1y…today+2y
+(matching `PublicCalendarEndpoint.ParseMonth`'s existing precedent) and capped at a 400-day span. The
+clamp applies only to what's actually fetched — the date inputs keep showing exactly what staff typed,
+with a separate warning banner naming both the requested and the actual searched window. This is the
+standing no-silent-date-mutation rule, applied here for the first time to a *range* rather than a
+single date.
+
+**Cost discipline**: `OnInitialized` performs no fetch — only an explicit Enter/Search-button click
+does (never search-as-you-type, since a keystroke could otherwise trigger a fan-out if the range had
+changed). The fetched range and results are held in page state, so refining the query text against an
+unchanged range costs zero further Graph calls; only a range change re-fetches. A bUnit test
+(`EventSearchTests.Render_OnInitialLoad_IssuesNoGatewayReads`) asserts this invariant directly, via a
+counting `IGraphEventGateway` decorator around the fake, rather than trusting it by inspection alone.
+
+**Grouping consolidation (D88 precursor).** Before this feature, the "which siblings belong to this
+multi-sheet booking occurrence" rule existed as three near-duplicates: `MonthGrid`/`WeekGrid`'s own
+`DedupeKey` (group id only) and `Calendar.razor`'s `OpenDetail` (group id *plus* `Start`/`End`
+equality, to avoid merging different weeks of one recurring series). A search result set makes the gap
+between those two encodings concrete — a 396-day result holds ~50 occurrences of one league sharing a
+single `BookingGroupId`, and group-id-only matching would open a 50-item "group." `CalendarStyles`
+now owns one `BookingGroupKey`/`SiblingGroup` pair combining both components, and `MonthGrid.razor`,
+`WeekGrid.razor`, `Calendar.razor`, and the search page all call it — a fourth independent copy was
+exactly the D75 failure shape this consolidation avoids. `CalendarStyles.BookingDisplayTitle` (the
+`RenterName` → category-label fallback) was extracted the same way, so the search matcher and every
+calendar chip agree on what a booking "is called" by construction.
+
+**Read-only detail, not a second edit flow (D88).** Clicking a result opens the existing
+`BookingDetailModal`/`ClubEventDetailModal` with a new additive `ReadOnly` parameter — Edit/Cancel are
+replaced by "Open on calendar," which deep-links to `/calendar?view=day&date=…` (a new
+`Calendar.ResolveDeepLink`, mirroring `PublicCalendarEndpoint`'s existing `ParseDate`/`ParseView`;
+`/calendar` had no query-parameter support before this). Wiring full edit/cancel into the search page
+was considered and rejected: it would mean a second, untested copy of `Calendar.razor`'s
+partial-sheet-edit and group-id-split rules (`SaveDraft`'s `splitGroupId` logic), the single most
+delicate piece of booking-identity logic in the app, with no bUnit coverage on the original to compare
+against. Reusing the existing detail markup with one additive parameter means there's still exactly
+one copy of it, and search/calendar can't drift apart.
+
+**Known gap, not yet closed**: recurring-series noise. Searching a league's name over the default
+396-day range returns every occurrence as a separate row — v1 does not collapse them. Collapsing would
+need a key of `SeriesMasterId` (per-sheet) plus `BookingGroupId` and a decision about what date a
+collapsed row displays; flagged for the operator rather than guessed at. Also unverified: this feature
+was implemented and tested without access to a live tenant, so the `$top` change's real-world behavior
+(whether Exchange's `singleValueExtendedProperties` expansion ever returns a shorter page than
+requested) and the actual search UX have not been manually confirmed against production Graph — see
+the Verification section of the original implementation plan for the specific live checks still
+outstanding.
+
 ---
 
 ## 5. API Interactions
@@ -747,6 +840,10 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D84 | Season enforcement lives in exactly one place - the top of `SheetBookingService.CreateAcrossSheetsAsync` - rather than being threaded through every write path as a flag | Both the staff booking form and `PracticeIceRequestService.SubmitAsync` already funnel through this one method, so gating it here covers both for free. Breely (`ClaimHoldAsync`) and edits (`UpdateGroupAsync`/`UpdateSeriesAsync`) are excluded by construction - they're different methods entirely - matching the operator's explicit "not Breely, not edits" scope with no special-casing needed anywhere. `CreateSeriesAsync` is deliberately left ungated, consistent with its existing "trusts the caller" contract (§5.1); season exclusion for a series happens client-side in the wizard's preview step instead (§4.5, D85). |
 | D85 | Season-excluded dates in the series wizard are folded into `SeriesDraft.SkippedDates` (excluded from creation, same as a manual Skip) but rendered with no Skip/Include toggle, and `FirstDate`/`LastDate` are never rewritten by the season check | Live-found 2026-08-18: an earlier version clipped `FirstDate`/`LastDate` in place to the season bounds, which silently moved the picker's displayed end date while a warning banner simultaneously said dates had been "removed" - two contradictory signals for an edit staff never made. A related bug in the same fix: the Step 2 status banner said "No conflicts — clear to create" in green while a season-exclusion warning sat directly above it in yellow, both individually true but reading as a direct contradiction - fixed by making the status banner's own wording aware of season exclusions, not just scheduling conflicts (`SeriesWizardModal.BuildStatusBannerText`). |
 | D78 | The resource mailboxes are configured to **auto-decline every meeting invite** (`AutomateProcessing AutoAccept` with all booking policies false and no delegates, plus an `AdditionalResponse`), not to auto-accept and not to ignore | D3 established that the Resource Booking Attendant never runs on the app's own direct writes, but said nothing about invites arriving from Outlook — and nothing stops a member or staffer adding a sheet as a room on a meeting. Left at the room default (`AutoAccept`), Exchange books the sheet itself: no app-side conflict check (§6.1), and an event carrying none of the app's metadata (§4.1). Set to `None`, the invite is silently ignored and the sender reasonably assumes they have the ice. Declining is the only option that both preserves the sole-writer invariant and tells the sender where to actually go. Documented as a tenant provisioning step (§7 step 2) rather than left to the mailbox default, which was the prior unstated behavior. **Live-confirmed 2026-08-18** against the real tenant: an Outlook invite naming a sheet as a room is declined and the sender receives the `AdditionalResponse` text. The cmdlet combination was reasoned out rather than observed when this decision was written, so this was the one part of it that needed a real test. |
+| D86 | A staff-only `/search` page (`Components/Pages/EventSearch.razor`) searches both sheet bookings and Club Events with a small prefixed-keyword grammar (`category:`/`day:`/`type:`, bare words match the title) over a wide, clamped date range | Staff feedback: nothing let staff find an event without already knowing roughly when it was - the calendar only loads its current view window, and the Club Events list has no search at all (§4.12). |
+| D87 | `GraphEventGateway.GetCalendarViewAsync` sets `$top = 200` on every `calendarView` read, for every caller, not just search | Previously unset, so Graph served its small default page size and the `@odata.nextLink` loop drained it serially - a search-sized sweep (~400 days, every sheet, recurring series expanded into occurrences) was on the order of 100 sequential round-trips per sheet without this. The returned set is unchanged, since the nextLink loop still drains to exhaustion regardless (§4.12). |
+| D88 | The search page's detail modal is read-only (`BookingDetailModal`/`ClubEventDetailModal`'s new additive `ReadOnly` parameter) with an "Open on calendar" handoff, rather than wiring Edit/Cancel directly into the search page | Full edit would mean a second, untested copy of `Calendar.razor`'s partial-sheet-edit and group-id-split rules (`SaveDraft`'s `splitGroupId` logic) - the most delicate booking-identity logic in the app, with no existing bUnit coverage to diverge from. The handoff needed `/calendar` to accept `?date=`/`?view=` for the first time (`Calendar.ResolveDeepLink`), mirroring `PublicCalendarEndpoint`'s existing `ParseDate`/`ParseView` (§4.12). |
+| D89 | `category:bonspiel` in search resolves to *both* `BookingCategory.Bonspiel` and `ClubEventCategory.OutOfTownBonspiels`, with an inline notice, rather than picking one | Not a special case - the vocabulary resolver returns whichever category families a normalized token hits, so any token present in both enums (also `other`) collides identically. Union rather than a guess: the two result kinds are already visually distinct in a row, and D81 renamed the club category specifically because staff conflate the two names (§4.12). |
 
 ---
 
