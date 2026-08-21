@@ -415,17 +415,16 @@ when it was — the calendar only ever loads the window currently in view, and t
 (`Components/Pages/ClubEvents.razor`) covers Club Events alone with no search box. `/search`, a new
 staff-only Blazor page (D86), searches both across a wide date range with a small keyword grammar.
 
-**The `$top` fix is a prerequisite, not a tuning knob (D87).** `GraphEventGateway.GetCalendarViewAsync`
-previously set only `StartDateTime`/`EndDateTime`/`Expand`, so Graph served its small default page
-size, and the `@odata.nextLink` loop drained it serially. `calendarView` also expands recurring
-series into occurrences, so a weekly league contributes ~50 events per sheet per year. A search-sized
-sweep (today−30d → today+366d, every sheet) was therefore on the order of 100 sequential round-trips
-*per sheet* before this — the search feature would have been unusably slow without it. Setting
-`$top = 200` shrinks that to a handful of round-trips per sheet; the returned set is identical, since
-the nextLink loop still drains to exhaustion regardless — this only changes how many requests that
-takes. The change applies to every caller of `GetCalendarViewAsync` (both `SheetBookingService` and
-`ClubEventService`), not just the search page, so ordinary calendar loads and conflict checks get
-incidentally faster too.
+**The `$top` fix helps round-trip count, but wasn't the actual fix for wide ranges (D87, corrected
+by D90).** `GraphEventGateway.GetCalendarViewAsync` previously set only
+`StartDateTime`/`EndDateTime`/`Expand`, so Graph served its small default page size, and the
+`@odata.nextLink` loop drained it serially. Setting `$top = 200` shrinks how many requests that takes
+for any range; the returned set is identical either way, since the nextLink loop still drains to
+exhaustion regardless. This is a real improvement and applies to every caller of
+`GetCalendarViewAsync` (both `SheetBookingService` and `ClubEventService`), not just search, so
+ordinary calendar loads and conflict checks get incidentally faster too. **It was originally believed
+to be sufficient to make a ~396-day search fast; live testing against the real tenant proved that
+wrong (D90) — see that entry for what the actual fix was.**
 
 **Grammar**: `category:<value>` (resolved across both `BookingCategory` and `ClubEventCategory`),
 `day:<value>` (full weekday name or 3-letter abbreviation), `type:booking`/`type:clubevent`
@@ -453,11 +452,15 @@ category chip plus an explicit "Club event" marker for the latter), and D81 rena
 category specifically because staff conflate the two — the correct response to a known conflation is
 to show both and say so, not guess.
 
-**Range default and clamp** (`Domain/Search/SearchRange.cs`): today−30d → today+366d by default (396
-days, the same width `ClubEvents.razor` already sweeps in production), bounded to today−1y…today+2y
-(matching `PublicCalendarEndpoint.ParseMonth`'s existing precedent) and capped at a 400-day span. The
-clamp applies only to what's actually fetched — the date inputs keep showing exactly what staff typed,
-with a separate warning banner naming both the requested and the actual searched window. This is the
+**Range default and clamp** (`Domain/Search/SearchRange.cs`): today−14d → today+46d by default (60
+days total), bounded to today−1y…today+2y (matching `PublicCalendarEndpoint.ParseMonth`'s existing
+precedent) and capped at a 60-day span — see D90 for why 60, not the much wider range originally
+shipped. One range applies uniformly to both bookings and Club Events; deliberately not decoupled
+into two different caps even though Club Events aren't the expensive half (no recurring-series
+expansion cost regardless of range width) — two different "how far was actually searched" answers
+for one search box would be a confusing result to explain, not a real usability win. The clamp
+applies only to what's actually fetched — the date inputs keep showing exactly what staff typed, with
+a separate warning banner naming both the requested and the actual searched window. This is the
 standing no-silent-date-mutation rule, applied here for the first time to a *range* rather than a
 single date.
 
@@ -472,8 +475,9 @@ counting `IGraphEventGateway` decorator around the fake, rather than trusting it
 multi-sheet booking occurrence" rule existed as three near-duplicates: `MonthGrid`/`WeekGrid`'s own
 `DedupeKey` (group id only) and `Calendar.razor`'s `OpenDetail` (group id *plus* `Start`/`End`
 equality, to avoid merging different weeks of one recurring series). A search result set makes the gap
-between those two encodings concrete — a 396-day result holds ~50 occurrences of one league sharing a
-single `BookingGroupId`, and group-id-only matching would open a 50-item "group." `CalendarStyles`
+between those two encodings concrete — even at the 60-day range (§ below), a result set holds several
+occurrences of one weekly league sharing a single `BookingGroupId`, and group-id-only matching would
+open a multi-date "group" as if it were one booking. `CalendarStyles`
 now owns one `BookingGroupKey`/`SiblingGroup` pair combining both components, and `MonthGrid.razor`,
 `WeekGrid.razor`, `Calendar.razor`, and the search page all call it — a fourth independent copy was
 exactly the D75 failure shape this consolidation avoids. `CalendarStyles.BookingDisplayTitle` (the
@@ -491,15 +495,40 @@ delicate piece of booking-identity logic in the app, with no bUnit coverage on t
 against. Reusing the existing detail markup with one additive parameter means there's still exactly
 one copy of it, and search/calendar can't drift apart.
 
-**Known gap, not yet closed**: recurring-series noise. Searching a league's name over the default
-396-day range returns every occurrence as a separate row — v1 does not collapse them. Collapsing would
+**Follow-up correction (2026-08-21), live-found the same day this feature shipped (D90).** The
+feature was designed and unit-tested without access to a live tenant; the very first live search
+(`category:bonspiel`, default range, 1 matching result) took 20+ seconds, and a second identical
+search inside the 30-second service cache window came back instantly — a result consistent with
+several different causes, so each was checked in turn rather than guessed at:
+
+1. Whether the search page's ordinary Staff Calendar (same `GetCalendarViewAsync`, same `$top = 200`,
+   but its normal ~6-week range) was also slow — it wasn't, ruling out `$top` itself as harmful.
+2. A fresh page load (bypassing the page's own in-memory `_fetchedRange` reuse) searched *past* the
+   30-second service cache window and still took 90+ seconds with no results back — ruling out both
+   client-side and service-level caching as the explanation, and ruling out simple cold-start/first-call
+   overhead (which wouldn't plausibly account for 90+ seconds on its own).
+3. Narrowing the search page's own date range below 90 days brought results back in a few seconds on
+   the same running instance.
+
+That combination isolates the cause precisely: **`calendarView`'s cost when recurring series are
+involved scales with the width of the requested date range itself, not just with page/round-trip
+count.** Graph has to expand every recurring occurrence across the *entire* requested window on every
+call; a 6-week request is cheap regardless of how many series exist in it, but a ~400-day request
+across every sheet is a fundamentally more expensive server-side computation, independent of `$top`.
+This directly contradicts D87's original assumption that reducing request count was the whole fix.
+
+The correction: `SearchRange`'s default and max span dropped from 396/400 days to 60, matching
+`PublicSearchEndpoint.MaxRangeDays`'s existing precedent for the same underlying reason — that
+endpoint's own code comment already anticipated this exact cost class ("a search this wide across
+every sheet is meaningfully more expensive per request than a single month/week/day view") when it
+was built, before this feature existed to rediscover it. One range applies uniformly to both bookings
+and Club Events (see above) rather than decoupling a wider cap for the cheaper Club Events half — a
+single, simple, honest constraint over a technically-more-permissive-but-confusing one.
+
+**Known gap, not yet closed**: recurring-series noise. Searching a league's name still returns every
+occurrence within the searched range as a separate row — v1 does not collapse them. Collapsing would
 need a key of `SeriesMasterId` (per-sheet) plus `BookingGroupId` and a decision about what date a
-collapsed row displays; flagged for the operator rather than guessed at. Also unverified: this feature
-was implemented and tested without access to a live tenant, so the `$top` change's real-world behavior
-(whether Exchange's `singleValueExtendedProperties` expansion ever returns a shorter page than
-requested) and the actual search UX have not been manually confirmed against production Graph — see
-the Verification section of the original implementation plan for the specific live checks still
-outstanding.
+collapsed row displays; flagged for the operator rather than guessed at.
 
 ---
 
@@ -841,9 +870,10 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D85 | Season-excluded dates in the series wizard are folded into `SeriesDraft.SkippedDates` (excluded from creation, same as a manual Skip) but rendered with no Skip/Include toggle, and `FirstDate`/`LastDate` are never rewritten by the season check | Live-found 2026-08-18: an earlier version clipped `FirstDate`/`LastDate` in place to the season bounds, which silently moved the picker's displayed end date while a warning banner simultaneously said dates had been "removed" - two contradictory signals for an edit staff never made. A related bug in the same fix: the Step 2 status banner said "No conflicts — clear to create" in green while a season-exclusion warning sat directly above it in yellow, both individually true but reading as a direct contradiction - fixed by making the status banner's own wording aware of season exclusions, not just scheduling conflicts (`SeriesWizardModal.BuildStatusBannerText`). |
 | D78 | The resource mailboxes are configured to **auto-decline every meeting invite** (`AutomateProcessing AutoAccept` with all booking policies false and no delegates, plus an `AdditionalResponse`), not to auto-accept and not to ignore | D3 established that the Resource Booking Attendant never runs on the app's own direct writes, but said nothing about invites arriving from Outlook — and nothing stops a member or staffer adding a sheet as a room on a meeting. Left at the room default (`AutoAccept`), Exchange books the sheet itself: no app-side conflict check (§6.1), and an event carrying none of the app's metadata (§4.1). Set to `None`, the invite is silently ignored and the sender reasonably assumes they have the ice. Declining is the only option that both preserves the sole-writer invariant and tells the sender where to actually go. Documented as a tenant provisioning step (§7 step 2) rather than left to the mailbox default, which was the prior unstated behavior. **Live-confirmed 2026-08-18** against the real tenant: an Outlook invite naming a sheet as a room is declined and the sender receives the `AdditionalResponse` text. The cmdlet combination was reasoned out rather than observed when this decision was written, so this was the one part of it that needed a real test. |
 | D86 | A staff-only `/search` page (`Components/Pages/EventSearch.razor`) searches both sheet bookings and Club Events with a small prefixed-keyword grammar (`category:`/`day:`/`type:`, bare words match the title) over a wide, clamped date range | Staff feedback: nothing let staff find an event without already knowing roughly when it was - the calendar only loads its current view window, and the Club Events list has no search at all (§4.12). |
-| D87 | `GraphEventGateway.GetCalendarViewAsync` sets `$top = 200` on every `calendarView` read, for every caller, not just search | Previously unset, so Graph served its small default page size and the `@odata.nextLink` loop drained it serially - a search-sized sweep (~400 days, every sheet, recurring series expanded into occurrences) was on the order of 100 sequential round-trips per sheet without this. The returned set is unchanged, since the nextLink loop still drains to exhaustion regardless (§4.12). |
+| D87 | `GraphEventGateway.GetCalendarViewAsync` sets `$top = 200` on every `calendarView` read, for every caller, not just search | Previously unset, so Graph served its small default page size and the `@odata.nextLink` loop drained it serially, costing extra round-trips on any range. The returned set is unchanged, since the nextLink loop still drains to exhaustion regardless (§4.12). Still a real improvement, but **not sufficient on its own** to make a ~400-day search fast - see D90 for what the actual fix was. |
 | D88 | The search page's detail modal is read-only (`BookingDetailModal`/`ClubEventDetailModal`'s new additive `ReadOnly` parameter) with an "Open on calendar" handoff, rather than wiring Edit/Cancel directly into the search page | Full edit would mean a second, untested copy of `Calendar.razor`'s partial-sheet-edit and group-id-split rules (`SaveDraft`'s `splitGroupId` logic) - the most delicate booking-identity logic in the app, with no existing bUnit coverage to diverge from. The handoff needed `/calendar` to accept `?date=`/`?view=` for the first time (`Calendar.ResolveDeepLink`), mirroring `PublicCalendarEndpoint`'s existing `ParseDate`/`ParseView` (§4.12). |
 | D89 | `category:bonspiel` in search resolves to *both* `BookingCategory.Bonspiel` and `ClubEventCategory.OutOfTownBonspiels`, with an inline notice, rather than picking one | Not a special case - the vocabulary resolver returns whichever category families a normalized token hits, so any token present in both enums (also `other`) collides identically. Union rather than a guess: the two result kinds are already visually distinct in a row, and D81 renamed the club category specifically because staff conflate the two names (§4.12). |
+| D90 | Search's default/max date range dropped from 396/400 days to 60, applied uniformly to bookings and Club Events, superseding D87's assumption that `$top` alone made a wide range fast | **Live-confirmed 2026-08-21** against the real tenant: a default-range search took 20+ seconds for one result, and a fresh, cache-bypassing search of the same wide range took 90+ seconds with nothing back, while the same instance's ordinary ~6-week Staff Calendar load and a narrowed (<90-day) search were both fast. `calendarView`'s per-call cost with recurring series scales with the *width* of the requested range (Graph expands every occurrence across the whole window on every call), not just with round-trip count - `$top` reduces the latter, not the former. 60 days matches `PublicSearchEndpoint.MaxRangeDays`, an existing cap already justified in that endpoint's own code for the identical reason. One range for both record kinds, not two, even though Club Events (no recurring series) aren't the expensive half - a single constraint over a technically-looser-but-confusing pair of them (§4.12). |
 
 ---
 

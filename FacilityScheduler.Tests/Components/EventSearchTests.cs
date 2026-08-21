@@ -68,8 +68,8 @@ public class EventSearchTests : BunitContext
     public void Render_OnInitialLoad_IssuesNoGatewayReads()
     {
         // The cost-protection invariant this page exists to preserve: fanning out across every
-        // sheet for a ~400-day range on plain navigation (rather than an explicit search) would
-        // charge that cost to every stray menu click.
+        // sheet on plain navigation (rather than an explicit search) would charge that cost to
+        // every stray menu click, regardless of how wide the configured range is.
         var gateway = RegisterServices();
 
         Render<EventSearch>();

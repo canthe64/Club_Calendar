@@ -206,8 +206,10 @@ delete it once you've verified or corrected the booking it refers to.
 ## 6. Searching for an Event
 
 Reach **Search** from the menu. Unlike the calendar, which only ever shows the day/week/month
-currently in view, this searches a wide date range at once (30 days back through a year ahead by
-default) so you can find something without already knowing roughly when it happened.
+currently in view, this searches a date range up to 60 days wide at once (14 days back through 46
+ahead by default) so you can find something without already knowing exactly when it happened. Move
+Start/End forward or back to search further out — the 60-day limit keeps a search fast; a much wider
+one would take Exchange a long time to compute against recurring bookings.
 
 Type a search and press **Enter** or click **Search**. Nothing is fetched until you do — opening the
 page or adjusting the date range alone doesn't search on its own.
@@ -232,8 +234,8 @@ of Town Bonspiels" — a note explains this and suggests `category:outoftownbons
 Search only looks at **titles and categories** — not phone numbers, email addresses, or notes. Open a
 result to see that information; it was never meant to be searchable text.
 
-**Start date** / **End date** narrow or widen the window searched. A window wider than 400 days is
-automatically limited to 400, with a banner saying so — your typed dates are never silently changed,
+**Start date** / **End date** narrow or widen the window searched. A window wider than 60 days is
+automatically limited to 60, with a banner saying so — your typed dates are never silently changed,
 only what's actually searched.
 
 Click a result to see its detail. From there, **Open on calendar** takes you to that day on the

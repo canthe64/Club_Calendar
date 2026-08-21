@@ -55,6 +55,10 @@
                 Terms combine with AND; multiple <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:</code> or <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:</code> terms combine with OR (<code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:saturday day:sunday</code> means the weekend).
                 <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:bonspiel</code> matches both the sheet-booking category and the club event category "Out of Town Bonspiels" - add <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:booking</code> to narrow.
             </div>
+            <div style="margin-top:8px;color:#90a0ab">
+                The date range covers at most @SearchRange.MaxSpanDays days at a time - move Start/End
+                forward to search further out.
+            </div>
         </div>
     }
     else
