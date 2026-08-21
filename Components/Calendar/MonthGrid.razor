@@ -15,7 +15,7 @@
                 var dayClubEvents = ClubEvents.Where(ce => ce.Start.Date <= cell.Date && cell.Date <= ce.End.Date).ToList();
                 var dayBookings = Bookings
                     .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, cell.Date))
-                    .GroupBy(DedupeKey)
+                    .GroupBy(CalendarStyles.BookingGroupKey)
                     .Select(g => g.First())
                     .ToList();
                 var dayItems = CombineForDay(dayClubEvents, dayBookings, cell.Date);
@@ -81,21 +81,10 @@
         }
     }
 
-    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
-
-    private static string BookingTitle(SheetBooking b) => $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {Title(b)}";
+    private static string BookingTitle(SheetBooking b) => $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {CalendarStyles.BookingDisplayTitle(b)}";
 
     // All-day events have no specific hour to show; timed ones get the same start-time prefix as bookings.
     private static string ClubEventTitle(ClubEvent ce) => ce.IsAllDay ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
-
-    // BookingGroupId doesn't reliably read back for untouched occurrences of a recurring series
-    // (only set on the series master, not proven to inherit down to occurrences) - they default to
-    // Guid.Empty. Grouping directly on that would incorrectly merge multiple UNRELATED bookings that
-    // all happen to share the same empty default into one, hiding all but one. Falling back to
-    // (SheetMailbox, EventId) - always unique per booking - for the empty case means only bookings
-    // that share a genuine, real group id ever get merged.
-    private static string DedupeKey(SheetBooking b) =>
-        b.BookingGroupId != Guid.Empty ? b.BookingGroupId.ToString() : $"{b.SheetMailbox}|{b.EventId}";
 
     // Merges a day's club events and bookings into one chronologically-ordered list. All-day club
     // events sort as if occurring at midnight (first), so they consistently anchor to the top of the

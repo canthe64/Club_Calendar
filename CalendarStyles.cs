@@ -65,6 +65,48 @@ public static class CalendarStyles
     public static string TextColorStyle(SheetBooking booking) =>
         booking.State == BookingState.Hold ? CategoryColor(booking.Category) : "#ffffff";
 
+    /// <summary>
+    /// The one key that identifies "the same conceptual booking, same occurrence" - combining
+    /// <see cref="SheetBooking.BookingGroupId"/> (real bookings) with its own Start/End, or a
+    /// per-event fallback for the <see cref="Guid.Empty"/> default.
+    ///
+    /// A <c>Guid.Empty</c> BookingGroupId isn't a real, shared identity - it's the default for an
+    /// untouched occurrence of a recurring series (only reliably persists once an occurrence has
+    /// been individually PATCHed, e.g. via an edit; live-confirmed 2026-07-16). Matching on it
+    /// directly would risk bundling two completely unrelated bookings that happen to share that same
+    /// empty default AND the same start/end time by coincidence; falling back to
+    /// (SheetMailbox, EventId) - always unique per booking - means only bookings that share a
+    /// genuine, real group id ever get merged.
+    ///
+    /// The Start/End component folds in what a click-to-detail handler needs beyond the group id
+    /// alone: a multi-week recurring series shares one BookingGroupId across every occurrence, so
+    /// group-id-only matching would merge every week's occurrence of a multi-sheet series into one
+    /// "group" the instant more than one week's worth of data is loaded at once (Month view, or a
+    /// wide search result set) - scoping by Start/End as well keeps a "group" to what it visually
+    /// is: the same conceptual booking, on the same date.
+    /// </summary>
+    public static string BookingGroupKey(SheetBooking b) =>
+        b.BookingGroupId != Guid.Empty
+            ? $"{b.BookingGroupId}|{b.Start:O}|{b.End:O}"
+            : $"{b.SheetMailbox}|{b.EventId}";
+
+    /// <summary>Every booking in <paramref name="all"/> that shares <paramref name="clicked"/>'s
+    /// group key - i.e. every sheet of the same conceptual booking, at the same occurrence. Shared by
+    /// the calendar grids' click-to-detail handler and the search page, so both open the exact same
+    /// set for the exact same booking rather than each keeping its own copy of this rule.</summary>
+    public static List<SheetBooking> SiblingGroup(IEnumerable<SheetBooking> all, SheetBooking clicked)
+    {
+        var key = BookingGroupKey(clicked);
+        return all.Where(b => BookingGroupKey(b) == key).ToList();
+    }
+
+    /// <summary>What a booking reads as when there's no dedicated title field - the renter's name if
+    /// one was given, or the category label otherwise. Shared by every calendar grid chip, the detail
+    /// modal, and the search page's result rows and title matcher, so all of them agree on what a
+    /// booking "is called" by construction instead of each keeping its own copy in sync.</summary>
+    public static string BookingDisplayTitle(SheetBooking b) =>
+        string.IsNullOrWhiteSpace(b.RenterName) ? CategoryLabel(b.Category) : b.RenterName;
+
     public static string EmptySlotBg { get; } = "#f6f8f9";
 
     /// <summary>

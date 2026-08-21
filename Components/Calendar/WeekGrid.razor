@@ -98,18 +98,9 @@
         }
     }
 
-    // BookingGroupId doesn't reliably read back for untouched occurrences of a recurring series
-    // (only set on the series master, not proven to inherit down to occurrences) - they default to
-    // Guid.Empty. Grouping directly on that would incorrectly merge multiple UNRELATED bookings that
-    // all happen to share the same empty default into one, hiding all but one. Falling back to
-    // (SheetMailbox, EventId) - always unique per booking - for the empty case means only bookings
-    // that share a genuine, real group id ever get merged.
-    private static string DedupeKey(SheetBooking b) =>
-        b.BookingGroupId != Guid.Empty ? b.BookingGroupId.ToString() : $"{b.SheetMailbox}|{b.EventId}";
-
     private static string BookingLabel(SheetBooking b, int sheetCount)
     {
-        var title = string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
+        var title = CalendarStyles.BookingDisplayTitle(b);
         return sheetCount > 1 ? $"{title} · {sheetCount} sheets" : title;
     }
 
@@ -128,7 +119,7 @@
 
         var consolidatedBookings = Bookings
             .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, day.Date))
-            .GroupBy(DedupeKey)
+            .GroupBy(CalendarStyles.BookingGroupKey)
             .Select(g => new DayItem(g.First().Start, g.First().End, null, g.First(), g.Count()));
 
         return timedClubEvents.Concat(consolidatedBookings).OrderBy(i => i.Start).ToList();

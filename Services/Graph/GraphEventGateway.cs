@@ -7,6 +7,16 @@ namespace FacilityScheduler.Services.Graph;
 /// operations - see IGraphEventGateway for why this boundary exists.</summary>
 public class GraphEventGateway(GraphServiceClient graphClient) : IGraphEventGateway
 {
+    // Graph's default calendarView page size is small enough that a wide window (the search page's
+    // today-30d..today+366d sweep, per sheet, with recurring series expanded into occurrences) can
+    // take on the order of 100 sequential nextLink round-trips to drain - the nextLink loop below
+    // already reads to exhaustion regardless, so this only changes how many requests that costs, not
+    // what comes back (architecture doc D87). 200 was chosen as a reasonable page size; if Graph's
+    // interaction between $top and the singleValueExtendedProperties $expand ever returns a shorter
+    // page than requested (plausible per Microsoft's own docs), the nextLink loop tolerates that
+    // transparently - only a much lower ceiling on round-trip savings would result, not a bug.
+    private const int CalendarViewPageSize = 200;
+
     public async Task<List<Event>> GetCalendarViewAsync(string mailbox, string startUtc, string endUtc, string[] expand,
         IReadOnlyDictionary<string, string>? extraHeaders = null, CancellationToken ct = default)
     {
@@ -16,6 +26,7 @@ public class GraphEventGateway(GraphServiceClient graphClient) : IGraphEventGate
             config.QueryParameters.StartDateTime = startUtc;
             config.QueryParameters.EndDateTime = endUtc;
             config.QueryParameters.Expand = expand;
+            config.QueryParameters.Top = CalendarViewPageSize;
             if (extraHeaders is not null)
             {
                 foreach (var (key, value) in extraHeaders)
@@ -28,6 +39,8 @@ public class GraphEventGateway(GraphServiceClient graphClient) : IGraphEventGate
         // calendarView pages its results - a wide window (e.g. a 6-week month view) with several
         // recurring series expanded into occurrences can easily exceed one page. Only reading the
         // first page silently truncates later occurrences; follow @odata.nextLink until exhausted.
+        // The explicit $top above shrinks how many pages that takes for a wide window; it doesn't
+        // change this loop's behavior or the final result set at all.
         while (response is not null)
         {
             if (response.Value is not null)

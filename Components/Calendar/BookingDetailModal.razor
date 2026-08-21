@@ -6,7 +6,7 @@
     <div @onclick="() => OnClose.InvokeAsync()" style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
         <div @onclick:stopPropagation="true" style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:440px">
             <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:2px">
-                <span style="font-size:17px;font-weight:600;color:#1e2a33">@(string.IsNullOrWhiteSpace(first.RenterName) ? first.Category.ToString() : first.RenterName)</span>
+                <span style="font-size:17px;font-weight:600;color:#1e2a33">@CalendarStyles.BookingDisplayTitle(first)</span>
                 <span style="background:@CalendarStyles.CategoryLightBg(first.Category);color:@CalendarStyles.CategoryColor(first.Category);font-size:12px;font-weight:600;padding:2px 9px;border-radius:10px">@first.State</span>
             </div>
             <div style="font-size:13px;color:#5a7183;margin-bottom:12px">@first.Start.ToString("dddd, MMM d, h:mmtt")-@first.End.ToString("h:mmtt")</div>
