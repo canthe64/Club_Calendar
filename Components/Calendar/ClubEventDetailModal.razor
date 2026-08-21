@@ -40,9 +40,19 @@
             else
             {
                 <div style="display:flex;gap:8px;margin-top:14px;font-size:13.5px;font-weight:600">
-                    <span @onclick="() => OnEdit.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit event…</span>
-                    <span @onclick="() => _confirmingDelete = true" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Delete Club Event</span>
-                    <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                    @if (ReadOnly)
+                    {
+                        @* Reached from the search page - see BookingDetailModal's own ReadOnly comment
+                           (D88): send staff to the working edit flow rather than a second copy of it. *@
+                        <span @onclick="() => OnOpenOnCalendar.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Open on calendar</span>
+                        <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                    }
+                    else
+                    {
+                        <span @onclick="() => OnEdit.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit event…</span>
+                        <span @onclick="() => _confirmingDelete = true" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Delete Club Event</span>
+                        <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                    }
                 </div>
             }
         </div>
@@ -54,6 +64,11 @@
     [Parameter] public EventCallback OnClose { get; set; }
     [Parameter] public EventCallback<ClubEvent> OnEdit { get; set; }
     [Parameter] public EventCallback<ClubEvent> OnDelete { get; set; }
+
+    // Additive - defaults to false, so every existing call site (the calendar page) is unchanged.
+    // The search page is the only ReadOnly caller today.
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback<ClubEvent> OnOpenOnCalendar { get; set; }
 
     private bool _confirmingDelete;
     private ClubEvent? _lastClubEvent;

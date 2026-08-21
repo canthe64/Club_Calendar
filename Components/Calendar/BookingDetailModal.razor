@@ -50,15 +50,27 @@
             }
 
             <div style="display:flex;gap:8px;margin-top:14px;font-size:13.5px;font-weight:600">
-                <span @onclick="() => OnEdit.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit booking…</span>
-                <span @onclick="() => OnCancelBooking.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Cancel Booking</span>
-                <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                @if (ReadOnly)
+                {
+                    @* Reached from the search page - Edit/Cancel there would be a second, untested
+                       copy of the partial-sheet-edit and group-id-split rules SaveDraft owns on the
+                       calendar page (D88). Send staff to the working flow instead. *@
+                    <span @onclick="() => OnOpenOnCalendar.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Open on calendar</span>
+                    <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                }
+                else
+                {
+                    <span @onclick="() => OnEdit.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit booking…</span>
+                    <span @onclick="() => OnCancelBooking.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Cancel Booking</span>
+                    <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
+                }
             </div>
 
             @* "Edit booking…" above edits only the date that was clicked. For a series, the far more
                common intent is "the league is called the wrong thing" - which means every date. The
-               two are separate buttons rather than a prompt so neither is a guess. *@
-            @if (Group.Any(g => g.SeriesMasterId is not null))
+               two are separate buttons rather than a prompt so neither is a guess. Suppressed in
+               ReadOnly mode along with the ordinary Edit/Cancel row above, same reasoning. *@
+            @if (!ReadOnly && Group.Any(g => g.SeriesMasterId is not null))
             {
                 <div style="margin-top:10px;border-top:1px solid #e7ecef;padding-top:10px">
                     <div style="font-size:12px;color:#90a0ab;margin-bottom:6px">Part of a recurring series</div>
@@ -79,6 +91,11 @@
     [Parameter] public EventCallback<List<SheetBooking>> OnCancelBooking { get; set; }
     [Parameter] public EventCallback<List<SheetBooking>> OnCancelSeries { get; set; }
     [Parameter] public EventCallback<List<SheetBooking>> OnEditSeries { get; set; }
+
+    // Additive - defaults to false, so every existing call site (the calendar page) is unchanged.
+    // The search page is the only ReadOnly caller today.
+    [Parameter] public bool ReadOnly { get; set; }
+    [Parameter] public EventCallback<List<SheetBooking>> OnOpenOnCalendar { get; set; }
 
     private static string SheetLabel(string sheetMailbox)
     {
