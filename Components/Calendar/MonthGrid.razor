@@ -38,7 +38,7 @@
                        as a daily 9AM recurrence rather than one continuous event. The arrows alone
                        carry that meaning on continuation days. *@
                     <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">@(contBefore ? "← " : "")@(contBefore ? Title(b) : BookingTitle(b))@(contAfter ? " →" : "")</div>
+                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">@(contBefore ? "← " : "")@(contBefore ? CalendarStyles.BookingDisplayTitle(b) : BookingTitle(b))@(contAfter ? " →" : "")</div>
                 }
             }
             @if (!isExpanded && dayItems.Count > 3)
