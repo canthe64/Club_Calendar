@@ -1,0 +1,376 @@
+@page "/search"
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Domain.Search
+@using FacilityScheduler.Services
+@using FacilityScheduler.Components.Calendar
+@inject SheetBookingService BookingService
+@inject ClubEventService ClubEventService
+@inject FacilityConfiguration Facility
+@inject NavigationManager Navigation
+
+<PageTitle>Search</PageTitle>
+
+<div style="padding:16px 24px">
+    <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
+        <span style="font-size:18px;font-weight:600;color:#1e2a33">Event Search</span>
+        <span style="font-size:15px;color:#90a0ab">Find a booking or Club Event by day, category, or title.</span>
+    </div>
+
+    <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">
+        <div style="flex:1;min-width:260px">
+            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px;font-size:13px">Search</div>
+            <input value="@_query" @oninput="e => _query = e.Value?.ToString() ?? string.Empty" @onkeydown="OnQueryKeyDown"
+                   placeholder="category:bonspiel day:saturday junior..."
+                   style="border:1px solid #d7dfe5;border-radius:6px;padding:7px 10px;font-size:13.5px;width:100%;box-sizing:border-box">
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px;font-size:13px">Start date</div>
+            <input type="date" value="@_rangeStart?.ToString("yyyy-MM-dd")" @onchange="OnRangeStartChanged"
+                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13.5px">
+        </div>
+        <div>
+            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px;font-size:13px">End date</div>
+            <input type="date" value="@_rangeEnd?.ToString("yyyy-MM-dd")" @onchange="OnRangeEndChanged"
+                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13.5px">
+        </div>
+        <span @onclick="RunSearch" style="background:#c62f2f;color:#fff;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;white-space:nowrap">
+            @(_isSearching ? "Searching…" : "Search")
+        </span>
+    </div>
+    <div style="font-size:12px;color:#90a0ab;margin-bottom:14px">
+        Searches titles and categories only - not phone numbers, email, or notes. Those still show once you open a result.
+    </div>
+
+    @if (!_hasSearched)
+    {
+        <div style="background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;padding:14px 16px;font-size:13.5px;color:#5a7183;max-width:640px">
+            <div style="font-weight:600;color:#1e2a33;margin-bottom:8px">Search syntax</div>
+            <div style="display:flex;flex-direction:column;gap:5px">
+                <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:bonspiel</code> - matches a category, e.g. league, bonspiel, practiceice, closure</div>
+                <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:saturday</code> - a day of the week (full name or 3-letter abbreviation)</div>
+                <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:booking</code> / <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:clubevent</code> - restrict to one kind</div>
+                <div>any other word matches the title, e.g. <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">smith wedding</code></div>
+            </div>
+            <div style="margin-top:8px;color:#90a0ab">
+                Terms combine with AND; multiple <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:</code> or <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:</code> terms combine with OR (<code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:saturday day:sunday</code> means the weekend).
+                <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:bonspiel</code> matches both the sheet-booking category and the club event category "Out of Town Bonspiels" - add <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:booking</code> to narrow.
+            </div>
+        </div>
+    }
+    else
+    {
+        @if (_notices.Count > 0)
+        {
+            <div style="display:flex;flex-direction:column;gap:4px;margin-bottom:8px">
+                @foreach (var notice in _notices)
+                {
+                    <div style="background:#fdf8ec;border:1px solid #f0d58c;color:#8a6d1f;border-radius:6px;padding:6px 10px;font-size:12.5px">@notice.Message</div>
+                }
+            </div>
+        }
+        @if (_rangeWarning is not null)
+        {
+            <div style="background:#eaf1f8;border:1px solid #b9d0e6;color:#2d5f8a;border-radius:6px;padding:6px 10px;font-size:12.5px;margin-bottom:8px">@_rangeWarning</div>
+        }
+
+        @if (_isSearching)
+        {
+            <p><em>Searching @Facility.SheetMailboxes.Length sheets over @((_lastResolvedEnd - _lastResolvedStart).Days) days…</em></p>
+        }
+        else
+        {
+            var totalMatched = _upcoming.Count + _past.Count;
+            <div style="font-size:13px;color:#5a7183;margin-bottom:10px">
+                @if (totalMatched == 0)
+                {
+                    <span>No results in @_lastResolvedStart.ToString("MMM d, yyyy") - @_lastResolvedEnd.ToString("MMM d, yyyy").</span>
+                }
+                else
+                {
+                    <span>@totalMatched result@(totalMatched == 1 ? "" : "s") - @_bookingMatchCount booking@(_bookingMatchCount == 1 ? "" : "s"), @_clubEventMatchCount club event@(_clubEventMatchCount == 1 ? "" : "s") - @_lastResolvedStart.ToString("MMM d, yyyy") to @_lastResolvedEnd.ToString("MMM d, yyyy")</span>
+                }
+            </div>
+
+            @if (totalMatched > MaxRenderedRows)
+            {
+                <div style="background:#fdf8ec;border:1px solid #f0d58c;color:#8a6d1f;border-radius:6px;padding:6px 10px;font-size:12.5px;margin-bottom:10px">
+                    Showing the first @MaxRenderedRows of @totalMatched - narrow your search to see the rest.
+                </div>
+            }
+
+            @if (_cappedUpcoming.Count > 0)
+            {
+                <div style="font-size:13px;font-weight:600;color:#90a0ab;letter-spacing:.05em;margin-bottom:6px">UPCOMING</div>
+                <div style="display:flex;flex-direction:column;gap:6px;margin-bottom:16px">
+                    @foreach (var row in _cappedUpcoming)
+                    {
+                        @if (row.Booking is { } ub)
+                        {
+                            <div @onclick="() => OpenResult(row)"
+                                 style="display:flex;align-items:center;gap:10px;border:1px solid #e7ecef;border-radius:6px;padding:9px 12px;cursor:pointer;background:#fff">
+                                <span style="background:@CalendarStyles.CategoryColor(ub.Category);color:#fff;padding:2px 10px;border-radius:10px;font-weight:600;font-size:12px;white-space:nowrap">@CalendarStyles.CategoryLabel(ub.Category)</span>
+                                <span style="font-weight:600;color:#1e2a33;font-size:14px">@CalendarStyles.BookingDisplayTitle(ub)</span>
+                                <span style="font-size:13px;color:#5a7183">@FormatBookingRange(ub)</span>
+                                <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
+                                    @string.Join(", ", CalendarStyles.SiblingGroup(_allBookings, ub).Select(m => SheetLabel(m.SheetMailbox)))
+                                    @if (ub.State == BookingState.Hold)
+                                    {
+                                        <span style="border:1px dashed #2d5f8a;color:#2d5f8a;padding:1px 8px;border-radius:8px;font-weight:600">Hold</span>
+                                    }
+                                </span>
+                            </div>
+                        }
+                        else if (row.ClubEvent is { } uce)
+                        {
+                            <div @onclick="() => OpenResult(row)"
+                                 style="display:flex;align-items:center;gap:10px;border:1.5px dotted #c1ccd4;border-radius:6px;padding:9px 12px;cursor:pointer;background:#fff">
+                                <span style="background:@CalendarStyles.ClubEventCategoryColor(uce.Category);color:#fff;padding:2px 10px;border-radius:10px;font-weight:600;font-size:12px;white-space:nowrap">@CalendarStyles.ClubEventCategoryLabel(uce.Category)</span>
+                                <span style="font-weight:600;color:#1e2a33;font-size:14px">@uce.Title</span>
+                                <span style="font-size:13px;color:#5a7183">@FormatClubEventRange(uce)</span>
+                                <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
+                                    Club event
+                                    @if (uce.MarksSheetsUnavailable)
+                                    {
+                                        <span style="color:#a02c21;font-weight:600">All sheets unavailable</span>
+                                    }
+                                </span>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+
+            @if (_cappedPast.Count > 0)
+            {
+                <div style="font-size:13px;font-weight:600;color:#90a0ab;letter-spacing:.05em;margin-bottom:6px">PAST</div>
+                <div style="display:flex;flex-direction:column;gap:6px">
+                    @foreach (var row in _cappedPast)
+                    {
+                        @if (row.Booking is { } pb)
+                        {
+                            <div @onclick="() => OpenResult(row)"
+                                 style="display:flex;align-items:center;gap:10px;border:1px solid #e7ecef;border-radius:6px;padding:9px 12px;cursor:pointer;background:#fafbfc">
+                                <span style="background:@CalendarStyles.CategoryColor(pb.Category);color:#fff;padding:2px 10px;border-radius:10px;font-weight:600;font-size:12px;white-space:nowrap">@CalendarStyles.CategoryLabel(pb.Category)</span>
+                                <span style="font-weight:600;color:#1e2a33;font-size:14px">@CalendarStyles.BookingDisplayTitle(pb)</span>
+                                <span style="font-size:13px;color:#5a7183">@FormatBookingRange(pb)</span>
+                                <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
+                                    @string.Join(", ", CalendarStyles.SiblingGroup(_allBookings, pb).Select(m => SheetLabel(m.SheetMailbox)))
+                                    @if (pb.State == BookingState.Hold)
+                                    {
+                                        <span style="border:1px dashed #2d5f8a;color:#2d5f8a;padding:1px 8px;border-radius:8px;font-weight:600">Hold</span>
+                                    }
+                                </span>
+                            </div>
+                        }
+                        else if (row.ClubEvent is { } pce)
+                        {
+                            <div @onclick="() => OpenResult(row)"
+                                 style="display:flex;align-items:center;gap:10px;border:1.5px dotted #c1ccd4;border-radius:6px;padding:9px 12px;cursor:pointer;background:#fafbfc">
+                                <span style="background:@CalendarStyles.ClubEventCategoryColor(pce.Category);color:#fff;padding:2px 10px;border-radius:10px;font-weight:600;font-size:12px;white-space:nowrap">@CalendarStyles.ClubEventCategoryLabel(pce.Category)</span>
+                                <span style="font-weight:600;color:#1e2a33;font-size:14px">@pce.Title</span>
+                                <span style="font-size:13px;color:#5a7183">@FormatClubEventRange(pce)</span>
+                                <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
+                                    Club event
+                                    @if (pce.MarksSheetsUnavailable)
+                                    {
+                                        <span style="color:#a02c21;font-weight:600">All sheets unavailable</span>
+                                    }
+                                </span>
+                            </div>
+                        }
+                    }
+                </div>
+            }
+        }
+    }
+</div>
+
+<BookingDetailModal Group="_detailGroup" ReadOnly="true" OnClose="() => _detailGroup = null" OnOpenOnCalendar="OpenOnCalendar" />
+<ClubEventDetailModal ClubEvent="_clubEventDetail" ReadOnly="true" OnClose="() => _clubEventDetail = null" OnOpenOnCalendar="OpenClubEventOnCalendar" />
+
+@code {
+    private const int MaxRenderedRows = 300;
+
+    private sealed record ResultRow(DateTime Start, DateTime End, SheetBooking? Booking, ClubEvent? ClubEvent);
+
+    private string _query = string.Empty;
+    private DateTime? _rangeStart;
+    private DateTime? _rangeEnd;
+
+    private bool _hasSearched;
+    private bool _isSearching;
+    private (DateTime Start, DateTime End)? _fetchedRange;
+    private List<SheetBooking> _allBookings = [];
+    private List<ClubEvent> _allClubEvents = [];
+
+    private IReadOnlyList<SearchNotice> _notices = [];
+    private string? _rangeWarning;
+    private DateTime _lastResolvedStart;
+    private DateTime _lastResolvedEnd;
+    private int _bookingMatchCount;
+    private int _clubEventMatchCount;
+    private List<ResultRow> _cappedUpcoming = [];
+    private List<ResultRow> _cappedPast = [];
+    private List<ResultRow> _upcoming = [];
+    private List<ResultRow> _past = [];
+
+    private List<SheetBooking>? _detailGroup;
+    private ClubEvent? _clubEventDetail;
+
+    // No fetch here - only sets the date pickers' defaults and renders the help card. A page that
+    // fanned out across every sheet for a wide range on plain navigation would charge that cost to
+    // every stray menu click.
+    protected override void OnInitialized()
+    {
+        var today = Facility.Today;
+        _rangeStart = today.AddDays(-SearchRange.DefaultLookbackDays);
+        _rangeEnd = today.AddDays(SearchRange.DefaultLookaheadDays);
+    }
+
+    private void OnQueryKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter")
+        {
+            _ = RunSearch();
+        }
+    }
+
+    private void OnRangeStartChanged(ChangeEventArgs e)
+    {
+        _rangeStart = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+    }
+
+    private void OnRangeEndChanged(ChangeEventArgs e)
+    {
+        _rangeEnd = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
+    }
+
+    // Runs on Enter or the Search button only - never search-as-you-type, since each keystroke could
+    // otherwise trigger a Graph fan-out if the range happened to change too.
+    private async Task RunSearch()
+    {
+        if (_isSearching)
+        {
+            return;
+        }
+
+        var query = SearchQueryParser.Parse(_query);
+        _notices = query.Notices;
+
+        if (query.IsEmpty)
+        {
+            _hasSearched = false;
+            _rangeWarning = null;
+            return;
+        }
+
+        var (start, end, warning) = SearchRange.Resolve(_rangeStart, _rangeEnd, Facility.Today);
+        _rangeWarning = warning;
+        _lastResolvedStart = start;
+        _lastResolvedEnd = end;
+
+        // Refining the query text against an unchanged range costs zero Graph calls - only a range
+        // change re-fetches. Holding the snapshot in page state (not the service's own 30s cache) is
+        // what makes iterating on the search text cheap.
+        if (_fetchedRange is null || _fetchedRange.Value.Start != start || _fetchedRange.Value.End != end)
+        {
+            _isSearching = true;
+            StateHasChanged();
+
+            try
+            {
+                var fetchEnd = end.AddDays(1); // end is the last INCLUDED day; services take an exclusive upper bound.
+                _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, fetchEnd);
+                _allClubEvents = await ClubEventService.GetEventsAsync(start, fetchEnd);
+                _fetchedRange = (start, end);
+            }
+            finally
+            {
+                _isSearching = false;
+            }
+        }
+
+        ApplyResults(query);
+        _hasSearched = true;
+    }
+
+    private void ApplyResults(SearchQuery query)
+    {
+        var bookingRows = _allBookings
+            .Where(b => EventSearchMatcher.Matches(b, query))
+            .GroupBy(CalendarStyles.BookingGroupKey)
+            .Select(g => g.First())
+            .Select(b => new ResultRow(b.Start, b.End, b, null));
+
+        var clubEventRows = _allClubEvents
+            .Where(ce => EventSearchMatcher.Matches(ce, query))
+            .Select(ce => new ResultRow(ce.Start, ce.End, null, ce));
+
+        var allRows = bookingRows.Concat(clubEventRows).ToList();
+        _bookingMatchCount = allRows.Count(r => r.Booking is not null);
+        _clubEventMatchCount = allRows.Count(r => r.ClubEvent is not null);
+
+        var today = Facility.Today;
+        _upcoming = allRows.Where(r => r.End.Date >= today.Date)
+            .OrderBy(r => r.Start).ThenBy(RowTitle).ThenBy(RowSheetKey)
+            .ToList();
+        _past = allRows.Where(r => r.End.Date < today.Date)
+            .OrderByDescending(r => r.Start).ThenBy(RowTitle).ThenBy(RowSheetKey)
+            .ToList();
+
+        // Upcoming first when the combined set exceeds the render cap - a stale past occurrence is
+        // less actionable than a future one when both can't fit.
+        _cappedUpcoming = _upcoming.Take(MaxRenderedRows).ToList();
+        var remaining = MaxRenderedRows - _cappedUpcoming.Count;
+        _cappedPast = remaining > 0 ? _past.Take(remaining).ToList() : [];
+    }
+
+    private static string RowTitle(ResultRow r) =>
+        r.Booking is { } b ? CalendarStyles.BookingDisplayTitle(b) : r.ClubEvent!.Title;
+
+    private static string RowSheetKey(ResultRow r) => r.Booking?.SheetMailbox ?? string.Empty;
+
+    private void OpenResult(ResultRow row)
+    {
+        if (row.Booking is { } b)
+        {
+            _detailGroup = CalendarStyles.SiblingGroup(_allBookings, b);
+        }
+        else if (row.ClubEvent is { } ce)
+        {
+            _clubEventDetail = ce;
+        }
+    }
+
+    private void OpenOnCalendar(List<SheetBooking> group) =>
+        Navigation.NavigateTo($"/calendar?view=day&date={group[0].Start:yyyy-MM-dd}");
+
+    private void OpenClubEventOnCalendar(ClubEvent ce) =>
+        Navigation.NavigateTo($"/calendar?view=day&date={ce.Start:yyyy-MM-dd}");
+
+    private static string FormatBookingRange(SheetBooking b) =>
+        b.Start.Date == b.End.Date
+            ? $"{b.Start:dddd, MMM d, yyyy} · {b.Start:h:mmtt}-{b.End:h:mmtt}"
+            : $"{b.Start:MMM d, h:mmtt} - {b.End:MMM d, h:mmtt yyyy}";
+
+    private static string FormatClubEventRange(ClubEvent ce)
+    {
+        if (ce.IsAllDay)
+        {
+            return ce.Start.Date == ce.End.Date
+                ? ce.Start.ToString("dddd, MMM d, yyyy")
+                : $"{ce.Start:MMM d} - {ce.End:MMM d, yyyy}";
+        }
+
+        return ce.Start.Date == ce.End.Date
+            ? $"{ce.Start:dddd, MMM d, yyyy} · {ce.Start:h:mmtt}-{ce.End:h:mmtt}"
+            : $"{ce.Start:MMM d, h:mmtt} - {ce.End:MMM d, h:mmtt yyyy}";
+    }
+
+    private static string SheetLabel(string sheetMailbox)
+    {
+        var localPart = sheetMailbox.Split('@')[0];
+        var digits = new string(localPart.Where(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
+    }
+}
