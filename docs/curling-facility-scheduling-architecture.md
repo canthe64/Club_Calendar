@@ -458,11 +458,16 @@ precedent) and capped at a 60-day span — see D90 for why 60, not the much wide
 shipped. One range applies uniformly to both bookings and Club Events; deliberately not decoupled
 into two different caps even though Club Events aren't the expensive half (no recurring-series
 expansion cost regardless of range width) — two different "how far was actually searched" answers
-for one search box would be a confusing result to explain, not a real usability win. The clamp
-applies only to what's actually fetched — the date inputs keep showing exactly what staff typed, with
-a separate warning banner naming both the requested and the actual searched window. This is the
-standing no-silent-date-mutation rule, applied here for the first time to a *range* rather than a
-single date.
+for one search box would be a confusing result to explain, not a real usability win. `Resolve` itself
+still clamps-and-warns defensively (unchanged, still the standing no-silent-date-mutation pattern
+applied to a range rather than a single date) — but as of the live-testing pass, the *page* no longer
+lets a search reach that clamp for the two conditions staff can trivially cause: a >60-day span or an
+end date before the start date. Both are checked reactively against the picked dates on every render,
+before Search is ever clicked, and the Search control is disabled with a specific inline reason while
+either holds — live-found the after-the-fact "the end date wasn't reached" banner read as vague and
+easy to trigger by accident, so the fix is to make the guaranteed-to-be-clamped state unreachable
+rather than explain it well after the fact. The absolute year-bound clamp (a date typed years out) is
+unchanged and still warns after the fact, since it's a much rarer case than the 60-day cap.
 
 **Cost discipline**: `OnInitialized` performs no fetch — only an explicit Enter/Search-button click
 does (never search-as-you-type, since a keystroke could otherwise trigger a fan-out if the range had

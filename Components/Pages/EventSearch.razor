@@ -33,9 +33,17 @@
             <input type="date" value="@_rangeEnd?.ToString("yyyy-MM-dd")" @onchange="OnRangeEndChanged"
                    style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13.5px">
         </div>
-        <span @onclick="RunSearch" style="background:#c62f2f;color:#fff;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;white-space:nowrap">
+        <span @onclick="RunSearch" title="@(RangeBlocksSearch ? RangeBlockMessage : null)"
+              style="background:@(_isSearching || RangeBlocksSearch ? "#e8b4ae" : "#c62f2f");color:#fff;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:@(_isSearching || RangeBlocksSearch ? "default" : "pointer");white-space:nowrap">
             @(_isSearching ? "Searching…" : "Search")
         </span>
+    </div>
+    @* Always visible, not just on the help card - this used to only mention the day cap before the
+       first search, which is exactly when it matters least. Switches to a specific, actionable
+       message the moment the picked dates would be blocked, rather than letting a guaranteed-to-be-
+       clamped search be attempted and explained after the fact. *@
+    <div style="font-size:12px;margin-bottom:4px;font-weight:@(RangeBlocksSearch ? "600" : "400");color:@(RangeBlocksSearch ? "#a02c21" : "#90a0ab")">
+        @(RangeBlocksSearch ? RangeBlockMessage : $"Searches up to {SearchRange.MaxSpanDays} days at a time.")
     </div>
     <div style="font-size:12px;color:#90a0ab;margin-bottom:14px">
         Searches titles and categories only - not phone numbers, email, or notes. Those still show once you open a result.
@@ -249,11 +257,28 @@
         _rangeEnd = DateTime.TryParse(e.Value?.ToString(), out var d) ? d : null;
     }
 
+    // Reactive to the currently-picked dates, evaluated on every render - so a too-wide or
+    // backwards range is visible and blocks Search the moment it's picked, not after a search is
+    // attempted and silently clamped. Null start/end (unset) is never blocking - SearchRange.Resolve
+    // falls back to its own defaults for either.
+    private int? RequestedSpanDays => _rangeStart.HasValue && _rangeEnd.HasValue
+        ? (_rangeEnd.Value.Date - _rangeStart.Value.Date).Days
+        : null;
+
+    private bool RangeEndBeforeStart => _rangeStart.HasValue && _rangeEnd.HasValue && _rangeEnd.Value.Date < _rangeStart.Value.Date;
+    private bool RangeTooWide => RequestedSpanDays is { } days && days > SearchRange.MaxSpanDays;
+    private bool RangeBlocksSearch => RangeEndBeforeStart || RangeTooWide;
+
+    private string? RangeBlockMessage =>
+        RangeEndBeforeStart ? "End date is before start date - fix the dates to search." :
+        RangeTooWide ? $"That's a {RequestedSpanDays}-day range - narrow it to {SearchRange.MaxSpanDays} days or fewer to search." :
+        null;
+
     // Runs on Enter or the Search button only - never search-as-you-type, since each keystroke could
     // otherwise trigger a Graph fan-out if the range happened to change too.
     private async Task RunSearch()
     {
-        if (_isSearching)
+        if (_isSearching || RangeBlocksSearch)
         {
             return;
         }

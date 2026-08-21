@@ -229,14 +229,16 @@ anything on the weekend.
 
 `category:bonspiel` deliberately matches **both** a sheet-booking Bonspiel and a Club Event under "Out
 of Town Bonspiels" — a note explains this and suggests `category:outoftownbonspiels` or
-`type:booking` if you meant just one.
+`type:booking` if you meant just one, since both were included in the search.
 
 Search only looks at **titles and categories** — not phone numbers, email addresses, or notes. Open a
 result to see that information; it was never meant to be searchable text.
 
-**Start date** / **End date** narrow or widen the window searched. A window wider than 60 days is
-automatically limited to 60, with a banner saying so — your typed dates are never silently changed,
-only what's actually searched.
+**Start date** / **End date** narrow or widen the window searched, always up to 60 days at a time. A
+reminder of that limit sits under the Search button at all times. If you pick a wider range (or an
+end date before the start date), **Search is disabled** and a specific message replaces the reminder
+explaining exactly what to fix — you won't be able to click Search and only find out afterward that it
+didn't cover what you asked for.
 
 Click a result to see its detail. From there, **Open on calendar** takes you to that day on the
 Calendar page, where you can edit or cancel it the normal way — Search itself is read-only, so you

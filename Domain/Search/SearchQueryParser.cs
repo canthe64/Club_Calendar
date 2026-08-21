@@ -67,8 +67,12 @@ internal static class SearchQueryParser
 
                         if (resolution.MultipleFamilies)
                         {
+                            // "were included in the search" rather than "are shown below" - this
+                            // fires whenever the term resolves to both families, regardless of
+                            // whether either one actually has a match in the searched range. Saying
+                            // "shown below" reads as a promise of results that may not be there.
                             notices.Add(new SearchNotice(SearchNoticeKind.CategoryCollision,
-                                $"\"category:{value}\" matches both a sheet booking category and a club event category - both are shown below."));
+                                $"\"category:{value}\" matches both a sheet booking category and a club event category - both were included in the search."));
                         }
                     }
 

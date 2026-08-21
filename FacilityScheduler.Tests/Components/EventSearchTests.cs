@@ -1,6 +1,7 @@
 using Bunit;
 using Microsoft.Extensions.DependencyInjection;
 using FacilityScheduler.Components.Pages;
+using FacilityScheduler.Domain.Search;
 using FacilityScheduler.Services;
 using FacilityScheduler.Services.Graph;
 using FacilityScheduler.Tests.TestSupport;
@@ -85,5 +86,54 @@ public class EventSearchTests : BunitContext
         var cut = Render<EventSearch>();
 
         Assert.Contains("Search syntax", cut.Markup);
+    }
+
+    [Fact]
+    public void Render_OnInitialLoad_ShowsTheDefaultRangeCapHint()
+    {
+        RegisterServices();
+
+        var cut = Render<EventSearch>();
+
+        Assert.Contains($"Searches up to {SearchRange.MaxSpanDays} days at a time.", cut.Markup);
+    }
+
+    [Fact]
+    public void SelectingRangeWiderThanCap_BlocksSearchWithoutFetchingAndShowsWhy()
+    {
+        // The bug this guards: staff could previously click Search on a too-wide range, wait, and
+        // only then see a vague "end date wasn't reached" message. The range must now block Search
+        // entirely, with a specific reason, the moment an out-of-bounds range is picked.
+        var gateway = RegisterServices();
+        var cut = Render<EventSearch>();
+
+        var dateInputs = cut.FindAll("input[type=date]");
+        dateInputs[0].Change("2026-01-01");
+        dateInputs[1].Change("2026-06-01"); // ~150 days, well past the 60-day cap
+
+        Assert.Contains("narrow it to", cut.Markup);
+
+        var searchButton = cut.FindAll("span").Single(s => s.TextContent.Trim() == "Search");
+        searchButton.Click();
+
+        Assert.Equal(0, gateway.CalendarViewCalls);
+    }
+
+    [Fact]
+    public void SelectingEndBeforeStart_BlocksSearchWithoutFetchingAndShowsWhy()
+    {
+        var gateway = RegisterServices();
+        var cut = Render<EventSearch>();
+
+        var dateInputs = cut.FindAll("input[type=date]");
+        dateInputs[0].Change("2026-06-10");
+        dateInputs[1].Change("2026-06-01");
+
+        Assert.Contains("End date is before start date", cut.Markup);
+
+        var searchButton = cut.FindAll("span").Single(s => s.TextContent.Trim() == "Search");
+        searchButton.Click();
+
+        Assert.Equal(0, gateway.CalendarViewCalls);
     }
 }
