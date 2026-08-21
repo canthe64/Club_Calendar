@@ -89,11 +89,11 @@ internal static class SearchQueryParser
                     break;
 
                 case "type":
-                    if (normalizedValue == "booking")
+                    if (normalizedValue is "booking" or "bookings")
                     {
                         kind = SearchKindFilter.BookingOnly;
                     }
-                    else if (normalizedValue == "clubevent")
+                    else if (normalizedValue is "clubevent" or "clubevents")
                     {
                         kind = SearchKindFilter.ClubEventOnly;
                     }
