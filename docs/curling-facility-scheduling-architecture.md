@@ -376,10 +376,37 @@ before (D75). A companion `CalendarStyles.ContinuationMarks(start, end, day)` re
 `→` (more of the booking follows on a later day) or `←` (part of it happened on an earlier day) mark
 a chip should show — both can apply on a middle day of a longer span — so a multi-sheet, multi-day
 booking's chips read as one continuous event rather than a wall of unrelated same-titled repeats.
-Deliberately scoped to sheet bookings only: New Series (`SeriesDraft`) is untouched, a separate type
-with its own single-occurrence-per-date model with no interaction to design around, and Club Events
-already rendered multi-day spans without a continuation mark before this feature and still do —
-adding one there was out of scope for what was asked.
+Deliberately scoped to sheet bookings only at first: New Series (`SeriesDraft`) stayed untouched, a
+separate type with its own single-occurrence-per-date model with no interaction to design around.
+
+**Follow-up UI corrections (2026-08-21), live-found from the shipped feature.** Three related fixes,
+made together once staff started actually using multi-day bookings:
+
+1. **A cell's start-time prefix (e.g. "9AM - Hot Shots") was still showing on every day of a
+   multi-day item, not just its actual first day** — on a Saturday in the middle of a Friday-Sunday
+   booking, "9AM" read as a daily 9AM recurrence rather than a continuation of Friday's booking. Every
+   render site that prefixes a start time (`MonthGrid`/`WeekGrid`/`DayGrid` and both
+   `PublicCalendarEndpoint` sites) now only does so when the rendered day equals the item's own
+   `Start.Date`; other days show the title alone (plus the continuation arrow). `DayGrid.razor`
+   additionally had a second line showing the item's raw `Start`-`End` time range unconditionally,
+   equally wrong on a middle day (implying the booking runs 9AM-4PM *that specific day* when it
+   actually runs the full day) — replaced with `TimeRangeForDay`, which shows the true start time on
+   the first day, the true end time on the last day, and `"All day"` on a middle day, with the
+   original single-day format preserved when both are the same day.
+2. **The `→`/`←` continuation marks, and the same stale-start-time bug, applied only to sheet
+   bookings, not Club Events** — an all-day or timed multi-day Club Event (a multi-day closure, an
+   Out of Town Bonspiels trip) showed no continuation indicator at all, while a booking spanning the
+   same days did, an inconsistency staff noticed directly. Reversing the original scoping decision
+   above, `ContinuationMarks` and the day-matched start-time suppression now apply to Club Events too,
+   in every one of the render sites listed above (staff `DayGrid.razor` still shows no arrows for
+   either kind, unchanged — it only ever renders one day, so there is nothing to point across).
+3. **`BookingFormModal`/`ClubEventFormModal`'s Start date and End date pickers could be left in an
+   inverted state** — moving Start date past the currently-selected End date left End date stale and
+   earlier than Start, an invalid range until End date was also touched. Both modals' Start-date
+   change handler now pulls End date forward to match whenever the new start would otherwise outrun
+   it — never backward, so a multi-day span staff already set up is left alone unless the new start
+   date genuinely passes it. This is a UX default, not a silent correction of a value staff typed
+   directly into End date itself.
 
 ---
 

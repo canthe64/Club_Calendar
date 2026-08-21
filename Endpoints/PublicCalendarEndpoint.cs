@@ -424,7 +424,11 @@ public static class PublicCalendarEndpoint
         foreach (var ce in dayClubEvents)
         {
             var note = ce.MarksSheetsUnavailable ? "All sheets reserved" : "";
-            var cellTitle = ce.IsAllDay ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
+            // ce.Start belongs to the event's actual first day only - on a later day of a multi-day
+            // timed club event, prefixing it here would misleadingly read as starting that day too.
+            var cellTitleText = ce.IsAllDay || cell.Date != ce.Start.Date ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
+            var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, cell.Date);
+            var cellTitle = $"{(ceContBefore ? "← " : "")}{cellTitleText}{(ceContAfter ? " →" : "")}";
             sb.Append($"""
                 <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(note)}"
                      style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
@@ -446,7 +450,10 @@ public static class PublicCalendarEndpoint
             var display = extra ? "none" : "block";
 
             var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, cell.Date);
-            var cellTitle = $"{(contBefore ? "← " : "")}{CalendarStyles.CellStartTimeLabel(b.Start)} - {b.Title}{(contAfter ? " →" : "")}";
+            // The start time belongs to the booking's actual first day only - repeating it on every
+            // later day reads as a daily recurrence rather than one continuous event.
+            var cellTitleText = contBefore ? b.Title : $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {b.Title}";
+            var cellTitle = $"{(contBefore ? "← " : "")}{cellTitleText}{(contAfter ? " →" : "")}";
             sb.Append($"""
                 <div class="pub-cal-chip{extraClass}" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(time)}" data-note=""
                      style="display:{display};background:{bg};color:{textColor};border:{border};border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
@@ -566,9 +573,11 @@ public static class PublicCalendarEndpoint
             foreach (var ce in allDayEvents)
             {
                 var text = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title;
+                var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
+                var chipText = $"{(ceContBefore ? "← " : "")}{text}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets reserved" : "")}"
-                         style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(text)}</div>
+                         style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(chipText)}</div>
                     """);
             }
             sb.Append("</div>");
@@ -591,7 +600,12 @@ public static class PublicCalendarEndpoint
             if (laid.Item.ClubEvent is { } ce)
             {
                 var bg = ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category);
-                var title = $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {ce.Title}";
+                // ce.Start belongs to the event's actual first day only - on a later day of a
+                // multi-day timed club event, prefixing it here would misleadingly read as starting
+                // that day too.
+                var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
+                var titleText = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
+                var title = $"{(ceContBefore ? "← " : "")}{titleText}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets reserved" : "")}"
                          style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:{CalendarStyles.ClubEventBorderStyle};color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
@@ -607,7 +621,10 @@ public static class PublicCalendarEndpoint
                 var subtitle = $"{CalendarStyles.CategoryLabel(category)} · {(b.IsConfirmed ? "Confirmed" : "Hold")}";
                 var timeText = $"{b.Start:dddd, MMM d} · {b.Start:h:mmtt}-{b.End:h:mmtt}";
                 var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, day);
-                var title = $"{(contBefore ? "← " : "")}{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {b.Title}{(contAfter ? " →" : "")}";
+                // The start time belongs to the booking's actual first day only - repeating it on every
+                // later day reads as a daily recurrence rather than one continuous event.
+                var titleText = contBefore ? b.Title : $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {b.Title}";
+                var title = $"{(contBefore ? "← " : "")}{titleText}{(contAfter ? " →" : "")}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(timeText)}" data-note=""
                          style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:1;border-radius:5px;background:{bg};border:{border};color:{textColor};padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>

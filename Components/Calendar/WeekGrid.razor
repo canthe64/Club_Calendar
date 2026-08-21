@@ -28,10 +28,10 @@
                     <div style="display:flex;flex-direction:column;gap:2px;height:@(WeekAllDayRowHeightPx)px;padding:2px 0;box-sizing:border-box">
                         @foreach (var ce in dayAllDayEvents)
                         {
+                            var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
+                            var ceText = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title;
                             <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
-                                 style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                                @(ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title)
-                            </div>
+                                 style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">@(ceContBefore ? "← " : "")@ceText@(ceContAfter ? " →" : "")</div>
                         }
                     </div>
                 }
@@ -46,17 +46,26 @@
                         var leftPct = laid.Lane * widthPct;
                         @if (laid.Item.ClubEvent is { } ce)
                         {
+                            // Same reasoning as booking titles: ce.Start belongs to the event's actual
+                            // first day only - on a later day of a multi-day timed club event, this
+                            // would otherwise read as starting at the same hour every day.
+                            var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
+                            var ceLabel = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
                             <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
-                                 style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:12px;font-weight:600">
-                                @($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {ce.Title}")
-                            </div>
+                                 style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:12px;font-weight:600">@(ceContBefore ? "← " : "")@ceLabel@(ceContAfter ? " →" : "")</div>
                         }
                         else if (laid.Item.Booking is { } b)
                         {
                             var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, day);
+                            // The start time belongs to the booking's actual first day only - repeating
+                            // it on every later day reads as a daily recurrence rather than one
+                            // continuous event. The arrows alone carry that meaning on continuation days.
+                            var label = contBefore
+                                ? BookingLabel(b, laid.Item.SheetCount)
+                                : $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}";
                             <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
                                  style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(b);border:@CalendarStyles.BorderStyle(b);color:@CalendarStyles.TextColorStyle(b);padding:2px 5px;overflow:hidden;cursor:pointer">
-                                <div style="font-size:12px;font-weight:600">@(contBefore ? "← " : "")@($"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}")@(contAfter ? " →" : "")</div>
+                                <div style="font-size:12px;font-weight:600">@(contBefore ? "← " : "")@label@(contAfter ? " →" : "")</div>
                             </div>
                         }
                     }

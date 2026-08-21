@@ -30,7 +30,7 @@
                     {
                         <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
                              style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:3px 8px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
-                            @ClubEventText(ce)
+                            @ClubEventText(ce, Date)
                         </div>
                     }
                 </div>
@@ -59,10 +59,16 @@
                                 var booking = laid.Item;
                                 var widthPct = 100.0 / laid.LaneCount;
                                 var leftPct = laid.Lane * widthPct;
+                                // The start time belongs to the booking's actual first day only - on a
+                                // later day of a multi-day booking (e.g. the Saturday of a Fri-Sun
+                                // booking), showing "9AM - Title" reads as if it starts at 9AM that day
+                                // too, rather than continuing from the day before.
+                                var isContinuationDay = Date.Date > booking.Start.Date;
+                                var titleText = isContinuationDay ? Title(booking) : $"{CalendarStyles.CellStartTimeLabel(booking.Start)} - {Title(booking)}";
                                 <div @onclick="() => OnBookingClick.InvokeAsync(booking)"
                                      style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(booking.Start, Date))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(booking.Start, booking.End, Date))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(booking);border:@CalendarStyles.BorderStyle(booking);padding:2px 6px;overflow:hidden;cursor:pointer">
-                                    <div style="font-size:12.5px;font-weight:600;color:@CalendarStyles.TextColorStyle(booking)">@($"{CalendarStyles.CellStartTimeLabel(booking.Start)} - {Title(booking)}")</div>
-                                    <div style="font-size:11.5px;color:@CalendarStyles.TextColorStyle(booking);opacity:.85">@TimeRange(booking)</div>
+                                    <div style="font-size:12.5px;font-weight:600;color:@CalendarStyles.TextColorStyle(booking)">@titleText</div>
+                                    <div style="font-size:11.5px;color:@CalendarStyles.TextColorStyle(booking);opacity:.85">@TimeRangeForDay(booking, Date)</div>
                                 </div>
                             }
                         </div>
@@ -75,7 +81,7 @@
                         {
                             <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
                                  style="pointer-events:auto;box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(ce.Start, Date))px;left:0;right:0;height:@(CalendarStyles.HeightPx(ce.Start, ce.End, Date))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 6px;overflow:hidden;cursor:pointer;opacity:.92">
-                                <div style="font-size:12.5px;font-weight:600">@ClubEventText(ce)</div>
+                                <div style="font-size:12.5px;font-weight:600">@ClubEventText(ce, Date)</div>
                             </div>
                         }
                     </div>
@@ -124,14 +130,17 @@
 
     // Purely informational - no change to sheet booking/conflict logic here, matching the Club
     // Events architecture decision D13 ("no cross-check in either direction").
-    private static string ClubEventText(ClubEvent ce)
+    private static string ClubEventText(ClubEvent ce, DateTime day)
     {
         if (ce.IsAllDay)
         {
             return ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets reserved" : ce.Title;
         }
 
-        var titleWithTime = $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
+        // Same reasoning as booking titles: ce.Start belongs to the event's actual first day only -
+        // on a later day of a multi-day timed club event, prefixing it here would read as if it
+        // starts that day too.
+        var titleWithTime = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
         return ce.MarksSheetsUnavailable ? $"{titleWithTime} - all sheets reserved" : titleWithTime;
     }
 
@@ -147,5 +156,21 @@
 
     private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
 
-    private static string TimeRange(SheetBooking b) => $"{b.Start:h:mmtt}-{b.End:h:mmtt}";
+    // Same reasoning as the title above: b.Start/b.End are the booking's overall boundaries, not
+    // necessarily anything to do with the day being rendered. Only state a boundary time this chip
+    // is actually showing on this day - a middle day of a multi-day booking runs the entire day, so
+    // neither boundary applies and it reads as "All day" rather than a fabricated 9AM-4PM.
+    private static string TimeRangeForDay(SheetBooking b, DateTime day)
+    {
+        var showsStart = day.Date == b.Start.Date;
+        var showsEnd = day.Date == b.End.Date;
+
+        return (showsStart, showsEnd) switch
+        {
+            (true, true) => $"{b.Start:h:mmtt}-{b.End:h:mmtt}",
+            (true, false) => $"{b.Start:h:mmtt} →",
+            (false, true) => $"→ {b.End:h:mmtt}",
+            _ => "All day"
+        };
+    }
 }
