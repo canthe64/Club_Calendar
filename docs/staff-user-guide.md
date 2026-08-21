@@ -45,9 +45,10 @@ an empty area of a day column in Week view, jumps to that day's Day view.
 axis down the left edge — Day view has one column per sheet, Week view has one column per day. If a
 booking spans multiple sheets at once, Week view shows it as a single item (e.g. "League Practice ·
 5 sheets") rather than repeating it in every sheet's row. Every cell's title is prefixed with its
-start time (e.g. "7PM - League Practice"), including in Month view. A booking spanning multiple
-days shows a **→** on days before its last and a **←** on days after its first, so a multi-day
-booking's chips read as one continuous event rather than unrelated repeats.
+start time (e.g. "7PM - League Practice") **on its actual starting day only** — a booking or Club
+Event that spans multiple days doesn't repeat that time on later days, since it didn't start again
+at that hour each day. A multi-day item shows a **→** on days before its last and a **←** on days
+after its first instead, so its chips read as one continuous event rather than unrelated repeats.
 
 Club Events (§5) render inline in every view — a pinned row at the top for all-day events, or a
 full-width band at the right hour for timed ones — with a **dotted border** distinguishing them from
@@ -82,7 +83,9 @@ You can also open the New Booking form directly by clicking an empty slot in Day
   covering the full 24-hour day. Leave End date equal to Start date for an ordinary same-day
   booking; set it later to span multiple days (e.g. a weekend bonspiel) — From/To then apply to the
   start and end date respectively, and a caption confirms the resolved span. The end date/time must
-  be after the start date/time, and a span can't exceed 14 days.
+  be after the start date/time, and a span can't exceed 14 days. Moving Start date past the current
+  End date pulls End date forward to match, so the range never goes invalid; it never pulls End date
+  backward, so a span you've already set up is preserved unless the new start actually outruns it.
 - **Booking status** (Group Event category only) — **Hold for future group event** or **Confirmed
   booking**. No default; you must pick one. Every other category is always a confirmed (hard)
   booking — this toggle doesn't appear for them.
@@ -176,7 +179,9 @@ opens the same edit form inline without leaving the calendar page.
 - **Event Title** — required.
 - **All day** — toggle on/off. When off, set **From**/**To** times (same 30-minute increments as
   bookings).
-- **Start date** / **End date**.
+- **Start date** / **End date** — moving Start date past the current End date pulls End date forward
+  to match, so the range never goes invalid; it never pulls End date backward, so a span you've
+  already set up is preserved unless the new start actually outruns it.
 - **Marks all sheets unavailable** — off by default. Turn this on if the event actually closes the
   ice (not every club event does — e.g. a promotional tournament listing might not).
 - **Notes** (optional).

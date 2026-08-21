@@ -219,6 +219,15 @@
         if (DateTime.TryParse(e.Value?.ToString(), out var d))
         {
             Draft.StartDate = d;
+
+            // Pushing the start past the current end would otherwise leave an invalid range on
+            // screen (End < Start) until End is also touched - follow it forward to keep the range
+            // valid. Only ever pulls End forward, never back, so a genuine multi-day span the staff
+            // member already set up is preserved unless the new start actually outruns it.
+            if (Draft.EndDate.Date < d.Date)
+            {
+                Draft.EndDate = d.Date;
+            }
         }
     }
 

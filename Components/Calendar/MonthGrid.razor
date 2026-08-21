@@ -26,16 +26,19 @@
             {
                 @if (item.ClubEvent is { } ce)
                 {
+                    var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, cell.Date);
                     <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">
-                        @ClubEventTitle(ce)
-                    </div>
+                         style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">@(ceContBefore ? "← " : "")@ClubEventTitle(ce, cell.Date)@(ceContAfter ? " →" : "")</div>
                 }
                 else if (item.Booking is { } b)
                 {
                     var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, cell.Date);
+                    @* The start time belongs to the booking's actual first day only - repeating it on
+                       every later day (e.g. "9AM" on the Saturday/Sunday of a Fri-Sun booking) reads
+                       as a daily 9AM recurrence rather than one continuous event. The arrows alone
+                       carry that meaning on continuation days. *@
                     <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
-                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">@(contBefore ? "← " : "")@BookingTitle(b)@(contAfter ? " →" : "")</div>
+                         style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">@(contBefore ? "← " : "")@(contBefore ? Title(b) : BookingTitle(b))@(contAfter ? " →" : "")</div>
                 }
             }
             @if (!isExpanded && dayItems.Count > 3)
@@ -83,8 +86,12 @@
 
     private static string BookingTitle(SheetBooking b) => $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {CalendarStyles.BookingDisplayTitle(b)}";
 
-    // All-day events have no specific hour to show; timed ones get the same start-time prefix as bookings.
-    private static string ClubEventTitle(ClubEvent ce) => ce.IsAllDay ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
+    // All-day events have no specific hour to show; timed ones get the same start-time prefix as
+    // bookings, but only on the event's actual first day - a later day of a multi-day timed club
+    // event would otherwise misleadingly read as starting at that same hour every day.
+    private static string ClubEventTitle(ClubEvent ce, DateTime day) => ce.IsAllDay || day.Date != ce.Start.Date
+        ? ce.Title
+        : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
 
     // Merges a day's club events and bookings into one chronologically-ordered list. All-day club
     // events sort as if occurring at midnight (first), so they consistently anchor to the top of the
