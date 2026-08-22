@@ -6,6 +6,7 @@ using FacilityScheduler.Services;
 using FacilityScheduler.Services.Graph;
 using FacilityScheduler.Tests.TestSupport;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.Components.Web;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Graph.Models;
 
@@ -135,5 +136,41 @@ public class EventSearchTests : BunitContext
         searchButton.Click();
 
         Assert.Equal(0, gateway.CalendarViewCalls);
+    }
+
+    // SearchViewState is internal - InternalsVisibleTo lets this assembly reference it, but xUnit's
+    // [Theory]/[InlineData] can't put an internal type in a public method signature (CS0051), so the
+    // expected value travels as a string and is compared via ToString(), same workaround used
+    // elsewhere in this test suite (e.g. SearchQueryParserTests for SearchKindFilter).
+    [Theory]
+    [InlineData(false, false, "Idle")]
+    [InlineData(false, true, "Results")]
+    // The regression case: mid-search, before the very first search has ever completed. The
+    // spinner used to be unreachable here because the markup nested it inside a branch gated on
+    // hasSearched, which is exactly the state during a page's very first search.
+    [InlineData(true, false, "Searching")]
+    [InlineData(true, true, "Searching")]
+    public void ResolveViewState_ReturnsTheExpectedViewForEveryCombination(bool isSearching, bool hasSearched, string expected)
+    {
+        Assert.Equal(expected, EventSearch.ResolveViewState(isSearching, hasSearched).ToString());
+    }
+
+    [Fact]
+    public async Task PressingEnterInTheSearchBox_RunsTheSearchAndShowsResults()
+    {
+        // Regression guard for a live-found bug: the Enter-key path used to fire-and-forget
+        // RunSearch (`_ = RunSearch();`) from a synchronous handler, so Blazor's own "await the
+        // handler, then re-render" never covered the search's completion - results were computed
+        // correctly but the final render was never triggered. OnQueryKeyDown now awaits RunSearch
+        // directly, same as the Search button's own @onclick binding already did.
+        var gateway = RegisterServices();
+        var cut = Render<EventSearch>();
+
+        var queryInput = cut.FindAll("input")[0]; // markup order: query text box, then Start date, End date
+        queryInput.Input("category:league");
+        await cut.InvokeAsync(() => queryInput.KeyDown(new KeyboardEventArgs { Key = "Enter" }));
+
+        Assert.True(gateway.CalendarViewCalls > 0);
+        Assert.Contains("result", cut.Markup);
     }
 }

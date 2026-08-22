@@ -49,7 +49,13 @@
         Searches titles and categories only - not phone numbers, email, or notes. Those still show once you open a result.
     </div>
 
-    @if (!_hasSearched)
+    @* See ResolveViewState's own doc comment for the real bug this fixed: the spinner used to be
+       unreachable on the very first search of a page load. *@
+    @if (ResolveViewState(_isSearching, _hasSearched) == SearchViewState.Searching)
+    {
+        <p><em>Searching @Facility.SheetMailboxes.Length sheets over @((_lastResolvedEnd - _lastResolvedStart).Days) days…</em></p>
+    }
+    else if (ResolveViewState(_isSearching, _hasSearched) == SearchViewState.Idle)
     {
         <div style="background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;padding:14px 16px;font-size:13.5px;color:#5a7183;max-width:640px">
             <div style="font-weight:600;color:#1e2a33;margin-bottom:8px">Search syntax</div>
@@ -85,11 +91,6 @@
             <div style="background:#eaf1f8;border:1px solid #b9d0e6;color:#2d5f8a;border-radius:6px;padding:6px 10px;font-size:12.5px;margin-bottom:8px">@_rangeWarning</div>
         }
 
-        @if (_isSearching)
-        {
-            <p><em>Searching @Facility.SheetMailboxes.Length sheets over @((_lastResolvedEnd - _lastResolvedStart).Days) days…</em></p>
-        }
-        else
         {
             var totalMatched = _upcoming.Count + _past.Count;
             <div style="font-size:13px;color:#5a7183;margin-bottom:10px">
@@ -205,6 +206,23 @@
 
     private sealed record ResultRow(DateTime Start, DateTime End, SheetBooking? Booking, ClubEvent? ClubEvent);
 
+    internal enum SearchViewState { Idle, Searching, Results }
+
+    /// <summary>
+    /// Which of the three top-level views the page shows - extracted as a pure function (D75) after
+    /// a real live-found bug: the markup used to nest the "Searching…" check inside a branch gated
+    /// on <c>hasSearched</c>, but <c>hasSearched</c> only flips to true at the very end of a search
+    /// (after the fetch and ApplyResults complete) - so the spinner was unreachable on the very
+    /// first search of a page load, or any search after the query was cleared, which is exactly
+    /// when the wait is longest and the feedback matters most. It only ever showed on a later
+    /// search in the same session, once <c>hasSearched</c> was already true from a prior one.
+    /// <c>isSearching</c> is checked first and wins regardless of <c>hasSearched</c>, fixing that.
+    /// </summary>
+    internal static SearchViewState ResolveViewState(bool isSearching, bool hasSearched) =>
+        isSearching ? SearchViewState.Searching :
+        !hasSearched ? SearchViewState.Idle :
+        SearchViewState.Results;
+
     private string _query = string.Empty;
     private DateTime? _rangeStart;
     private DateTime? _rangeEnd;
@@ -239,11 +257,22 @@
         _rangeEnd = today.AddDays(SearchRange.DefaultLookaheadDays);
     }
 
-    private void OnQueryKeyDown(KeyboardEventArgs e)
+    // This used to be `_ = RunSearch();` (fire-and-forget) from a synchronous void handler - the
+    // actual root cause of results never appearing on the Enter-key path. Blazor Server's automatic
+    // "await the handler, then re-render" only applies to the Task it's actually given; a detached
+    // task is invisible to it. RunSearch's own leading StateHasChanged() (before its first await)
+    // still reaches the renderer, since nothing has escaped the circuit's SynchronizationContext
+    // yet at that point - which is exactly why the "Searching..." spinner, once reachable at all
+    // (see ResolveViewState), still showed up correctly. But there was no explicit StateHasChanged()
+    // after the fetch completed, so the final results render was never triggered on this path at
+    // all - not delayed, genuinely never sent. The Search button's @onclick="RunSearch" binds
+    // directly to the async method, which Blazor DOES await properly, which is why that path always
+    // worked. Awaiting here instead of discarding makes the two paths identical.
+    private async Task OnQueryKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Enter")
         {
-            _ = RunSearch();
+            await RunSearch();
         }
     }
 

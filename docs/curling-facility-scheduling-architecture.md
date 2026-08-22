@@ -537,12 +537,45 @@ appearing at all — a genuinely different symptom from the range-width cost abo
 regardless of how long the fetch itself takes. Temporary `Stopwatch`/`Console.WriteLine`
 instrumentation was added to `EventSearch.RunSearch` to localize it precisely, but the very next
 attempt (same build, same page) returned in 2 seconds, and multiple further attempts — including
-after a full service restart and a 12+ hour gap — all stayed under 5 seconds. Concluded to be a
-one-time environmental fluke (a plausible candidate: a first-run antivirus/security scan of the
-freshly rebuilt executable) rather than a reproducible defect, since a real cause tied to the code,
-Graph, or cold-start timing would have recurred across at least one of those retries. The diagnostic
-instrumentation was removed once this was confirmed. **The 60-day range fix is validated on its own
-terms** by the multiple consistent sub-5-second results obtained independently of this anomaly.
+after a full service restart and a 12+ hour gap — all stayed under 5 seconds. At the time, this was
+concluded to be a one-time environmental fluke. **That conclusion was wrong — the anomaly recurred**,
+and further live diagnosis found two real, distinct bugs in `EventSearch.razor` itself (D91, D92),
+unrelated to Graph, range width, `$top`, throttling, or the browser/extensions all investigated and
+ruled out along the way. Between them these two bugs plausibly account for most or all of the
+severe, inconsistent delays observed throughout this investigation — the 60-day range fix (D90)
+and the `$top` fix (D87) remain independently correct (both are proven by direct, controlled
+evidence: narrow-range and button-triggered searches were consistently fast throughout, even while
+Enter-triggered searches on the same running instance intermittently failed to show anything at
+all), but neither explains a search that computes correctly server-side and then never displays.
+
+**D91 — the "Searching…" indicator was unreachable on exactly the search where it mattered most.**
+The markup nested the `_isSearching` check inside a branch gated on `_hasSearched`, which only
+flips to `true` at the very end of a search (after the fetch and `ApplyResults` complete) — so on
+the very first search of a page load, or any search run after the query was cleared, `_hasSearched`
+was still `false` for the entire duration of the fetch, and the spinner branch was structurally
+unreachable. It only ever appeared on a *later* search in the same session, once `_hasSearched` was
+already `true` from an earlier completed one — exactly the pattern staff reported ("only appearing"
+on a modified-range search, never on the first one). Extracted into a pure, tested
+`EventSearch.ResolveViewState(isSearching, hasSearched)` (D75) that checks `isSearching` first,
+regardless of `hasSearched`.
+
+**D92 — the actual cause of results never appearing: a fire-and-forget async handler.**
+`OnQueryKeyDown` (the Enter-key handler on the search box) called `_ = RunSearch();` — discarding
+the task rather than awaiting it — from a synchronous `void` handler. Blazor Server's automatic
+"await the event handler, then re-render" only covers the `Task` it's actually given; a detached
+task started from inside a synchronous handler is invisible to that mechanism entirely. `RunSearch`'s
+own explicit `StateHasChanged()` call *before* its first `await` still worked (nothing has left the
+circuit's `SynchronizationContext` yet at that point, which is exactly why D91's spinner, once made
+reachable, displayed correctly) — but there was no equivalent explicit call *after* the fetch and
+`ApplyResults` completed. The final results render was therefore never triggered on the Enter-key
+path at all — not delayed, genuinely never sent, regardless of how long staff waited. The Search
+button worked throughout because `@onclick="RunSearch"` binds directly to the async method, which
+Blazor *does* properly await, triggering its own automatic re-render on completion. Fixed by making
+`OnQueryKeyDown` itself `async Task` and `await`ing `RunSearch()`, making the two input paths
+identical. Confirmed live: HTTP/render-timing instrumentation (temporary, since removed) showed the
+missing final `OnAfterRender` call appearing immediately after `RunSearch` completed once this
+landed, and staff confirmed both the spinner and the results displaying correctly on repeated
+Enter-key searches afterward.
 
 **Known gap, not yet closed**: recurring-series noise. Searching a league's name still returns every
 occurrence within the searched range as a separate row — v1 does not collapse them. Collapsing would
@@ -893,6 +926,8 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D88 | The search page's detail modal is read-only (`BookingDetailModal`/`ClubEventDetailModal`'s new additive `ReadOnly` parameter) with an "Open on calendar" handoff, rather than wiring Edit/Cancel directly into the search page | Full edit would mean a second, untested copy of `Calendar.razor`'s partial-sheet-edit and group-id-split rules (`SaveDraft`'s `splitGroupId` logic) - the most delicate booking-identity logic in the app, with no existing bUnit coverage to diverge from. The handoff needed `/calendar` to accept `?date=`/`?view=` for the first time (`Calendar.ResolveDeepLink`), mirroring `PublicCalendarEndpoint`'s existing `ParseDate`/`ParseView` (§4.12). |
 | D89 | `category:bonspiel` in search resolves to *both* `BookingCategory.Bonspiel` and `ClubEventCategory.OutOfTownBonspiels`, with an inline notice, rather than picking one | Not a special case - the vocabulary resolver returns whichever category families a normalized token hits, so any token present in both enums (also `other`) collides identically. Union rather than a guess: the two result kinds are already visually distinct in a row, and D81 renamed the club category specifically because staff conflate the two names (§4.12). |
 | D90 | Search's default/max date range dropped from 396/400 days to 60, applied uniformly to bookings and Club Events, superseding D87's assumption that `$top` alone made a wide range fast | **Live-confirmed 2026-08-21** against the real tenant: a default-range search took 20+ seconds for one result, and a fresh, cache-bypassing search of the same wide range took 90+ seconds with nothing back, while the same instance's ordinary ~6-week Staff Calendar load and a narrowed (<90-day) search were both fast. `calendarView`'s per-call cost with recurring series scales with the *width* of the requested range (Graph expands every occurrence across the whole window on every call), not just with round-trip count - `$top` reduces the latter, not the former. 60 days matches `PublicSearchEndpoint.MaxRangeDays`, an existing cap already justified in that endpoint's own code for the identical reason. One range for both record kinds, not two, even though Club Events (no recurring series) aren't the expensive half - a single constraint over a technically-looser-but-confusing pair of them (§4.12). |
+| D91 | `EventSearch`'s three-way view (help card / "Searching…" / results) is resolved by a pure, tested `ResolveViewState(isSearching, hasSearched)` that checks `isSearching` first | Live-found: the original markup nested the spinner check inside a branch gated on `hasSearched`, which only becomes true after a search finishes - so the spinner was structurally unreachable on the very first search of a page load, appearing only on a later search in the same session once `hasSearched` was already true from an earlier one (§4.12). |
+| D92 | `EventSearch.OnQueryKeyDown` awaits `RunSearch()` directly instead of discarding it (`_ = RunSearch()`) | Live-found root cause of results never appearing on the Enter-key search path: Blazor Server's automatic "await the handler, then re-render" only covers the `Task` it's actually given, and a fire-and-forget task from a synchronous handler is invisible to that mechanism - the search computed correctly server-side but the final render was never triggered, not delayed. The Search button worked throughout because its `@onclick` binds directly to the async method (§4.12). |
 
 ---
 
