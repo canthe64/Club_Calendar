@@ -530,6 +530,20 @@ was built, before this feature existed to rediscover it. One range applies unifo
 and Club Events (see above) rather than decoupling a wider cap for the cheaper Club Events half — a
 single, simple, honest constraint over a technically-more-permissive-but-confusing one.
 
+**A separate, unrelated anomaly surfaced during the same testing pass**: one specific search (after
+rebuilding with the 60-day cap in place) took ~4 minutes, with the "Searching…" status text never
+appearing at all — a genuinely different symptom from the range-width cost above, since
+`StateHasChanged()` fires before any Graph call and should show that text almost immediately
+regardless of how long the fetch itself takes. Temporary `Stopwatch`/`Console.WriteLine`
+instrumentation was added to `EventSearch.RunSearch` to localize it precisely, but the very next
+attempt (same build, same page) returned in 2 seconds, and multiple further attempts — including
+after a full service restart and a 12+ hour gap — all stayed under 5 seconds. Concluded to be a
+one-time environmental fluke (a plausible candidate: a first-run antivirus/security scan of the
+freshly rebuilt executable) rather than a reproducible defect, since a real cause tied to the code,
+Graph, or cold-start timing would have recurred across at least one of those retries. The diagnostic
+instrumentation was removed once this was confirmed. **The 60-day range fix is validated on its own
+terms** by the multiple consistent sub-5-second results obtained independently of this anomaly.
+
 **Known gap, not yet closed**: recurring-series noise. Searching a league's name still returns every
 occurrence within the searched range as a separate row — v1 does not collapse them. Collapsing would
 need a key of `SeriesMasterId` (per-sheet) plus `BookingGroupId` and a decision about what date a
