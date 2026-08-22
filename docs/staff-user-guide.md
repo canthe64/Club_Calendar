@@ -40,7 +40,7 @@ seeing without losing your place in the app.
 
 The main working page (`/calendar`) has three views, selected top-right: **Month**, **Week**, and
 **Day**. Use the **‹**, **Today**, and **›** controls to navigate; clicking a day in Month view, or
-an empty area of a day column in Week view, jumps to that day's Day view.
+a day's name/date header in Week view, jumps to that day's Day view.
 
 **Week and Day are both hour-by-hour grids** covering the full 24-hour day, sharing the same time
 axis down the left edge — Day view has one column per sheet, Week view has one column per day. If a
@@ -73,7 +73,9 @@ Click the **+ New Booking ▾** button. A small menu opens with two options:
 - **New Booking** — a single one-off booking (§3.1).
 - **New Series** — a recurring weekly booking (§4).
 
-You can also open the New Booking form directly by clicking an empty slot in Day view.
+You can also open the New Booking form directly by clicking an empty slot in Day or Week view. In
+Day view this also fills in the sheet you clicked; Week view doesn't show sheets separately, so pick
+one in the form.
 
 ### 3.1 The booking form
 

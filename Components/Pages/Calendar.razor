@@ -72,7 +72,7 @@
     }
     else if (View == ViewMode.Week)
     {
-        <WeekGrid Bookings="FilteredBookings" ClubEvents="VisibleClubEvents" WeekStart="WeekStart" OnBookingClick="OpenDetail" OnClubEventClick="OpenClubEventDetail" OnDayClick="JumpToDay" />
+        <WeekGrid Bookings="FilteredBookings" ClubEvents="VisibleClubEvents" WeekStart="WeekStart" OnBookingClick="OpenDetail" OnClubEventClick="OpenClubEventDetail" OnDayClick="JumpToDay" OnSlotClick="OpenWeekSlotForm" />
     }
     else
     {
@@ -330,6 +330,17 @@
     {
         _draft = new BookingDraft();
         _draft.Reset(Facility.Today, initialSheets: [slot.Sheet], initialStart: slot.Start);
+        _formConflicts = [];
+        _formOpen = true;
+    }
+
+    // Week view has no sheet dimension (bookings across sheets are consolidated into one lane-packed
+    // timeline per day), so unlike OpenSlotForm above there's no clicked sheet to prefill - staff pick
+    // one in the dialog itself.
+    private void OpenWeekSlotForm(DateTime start)
+    {
+        _draft = new BookingDraft();
+        _draft.Reset(Facility.Today, initialStart: start);
         _formConflicts = [];
         _formOpen = true;
     }

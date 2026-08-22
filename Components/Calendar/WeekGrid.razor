@@ -35,10 +35,12 @@
                         }
                     </div>
                 }
-                <div @onclick="() => OnDayClick.InvokeAsync(day)" style="position:relative;cursor:pointer">
+                <div style="position:relative">
                     @foreach (var hour in CalendarStyles.HourRows)
                     {
-                        <div style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;margin-bottom:@(CalendarStyles.RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3"></div>
+                        var slotStart = day.Date.AddHours(hour);
+                        <div @onclick="() => OnSlotClick.InvokeAsync(slotStart)"
+                             style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;margin-bottom:@(CalendarStyles.RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3;cursor:pointer"></div>
                     }
                     @foreach (var laid in laidOutItems)
                     {
@@ -51,7 +53,7 @@
                             // would otherwise read as starting at the same hour every day.
                             var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
                             var ceLabel = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
-                            <div @onclick="() => OnClubEventClick.InvokeAsync(ce)" @onclick:stopPropagation="true"
+                            <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
                                  style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:12px;font-weight:600">@(ceContBefore ? "← " : "")@ceLabel@(ceContAfter ? " →" : "")</div>
                         }
                         else if (laid.Item.Booking is { } b)
@@ -63,7 +65,7 @@
                             var label = contBefore
                                 ? BookingLabel(b, laid.Item.SheetCount)
                                 : $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {BookingLabel(b, laid.Item.SheetCount)}";
-                            <div @onclick="() => OnBookingClick.InvokeAsync(b)" @onclick:stopPropagation="true"
+                            <div @onclick="() => OnBookingClick.InvokeAsync(b)"
                                  style="box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(laid.Item.Start, day))px;left:@(leftPct)%;width:calc(@(widthPct)% - 2px);height:@(CalendarStyles.HeightPx(laid.Item.Start, laid.Item.End, day))px;z-index:1;border-radius:5px;background:@CalendarStyles.BackgroundStyle(b);border:@CalendarStyles.BorderStyle(b);color:@CalendarStyles.TextColorStyle(b);padding:2px 5px;overflow:hidden;cursor:pointer">
                                 <div style="font-size:12px;font-weight:600">@(contBefore ? "← " : "")@label@(contAfter ? " →" : "")</div>
                             </div>
@@ -82,6 +84,7 @@
     [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
     [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
+    [Parameter] public EventCallback<DateTime> OnSlotClick { get; set; }
 
     private const double AllDayChipHeightPx = 18;
     private const double AllDayChipGapPx = 2;
