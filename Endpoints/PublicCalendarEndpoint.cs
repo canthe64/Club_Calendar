@@ -358,7 +358,7 @@ public static class PublicCalendarEndpoint
                 {string.Join("", categoryLabels)}
                 <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
                     <input type="checkbox" name="showClubEvents" value="1"{(filter.ShowClubEvents ? " checked" : "")}>
-                    Club events
+                    Off-Ice Events
                 </label>
                 <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
             </form>
