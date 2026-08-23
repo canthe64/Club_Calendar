@@ -107,7 +107,7 @@ sheets" — waits where you left it, so flipping over and back loses nothing.
 badge when you open an existing event. If something was filed on the wrong side, delete it and create
 it again.
 
-### 3.1 The booking form
+### 3.1 The event form
 
 - **Category** — required, no default. Pick one of the category chips before you can save.
 - **Sheets** — tap sheet chips to toggle which sheet(s) this booking covers, or click **All Sheets**
@@ -129,7 +129,35 @@ Click **Save**. If the requested sheets/time conflict with an existing booking, 
 flagged as closing all sheets, nothing is saved — a red banner lists exactly what conflicts, and you
 adjust the sheets or time and try again.
 
+### 3.2 Editing or canceling a booking
+
+Click any booking chip to open its detail view, which offers **Edit event…** and **Cancel Booking**.
+If the booking is part of a recurring series, a second row appears below those with **Edit whole
+series…** and **Cancel entire series** (§4).
+
+- **Edit event…** reopens the same form, pre-filled. If you deselect a sheet that was previously part of a
+  multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
+  it won't keep showing the old renter's details. You can also *add* a sheet that wasn't part of the
+  original booking; it's created fresh under the same booking.
+- **Cancel Booking** offers up to three choices (the reopen choice only appears for a **Confirmed**
+  booking — cancelling something that's already an open Hold just offers to remove it, since there's
+  nothing to "reopen"):
+  - **Cancel & reopen for group event** (Confirmed Group Event bookings only) — the slot goes back to
+    an open, unclaimed Hold, publicly bookable again. If this reopens right next to another open
+    Group Event slot on the same sheet, they merge into one continuous open block rather than showing
+    as separate chips.
+  - **Cancel booking** — removed entirely, no longer offered.
+  - **Keep the booking** — closes the dialog, no change.
+- **Cancel Series** deletes every occurrence of the recurring series on every sheet involved. You'll
+  be asked to confirm; this can't be undone.
+
+**A chip titled "Available for Group Events"** is an open Hold the app created automatically, not
+something staff typed in — either the leftover of a slot after a Breely booking claimed part of a
+larger hold, or a hold reopened after cancelling a booking. It behaves exactly like any other open
+Group Event Hold; there's nothing special to do with it beyond booking or cancelling it as normal.
+
 ---
+
 
 ## 4. Creating a Recurring Series
 
@@ -154,7 +182,7 @@ skipped or outside the season, **Create series** is disabled until you adjust th
 
 **Editing a series** has two paths, both from an occurrence's detail view (§3.2):
 
-- **Edit booking…** — the ordinary single-occurrence edit. Changes only the date you clicked,
+- **Edit event…** — the ordinary single-occurrence edit. Changes only the date you clicked,
   including its time.
 - **Edit whole series…** — applies to every date, past and future. You can change the title, notes,
   category, and which sheets the series occupies, but **not the time** — a series can span months, so
@@ -169,33 +197,6 @@ skipped or outside the season, **Create series** is disabled until you adjust th
 **Canceling an entire series** is a separate, deliberately de-emphasized action, also from the
 occurrence's detail view — meant for correcting a data-entry mistake at the start of a season, not
 routine cancellations, since it deletes every occurrence, past and future, on every sheet involved.
-
-### 3.2 Editing or canceling a booking
-
-Click any booking chip to open its detail view, which offers **Edit booking…** and **Cancel Booking**.
-If the booking is part of a recurring series, a second row appears below those with **Edit whole
-series…** and **Cancel entire series** (§4).
-
-- **Edit booking…** reopens the same form, pre-filled. If you deselect a sheet that was previously part of a
-  multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
-  it won't keep showing the old renter's details. You can also *add* a sheet that wasn't part of the
-  original booking; it's created fresh under the same booking.
-- **Cancel Booking** offers up to three choices (the reopen choice only appears for a **Confirmed**
-  booking — cancelling something that's already an open Hold just offers to remove it, since there's
-  nothing to "reopen"):
-  - **Cancel & reopen for group event** (Confirmed Group Event bookings only) — the slot goes back to
-    an open, unclaimed Hold, publicly bookable again. If this reopens right next to another open
-    Group Event slot on the same sheet, they merge into one continuous open block rather than showing
-    as separate chips.
-  - **Cancel booking** — removed entirely, no longer offered.
-  - **Keep the booking** — closes the dialog, no change.
-- **Cancel Series** deletes every occurrence of the recurring series on every sheet involved. You'll
-  be asked to confirm; this can't be undone.
-
-**A chip titled "Available for Group Events"** is an open Hold the app created automatically, not
-something staff typed in — either the leftover of a slot after a Breely booking claimed part of a
-larger hold, or a hold reopened after cancelling a booking. It behaves exactly like any other open
-Group Event Hold; there's nothing special to do with it beyond booking or cancelling it as normal.
 
 ---
 

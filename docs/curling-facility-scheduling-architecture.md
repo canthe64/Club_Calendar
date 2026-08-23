@@ -9,13 +9,13 @@
 
 ## 1. Executive Summary
 
-A web-based system for managing the scheduling and availability of curling sheets, built on Microsoft Exchange Online (EXO) resource mailboxes as the system of record. Each sheet is modeled as an EXO resource mailbox; every booking is a calendar event on that mailbox. A custom Blazor Server application — not Outlook — is the operational interface for staff: per-sheet/consolidated calendar views (Month/Week/Day), one-off and recurring bookings spanning multiple sheets at once, and a separate whole-club "Club Events" resource.
+A web-based system for managing the scheduling and availability of curling sheets, built on Microsoft Exchange Online (EXO) resource mailboxes as the system of record. Each sheet is modeled as an EXO resource mailbox; every booking is a calendar event on that mailbox. A custom Blazor Server application — not Outlook — is the operational interface for staff: per-sheet/consolidated calendar views (Month/Week/Day), and one-off and recurring bookings spanning multiple sheets at once. Events that use no ice (closures, meetings, away bonspiels) live on their own whole-club mailbox, but the UI presents both kinds as one "event" with an on-ice/off-ice toggle (§4.4, D95) - the mailbox split is an implementation detail staff never see.
 
 Around that core sit four anonymous read-only surfaces (§5.4) — a minimized JSON availability API for a thin CMS embed, a full public calendar page with its own Month/Week/Day views, a search page for finding a window with enough open sheets for a group event, and a practice-ice page listing times any member could volunteer to host — plus two write surfaces beyond the staff UI: an inbound webhook ingesting booking notifications from Breely, the club's separate customer-facing booking platform (§4.8, a one-way stopgap pending real bidirectional sync), and a member-facing practice ice hosting request flow that writes a pending hold for staff approval (§5.4.4). A staff-only Settings page (§4.9) exposes a rotating activity/debug log, added once the Breely webhook started acting on its own and its production behavior proved otherwise invisible.
 
 The design still avoids any adjacent authoritative datastore: all booking data, including rich metadata (renter contact, notes), lives on the calendar event itself. The only additional infrastructure is a short-lived, disposable read cache, deliberately scoped to never touch the paths that enforce double-booking prevention.
 
-Every tenant-specific value (the M365 tenant domain, which mailboxes are sheets vs. Club Events, the facility's local time zone) is configuration, not code — the same deployed app can be repointed at a different tenant, or stood up fresh for a different facility, without a recompile (§4.6).
+Every tenant-specific value (the M365 tenant domain, which mailboxes are sheets vs. the off-ice events mailbox, the facility's local time zone) is configuration, not code — the same deployed app can be repointed at a different tenant, or stood up fresh for a different facility, without a recompile (§4.6).
 
 The pattern generalizes to other bookable facilities (bowling lanes, tennis courts, etc.) — nothing in the architecture is curling-specific except the vocabulary and the configured sheet count.
 
@@ -37,7 +37,7 @@ The pattern generalizes to other bookable facilities (bowling lanes, tennis cour
 | R8 | Outlook/OWA remains available as a read-only fallback | Done |
 | R9 | Recurring bookings supported via native calendar recurrence | Done (§4.5) |
 | R10 | Double-booking prevention, enforced by the application | Done (§6.1); the read cache is deliberately scoped to never weaken this (§4.3) |
-| R11 | **Club Events**: a whole-club resource for large events, separate from individual sheet reservations | Done (§4.4), including a closure-conflict cross-check added after build (§4.4) |
+| R11 | **Club Events**: a whole-club resource for large events, separate from individual sheet reservations | Done (§4.4), including a closure-conflict cross-check added after build. The dedicated mailbox remains, but the UI-level separation was later removed as staff-reported confusion (D95) - these are now "off-ice events", entered through the same form as a sheet booking |
 | R12 | Configuration-driven tenant/mailbox/timezone, no hardcoded tenant values in code | Done (§4.6) |
 | R13 | Reflect bookings made through the club's separate customer-facing booking platform (Breely) onto this calendar | Done (§4.8) as an explicit fallback/stopgap - not a replacement for real bidirectional sync, which remains future work (§2.2) |
 | R14 | Staff-visible record of what the app has actually done in production (who created/edited/canceled what, plus optional deeper detail while troubleshooting) | Done (§4.9), added after the operator found the Breely webhook's production behavior opaque with no way to see it - a Settings page exposes a Standard/Debug level toggle and a viewer/download for a rotating log file |
@@ -80,12 +80,12 @@ flowchart TB
         EID["Entra ID<br/>(staff SSO + app registration)"]
         subgraph EXO ["Exchange Online — system of record"]
             SN["Resource mailboxes<br/>Sheet 1..N (configured count)"]
-            CE["Resource mailbox<br/>Club Events"]
+            CE["Resource mailbox<br/>Off-ice events"]
         end
     end
 
     subgraph App ["Blazor Server Application (single deployment)"]
-        UI["Staff calendar UI<br/>(Month/Week/Day, series wizard,<br/>Club Events, filters)"]
+        UI["Staff calendar UI<br/>(Month/Week/Day, series wizard,<br/>unified event form, filters)"]
         API["Services<br/>SheetBookingService · ClubEventService<br/>conflict enforcement · FacilityConfiguration"]
         CACHE["Ephemeral cache (IMemoryCache)<br/>view-reads only, 30s TTL<br/>never the conflict-check path"]
         PUBAPI["Public JSON endpoint<br/>+ embed widget JS"]
@@ -149,7 +149,7 @@ Key structural decisions visible above:
 | Multi-sheet grouping identity (`BookingGroupId`) | Application (§4.5) |
 | State vocabulary and category schema integrity | Application (sole writer discipline; Exchange validates nothing) |
 | Recurring series creation, per-occurrence edit/cancel semantics | Application |
-| Club Events / closure-conflict cross-check | Application (§4.4) |
+| Off-ice events / closure-conflict cross-check | Application (§4.4) |
 | Public data minimization | Application |
 | Tenant/mailbox/timezone configuration | Application, externalized to config (§4.6) |
 
@@ -418,21 +418,17 @@ made together once staff started actually using multi-day bookings:
 
 ### 4.12 Staff Event Search (added 2026-08-21)
 
-Staff feedback: there was no way to find a booking or Club Event without already knowing roughly
-when it was — the calendar only ever loads the window currently in view, and the only list surface
-(`Components/Pages/ClubEvents.razor`) covers Club Events alone with no search box. `/search`, a new
-staff-only Blazor page (D86), searches both across a wide date range with a small keyword grammar.
+Staff feedback: there was no way to find an event without already knowing roughly when it was — the
+calendar only ever loads the window currently in view, and the only list surface
+(`Components/Pages/ClubEvents.razor`, the Off-Ice Events page) covers off-ice events alone with no
+search box. `/search`, a staff-only Blazor page (D86), searches both kinds across a date range with a
+small keyword grammar.
 
-**The `$top` fix helps round-trip count, but wasn't the actual fix for wide ranges (D87, corrected
-by D90).** `GraphEventGateway.GetCalendarViewAsync` previously set only
-`StartDateTime`/`EndDateTime`/`Expand`, so Graph served its small default page size, and the
-`@odata.nextLink` loop drained it serially. Setting `$top = 200` shrinks how many requests that takes
-for any range; the returned set is identical either way, since the nextLink loop still drains to
-exhaustion regardless. This is a real improvement and applies to every caller of
-`GetCalendarViewAsync` (both `SheetBookingService` and `ClubEventService`), not just search, so
-ordinary calendar loads and conflict checks get incidentally faster too. **It was originally believed
-to be sufficient to make a ~396-day search fast; live testing against the real tenant proved that
-wrong (D90) — see that entry for what the actual fix was.**
+**Paging (D87).** `GraphEventGateway.GetCalendarViewAsync` previously left `$top` unset, so Graph
+served its small default page size and the `@odata.nextLink` loop drained it serially. Setting
+`$top = 200` cuts the request count for any range — the returned set is identical either way — and
+applies to every caller, so ordinary calendar loads and conflict checks benefit incidentally. This
+was believed at the time to be the whole fix for wide ranges; it wasn't (see D90 below).
 
 **Grammar**: `category:<value>` (resolved across both `BookingCategory` and `ClubEventCategory`),
 `day:<value>` (full weekday name or 3-letter abbreviation), `type:on-ice`/`type:off-ice` (the pre-D95 `type:booking`/`type:clubevent` remain as silent aliases)
@@ -456,7 +452,7 @@ resolver (`Domain/Search/SearchCategoryVocabulary.cs`) returns whichever enum fa
 token happens to hit, so `category:other` (present in both enums) collides identically with zero extra
 code, and the parser's collision notice fires whenever a resolution spans more than one family. Union
 rather than picking one: the two result kinds are already visually distinct in a result row (a colored
-category chip plus an explicit "Club event" marker for the latter), and D81 renamed that Club Event
+category chip plus an explicit "Off-ice" marker for the latter), and D81 renamed that Club Event
 category specifically because staff conflate the two — the correct response to a known conflation is
 to show both and say so, not guess.
 
@@ -508,82 +504,40 @@ delicate piece of booking-identity logic in the app, with no bUnit coverage on t
 against. Reusing the existing detail markup with one additive parameter means there's still exactly
 one copy of it, and search/calendar can't drift apart.
 
-**Follow-up correction (2026-08-21), live-found the same day this feature shipped (D90).** The
-feature was designed and unit-tested without access to a live tenant; the very first live search
-(`category:bonspiel`, default range, 1 matching result) took 20+ seconds, and a second identical
-search inside the 30-second service cache window came back instantly — a result consistent with
-several different causes, so each was checked in turn rather than guessed at:
+**Performance corrections, live-found after shipping (D90, D91, D92).** The feature was designed and
+unit-tested without a live tenant, and three separate problems surfaced once it met real data. They
+are recorded together because the investigation repeatedly mistook one for another.
 
-1. Whether the search page's ordinary Staff Calendar (same `GetCalendarViewAsync`, same `$top = 200`,
-   but its normal ~6-week range) was also slow — it wasn't, ruling out `$top` itself as harmful.
-2. A fresh page load (bypassing the page's own in-memory `_fetchedRange` reuse) searched *past* the
-   30-second service cache window and still took 90+ seconds with no results back — ruling out both
-   client-side and service-level caching as the explanation, and ruling out simple cold-start/first-call
-   overhead (which wouldn't plausibly account for 90+ seconds on its own).
-3. Narrowing the search page's own date range below 90 days brought results back in a few seconds on
-   the same running instance.
+*Range width, not request count (D90).* The first live search took 20+ seconds for one result. Three
+controlled comparisons isolated it: the ordinary ~6-week Staff Calendar load on the same instance was
+fast (so `$top` itself wasn't harmful), a cache-bypassing repeat of the same wide search took 90+
+seconds (ruling out caching and cold start), and narrowing the range below 90 days brought it back to
+a few seconds. **`calendarView`'s cost scales with the width of the requested range when recurring
+series are involved** — Graph expands every occurrence across the whole window on every call — which
+is independent of `$top` and directly contradicted D87's assumption that round-trip count was the
+whole story. `PublicSearchEndpoint` had already reached the same conclusion when it was built; its
+60-day cap is now shared.
 
-That combination isolates the cause precisely: **`calendarView`'s cost when recurring series are
-involved scales with the width of the requested date range itself, not just with page/round-trip
-count.** Graph has to expand every recurring occurrence across the *entire* requested window on every
-call; a 6-week request is cheap regardless of how many series exist in it, but a ~400-day request
-across every sheet is a fundamentally more expensive server-side computation, independent of `$top`.
-This directly contradicts D87's original assumption that reducing request count was the whole fix.
+*Two Blazor bugs wearing the same costume (D91, D92).* A search that took ~4 minutes with the
+"Searching…" text never appearing was initially concluded to be a one-time environmental fluke after
+several fast retries, including across a service restart and a 12-hour gap. **That conclusion was
+wrong** — the symptom recurred, and instrumented diagnosis found two real, fully reproducible bugs
+that had been masked by their own intermittency:
 
-The correction: `SearchRange`'s default and max span dropped from 396/400 days to 60, matching
-`PublicSearchEndpoint.MaxRangeDays`'s existing precedent for the same underlying reason — that
-endpoint's own code comment already anticipated this exact cost class ("a search this wide across
-every sheet is meaningfully more expensive per request than a single month/week/day view") when it
-was built, before this feature existed to rediscover it. One range applies uniformly to both bookings
-and Club Events (see above) rather than decoupling a wider cap for the cheaper Club Events half — a
-single, simple, honest constraint over a technically-more-permissive-but-confusing one.
+- **D91** — the spinner was structurally unreachable on the search where it mattered. The
+  `_isSearching` check was nested inside a branch gated on `_hasSearched`, which only flips true when
+  a search *finishes*, so it could never show on the first search of a page load. Extracted into a
+  pure, tested `ResolveViewState(isSearching, hasSearched)` that checks `isSearching` first (D75).
+- **D92** — results never rendered on the Enter-key path. `OnQueryKeyDown` did `_ = RunSearch();`,
+  discarding the task from a synchronous handler. **Blazor Server's automatic "await the handler,
+  then re-render" only covers the `Task` it is actually given**; a task detached from a synchronous
+  handler is invisible to it, so the search computed correctly server-side and the final render was
+  never sent — not delayed, never sent. The Search button worked throughout because `@onclick` binds
+  straight to the async method. Fixed by awaiting it.
 
-**A separate, unrelated anomaly surfaced during the same testing pass**: one specific search (after
-rebuilding with the 60-day cap in place) took ~4 minutes, with the "Searching…" status text never
-appearing at all — a genuinely different symptom from the range-width cost above, since
-`StateHasChanged()` fires before any Graph call and should show that text almost immediately
-regardless of how long the fetch itself takes. Temporary `Stopwatch`/`Console.WriteLine`
-instrumentation was added to `EventSearch.RunSearch` to localize it precisely, but the very next
-attempt (same build, same page) returned in 2 seconds, and multiple further attempts — including
-after a full service restart and a 12+ hour gap — all stayed under 5 seconds. At the time, this was
-concluded to be a one-time environmental fluke. **That conclusion was wrong — the anomaly recurred**,
-and further live diagnosis found two real, distinct bugs in `EventSearch.razor` itself (D91, D92),
-unrelated to Graph, range width, `$top`, throttling, or the browser/extensions all investigated and
-ruled out along the way. Between them these two bugs plausibly account for most or all of the
-severe, inconsistent delays observed throughout this investigation — the 60-day range fix (D90)
-and the `$top` fix (D87) remain independently correct (both are proven by direct, controlled
-evidence: narrow-range and button-triggered searches were consistently fast throughout, even while
-Enter-triggered searches on the same running instance intermittently failed to show anything at
-all), but neither explains a search that computes correctly server-side and then never displays.
-
-**D91 — the "Searching…" indicator was unreachable on exactly the search where it mattered most.**
-The markup nested the `_isSearching` check inside a branch gated on `_hasSearched`, which only
-flips to `true` at the very end of a search (after the fetch and `ApplyResults` complete) — so on
-the very first search of a page load, or any search run after the query was cleared, `_hasSearched`
-was still `false` for the entire duration of the fetch, and the spinner branch was structurally
-unreachable. It only ever appeared on a *later* search in the same session, once `_hasSearched` was
-already `true` from an earlier completed one — exactly the pattern staff reported ("only appearing"
-on a modified-range search, never on the first one). Extracted into a pure, tested
-`EventSearch.ResolveViewState(isSearching, hasSearched)` (D75) that checks `isSearching` first,
-regardless of `hasSearched`.
-
-**D92 — the actual cause of results never appearing: a fire-and-forget async handler.**
-`OnQueryKeyDown` (the Enter-key handler on the search box) called `_ = RunSearch();` — discarding
-the task rather than awaiting it — from a synchronous `void` handler. Blazor Server's automatic
-"await the event handler, then re-render" only covers the `Task` it's actually given; a detached
-task started from inside a synchronous handler is invisible to that mechanism entirely. `RunSearch`'s
-own explicit `StateHasChanged()` call *before* its first `await` still worked (nothing has left the
-circuit's `SynchronizationContext` yet at that point, which is exactly why D91's spinner, once made
-reachable, displayed correctly) — but there was no equivalent explicit call *after* the fetch and
-`ApplyResults` completed. The final results render was therefore never triggered on the Enter-key
-path at all — not delayed, genuinely never sent, regardless of how long staff waited. The Search
-button worked throughout because `@onclick="RunSearch"` binds directly to the async method, which
-Blazor *does* properly await, triggering its own automatic re-render on completion. Fixed by making
-`OnQueryKeyDown` itself `async Task` and `await`ing `RunSearch()`, making the two input paths
-identical. Confirmed live: HTTP/render-timing instrumentation (temporary, since removed) showed the
-missing final `OnAfterRender` call appearing immediately after `RunSearch` completed once this
-landed, and staff confirmed both the spinner and the results displaying correctly on repeated
-Enter-key searches afterward.
+Two lessons worth carrying beyond this feature: a fire-and-forget `Task` in a Blazor event handler
+silently loses its final render, and an intermittent bug that fails to reproduce a few times has not
+been shown to be absent.
 
 **Known gap, not yet closed**: recurring-series noise. Searching a league's name still returns every
 occurrence within the searched range as a separate row — v1 does not collapse them. Collapsing would
@@ -840,6 +794,9 @@ See `docs/deployment-guide.md` for the full deployment process this checklist fe
 | `checkMemberGroups` needs `User.Read.All` as well as `GroupMember.Read.All` | **Live-found in production 2026-08-15**, on the first real deploy of the staff/member split: every staff sign-in completed normally and was then denied every page. The documented grant was `GroupMember.Read.All` alone, which returns `403 Insufficient privileges to complete the operation` - the call resolves the *user* object as well as its memberships. Both permissions are now required by the provisioning checklist (§7 step 7) and deployment guide Step 5, whose Appendix C also gained a troubleshooting table for this exact symptom. Worth noting how it presented: an Azure log stream showing a clean token validation and then silence looks identical for success and failure, because nothing on this path writes to `ILogger` - the answer was only in the app's own log file. |
 | No automated test coverage anywhere in the repo | **RESOLVED (2026-08-04)** — an xUnit/bUnit test suite (§11) now covers concurrency locking, Breely webhook processing, conflict/booking rules, facility-timezone conversion, anonymous-endpoint request parsing, and two staff pages; wired into CI. Recurring-series instance expansion (`CreateSeriesAsync`'s excluded-date deletion) and full HTTP-level endpoint integration testing remain uncovered (§11). |
 | Pre-existing multi-sheet Breely rentals don't show a sheet count on the public calendar (D65) | **Accepted, not a defect** — confirmed live 2026-08-04 against the operator's own test-tenant data: sibling sheets claimed through separate pre-D45/D46 webhook deliveries never shared a `BookingGroupId`, so there's no identity linking them for the count logic to find. Operator confirmed this is test-tenant data only and chose not to backfill it; every Breely rental claimed since D45/D46 landed gets a correctly-shared group id going forward, so this doesn't recur for new bookings. |
+| Enter-key search computed results and never rendered them | **Found live, fixed (2026-08-22)** — `OnQueryKeyDown` discarded its `Task` (`_ = RunSearch();`) from a synchronous handler. Blazor Server's automatic post-handler re-render only covers the `Task` it is actually given, so the final render was never sent — not delayed, never sent (D92, §4.12). The Search button was unaffected, which is why this read as intermittent for days. **Generalizes: any fire-and-forget `Task` in a Blazor event handler silently loses its final render.** |
+| A live bug was declared a one-time environmental fluke after several clean retries | **Wrong conclusion, corrected (2026-08-22)** — the search slowdown above failed to reproduce across a service restart and a 12-hour gap and was closed as an anomaly; it recurred, and instrumented diagnosis found two fully reproducible bugs (D91, D92). Recorded because the cost was real: the premature conclusion nearly closed an active defect as unfixable. **An intermittent bug that fails to reproduce a few times has not been shown to be absent.** |
+| An all-day closure blocked no bookings on the days it closed | **Found live, fixed (2026-08-23)** — an all-day off-ice event stores `End` as the inclusive last day at midnight, so a single-day closure had `Start == End == that day's midnight` and the staff cross-check's half-open overlap test never saw it covering any time later that day. `IsAllDay` defaults to true, so **the most natural way to record "we're closed Tuesday" silently permitted Tuesday bookings.** `PublicAvailabilityService` had already open-coded the fixup for practice ice, so the public side was correct while the staff side was not — the divergence is what hid it. Fixed by giving `ClubEvent` a single `ExclusiveEnd` definition both callers use (D98). Found only because the predicate was being extracted for testing. |
 
 ---
 
@@ -921,6 +878,7 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D75 | The staff marker is an app-owned claim type (`facility:staff`) matched with `RequireClaim`, never `ClaimTypes.Role` + `RequireRole`; and the authorization policies live in `StaffAuthorizationPolicies`, not inline in `Program.cs` | `RequireRole` matches only against `ClaimsIdentity.RoleClaimType`, which Microsoft.Identity.Web overrides to `"roles"` - the role-based pairing silently never matched and locked every staff member out on the first deploy (§6.5/§8). An app-owned claim type depends on no framework convention. Extracting the policies is inseparable from the fix: inline lambdas in `Program.cs` are unreachable from tests, which is exactly why nothing caught it before deploy. |
 | D76 | The staff header is a hamburger menu (always visible, click-to-dropdown) plus a title block, replacing D64's inline nav links | Operator requirement ahead of production. The inline links didn't scale past the handful of pages the app now has, and every added surface made the header more crowded. A single menu holds all seven destinations (Staff Calendar, Public Calendar, Club Events, Practice Ice, Practice Ice Approvals, Settings, Sign out) at a fixed header size, and puts Club Events back as a first-class destination rather than only a button on the Calendar page. The two anonymous surfaces open in a new tab so a staff member checking the member-facing view doesn't lose their place. Dismissal uses a transparent full-viewport backdrop element rather than a document-level JS listener - this is the authenticated Blazor circuit, so `@onclick` is available (D15 constrains the *anonymous* pages only). |
 | D77 | The staff header's CSS lives in `MainLayout.razor.css` (Blazor scoped CSS) | The `app-header`/`app-title` classes had been referenced by the markup since the initial build but were never defined anywhere - no Bootstrap is loaded and `wwwroot/app.css` carries only leftover template rules, so the header rendered as unstyled text. Scoped rather than global CSS specifically so it can never leak into the hand-built public pages, which style themselves inline and share no stylesheet with the staff app. |
+| D78 | The resource mailboxes are configured to **auto-decline every meeting invite** (`AutomateProcessing AutoAccept` with all booking policies false and no delegates, plus an `AdditionalResponse`), not to auto-accept and not to ignore | D3 established that the Resource Booking Attendant never runs on the app's own direct writes, but said nothing about invites arriving from Outlook — and nothing stops a member or staffer adding a sheet as a room on a meeting. Left at the room default (`AutoAccept`), Exchange books the sheet itself: no app-side conflict check (§6.1), and an event carrying none of the app's metadata (§4.1). Set to `None`, the invite is silently ignored and the sender reasonably assumes they have the ice. Declining is the only option that both preserves the sole-writer invariant and tells the sender where to actually go. Documented as a tenant provisioning step (§7 step 2) rather than left to the mailbox default, which was the prior unstated behavior. **Live-confirmed 2026-08-18** against the real tenant: an Outlook invite naming a sheet as a room is declined and the sender receives the `AdditionalResponse` text. The cmdlet combination was reasoned out rather than observed when this decision was written, so this was the one part of it that needed a real test. |
 | D79 | `/api/public/availability` serializes enums by name, via a `JsonStringEnumConverter` registered in `PublicJsonOptions` | Found 2026-08-17 while adding the Meetings club event category (D80). The endpoint returns `PublicClubEventLabel.Category` through `Results.Ok` with the default web JSON options, which carry no string-enum converter - so `clubEvents[].category` had always gone out as an integer ordinal, while `api-reference.md` had always documented it as a name. Verified empirically rather than inferred from the defaults. Serializing by name makes the endpoint match its own published contract, and moves the breaking-change risk from *reordering* the enum (invisible, easy to do by accident) to *renaming* a member (deliberate, and already breaking for the Graph category literal anyway). A knowingly breaking change to a public endpoint, accepted because the one known consumer - the club's embed widget - doesn't read club event categories at all. Registered through an extracted `Configure` method rather than an inline lambda in `Program.cs`, per D75's lesson about untestable startup wiring. |
 | D80 | Club event category `Meetings`, cranberry, positioned between Activities and Closure in the picker | Operator request. Picker order comes from `CalendarStyles.ClubEventCategories` (mirroring the existing `SheetCategories` pattern) rather than enum declaration order - originally to keep the enum append-only while the ordinals were on the wire, and kept after D79 removed that constraint because display order and declaration order have no reason to be coupled. The split is guarded by a test asserting the list covers every enum member, since a category present in the enum but missing from the list would render on the calendar while being impossible to select. |
 | D81 | Club event category `Bonspiel` renamed to `OutOfTownBonspiels` (displayed "Out of Town Bonspiels"), and `Competitions` (gold) added | Staff reported confusing this category with `BookingCategory.Bonspiel` - a bonspiel held on this club's own ice, an unrelated sheet-booking category that happens to share the plain name. Safe as a rename rather than a migration-requiring breaking change specifically because D79 landed first: member names are the wire/Graph-literal value (D79's own note), but no club events existed yet carrying the old literal, so there was nothing to migrate. `docs/provision-categories.ps1`'s master category updated to match; re-running it is idempotent. |
@@ -928,7 +886,6 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D83 | The publish cutoff and booking season (§4.10) are persisted as one JSON file (`scheduling-window.json`), not the one-plain-text-file-per-value convention `booking-policy.txt`/`level.txt` each already use | `SetSeasonWindowAsync` sets two of the three values together; separate files would make "together" true in the API but not on disk, since a failed write between two file operations could leave one bound updated and the other stale. One file also collapses three near-identical load/parse/fallback blocks into one. `System.Text.Json` was already a dependency (`PublicJsonOptions`), so this isn't new dependency surface, just a better-fitted format than the precedent for a case with more than one field. |
 | D84 | Season enforcement lives in exactly one place - the top of `SheetBookingService.CreateAcrossSheetsAsync` - rather than being threaded through every write path as a flag | Both the staff booking form and `PracticeIceRequestService.SubmitAsync` already funnel through this one method, so gating it here covers both for free. Breely (`ClaimHoldAsync`) and edits (`UpdateGroupAsync`/`UpdateSeriesAsync`) are excluded by construction - they're different methods entirely - matching the operator's explicit "not Breely, not edits" scope with no special-casing needed anywhere. `CreateSeriesAsync` is deliberately left ungated, consistent with its existing "trusts the caller" contract (§5.1); season exclusion for a series happens client-side in the wizard's preview step instead (§4.5, D85). |
 | D85 | Season-excluded dates in the series wizard are folded into `SeriesDraft.SkippedDates` (excluded from creation, same as a manual Skip) but rendered with no Skip/Include toggle, and `FirstDate`/`LastDate` are never rewritten by the season check | Live-found 2026-08-18: an earlier version clipped `FirstDate`/`LastDate` in place to the season bounds, which silently moved the picker's displayed end date while a warning banner simultaneously said dates had been "removed" - two contradictory signals for an edit staff never made. A related bug in the same fix: the Step 2 status banner said "No conflicts — clear to create" in green while a season-exclusion warning sat directly above it in yellow, both individually true but reading as a direct contradiction - fixed by making the status banner's own wording aware of season exclusions, not just scheduling conflicts (`SeriesWizardModal.BuildStatusBannerText`). |
-| D78 | The resource mailboxes are configured to **auto-decline every meeting invite** (`AutomateProcessing AutoAccept` with all booking policies false and no delegates, plus an `AdditionalResponse`), not to auto-accept and not to ignore | D3 established that the Resource Booking Attendant never runs on the app's own direct writes, but said nothing about invites arriving from Outlook — and nothing stops a member or staffer adding a sheet as a room on a meeting. Left at the room default (`AutoAccept`), Exchange books the sheet itself: no app-side conflict check (§6.1), and an event carrying none of the app's metadata (§4.1). Set to `None`, the invite is silently ignored and the sender reasonably assumes they have the ice. Declining is the only option that both preserves the sole-writer invariant and tells the sender where to actually go. Documented as a tenant provisioning step (§7 step 2) rather than left to the mailbox default, which was the prior unstated behavior. **Live-confirmed 2026-08-18** against the real tenant: an Outlook invite naming a sheet as a room is declined and the sender receives the `AdditionalResponse` text. The cmdlet combination was reasoned out rather than observed when this decision was written, so this was the one part of it that needed a real test. |
 | D86 | A staff-only `/search` page (`Components/Pages/EventSearch.razor`) searches both sheet bookings and Club Events with a small prefixed-keyword grammar (`category:`/`day:`/`type:`, bare words match the title) over a wide, clamped date range | Staff feedback: nothing let staff find an event without already knowing roughly when it was - the calendar only loads its current view window, and the Club Events list has no search at all (§4.12). |
 | D87 | `GraphEventGateway.GetCalendarViewAsync` sets `$top = 200` on every `calendarView` read, for every caller, not just search | Previously unset, so Graph served its small default page size and the `@odata.nextLink` loop drained it serially, costing extra round-trips on any range. The returned set is unchanged, since the nextLink loop still drains to exhaustion regardless (§4.12). Still a real improvement, but **not sufficient on its own** to make a ~400-day search fast - see D90 for what the actual fix was. |
 | D88 | The search page's detail modal is read-only (`BookingDetailModal`/`ClubEventDetailModal`'s new additive `ReadOnly` parameter) with an "Open on calendar" handoff, rather than wiring Edit/Cancel directly into the search page | Full edit would mean a second, untested copy of `Calendar.razor`'s partial-sheet-edit and group-id-split rules (`SaveDraft`'s `splitGroupId` logic) - the most delicate booking-identity logic in the app, with no existing bUnit coverage to diverge from. The handoff needed `/calendar` to accept `?date=`/`?view=` for the first time (`Calendar.ResolveDeepLink`), mirroring `PublicCalendarEndpoint`'s existing `ParseDate`/`ParseView` (§4.12). |
@@ -937,7 +894,6 @@ Each entry states a decision that holds in the system as it exists today, with t
 | D91 | `EventSearch`'s three-way view (help card / "Searching…" / results) is resolved by a pure, tested `ResolveViewState(isSearching, hasSearched)` that checks `isSearching` first | Live-found: the original markup nested the spinner check inside a branch gated on `hasSearched`, which only becomes true after a search finishes - so the spinner was structurally unreachable on the very first search of a page load, appearing only on a later search in the same session once `hasSearched` was already true from an earlier one (§4.12). |
 | D92 | `EventSearch.OnQueryKeyDown` awaits `RunSearch()` directly instead of discarding it (`_ = RunSearch()`) | Live-found root cause of results never appearing on the Enter-key search path: Blazor Server's automatic "await the handler, then re-render" only covers the `Task` it's actually given, and a fire-and-forget task from a synchronous handler is invisible to that mechanism - the search computed correctly server-side but the final render was never triggered, not delayed. The Search button worked throughout because its `@onclick` binds directly to the async method (§4.12). |
 | D93 | Week view's empty-slot click (`WeekGrid.OnSlotClick`) opens the booking dialog with no sheet preselected, and is a distinct click target from the day-column header's existing "jump to Day view" click | Staff feedback: clicking an open slot should launch the new-booking dialog immediately, matching Day view's existing behavior (§4.7). Week's columns are per-day, not per-sheet (§4.7's consolidation), so unlike Day view there's no clicked sheet to prefill from - staff pick one in the dialog itself rather than the app guessing. The header keeps its own click so "jump to Day view" isn't lost; removing it from the grid body (which previously fired on any empty-space click there) made the `@onclick:stopPropagation` on booking/Club-Event chips underneath it dead code, also removed. Staff calendar only - `PublicCalendarEndpoint`'s Week/Day grids are separately rendered server-side markup with no dialog to open. |
-| D94 | The "show/hide Club Events" checkbox is labeled "Show Off-Ice Events" (staff calendar) / "Off-Ice Events" (public calendar) - a display-text-only rename, nothing underneath it | User request, flagged as possibly the start of a broader rename later - deliberately scoped to just this one checkbox's visible label for now. `_showClubEvents`, `ClubEvent`, `ClubEventService`, the `showClubEvents` query parameter, and the `/club-events` management page all keep their existing names (§4.4). |
 | D95 | The booking form and the club-event form become ONE `EventFormModal` with an On the ice / Off the ice toggle; the page decides which service to call from the mode. Both category enums, both services, both mailboxes, and every code/wire name stay exactly as they were | Staff feedback: the booking-vs-club-event split is artificial and confusing - the distinction that matters is whether an event occupies ice. Scoped to UI + dialog deliberately: `ClubEventCategory` member names are at once the public API wire value (D79), the Graph category literal, and an Exchange master-category `displayName` from `provision-categories.ps1`, so unlike D81's free rename this data now exists in production and a merge would be a migration, not a rename. `EventDraft` COMPOSES `BookingDraft`/`ClubEventDraft` rather than absorbing them - both already encode the "each Minutes field is relative to its OWN Date field" rule that a live multi-day bug forced (§4.11), with 8 tests pinning it, so absorbing them would mean re-deriving that arithmetic and stranding its guards. Composition makes a mode switch a plain scalar copy with no date arithmetic at all (§4.4). |
 | D96 | The mode toggle is create-only - editing an existing event shows it as an inert badge, and the Off-Ice Events list page passes `AllowModeToggle=false` | Converting a saved event across the boundary means deleting N events across N sheet mailboxes and creating one on the club-events mailbox, non-transactionally across two services D13 deliberately decoupled, with no rollback path (`MultiSheetRollbackTests` exists because multi-mailbox writes are the hard part here). The reverse direction additionally has to invent sheets, a category from a different enum, and a Hold/Confirmed state. Accepted limitation: a mis-filed event costs a delete and re-entry, and loses the original's `BookedBy` provenance. The list page locks it for a different reason - that page's save writes off-ice unconditionally, so a live toggle there would let a save land somewhere the list can't show. |
 | D97 | Off-ice events gained per-category filtering on both calendars, and the public calendar carries a new `clubFiltered=1` marker alongside the existing `showClubEvents` | Off-ice was previously all-or-nothing while on-ice had six chips - the asymmetry no longer made sense once both are "events". D67 established that for a single on/off toggle, absent must reliably mean off; generalized to a family, that means the off-ice group must NOT inherit the fall-back-to-all rule the sheet categories keep. But "zero checked" is indistinguishable on the wire from "this URL predates per-category off-ice filtering", and bookmarks/embeds carrying `showClubEvents=1` must keep showing everything - hence the marker, the same trick `filtered=1` already plays. `showClubEvents` is still emitted (true whenever anything off-ice shows) so any external reader keeps working. Live-verified against the real tenant, including both legacy URL shapes. |
@@ -968,6 +924,7 @@ To reuse this for bowling lanes, tennis courts, or other facilities: the resourc
 - Anonymous-endpoint request parsing — the date/month/range clamping on `/public/calendar` and `/public/search`, the category-filter parsing and nav-link query-string generation (D66/D67), and the constant-time webhook secret comparison, exposed via `internal` + `InternalsVisibleTo` (D60) rather than a full ASP.NET Core test host.
 - Staff UI via bUnit — `Settings.razor` (the D56 PII warning banner, the D55 interval dropdown), and `MainLayout.razor`'s header menu (D76): staff see every destination, non-staff see only the three they can use, the staff hrefs are absent from the DOM rather than merely hidden, open/close behaviour, and the greeting using the display-name claim rather than the UPN (D71). Those tests deliberately displace bUnit's placeholder `IAuthorizationService` and register the app's own `StaffAuthorizationPolicies` instead of using bUnit's `AddTestAuthorization()` — the point is to exercise the real policy, not a faked one, so the menu can't drift from what the pages enforce.
 - Practice ice hosting (§5.4.4) — the free-time gap computation (blocking parity between a Hold and a Confirmed booking, ice-blocking vs. non-blocking club events, eligible-hours/lead-time/horizon clamping, 30-minute grid alignment, the minimum-session floor), the public title's host-name/UPN-guard behavior (D69), and `PracticeIceRequestService`'s submit/approve/decline paths including the D70 mail-failure-resilience fix (a `FakeGraphMailGateway.ThrowOnSend` regression test for each of the three write paths) - `FacilityScheduler.Tests/Services/PracticeIceAvailabilityTests.cs`, `PracticeIceRequestServiceTests.cs`, `PracticeIceRulesTests.cs`, plus `FacilityConfigurationTests` additions for the new config section's validation.
+- The unified event form and the calendar page (§4.4, D95) — `EventDraftTests` pins the mode-switch carry-over, most importantly that flipping on-ice/off-ice and back never alters an event's `Start`/`End` (it reuses the exact multi-day fixture that caught the original `LoadForEdit` bug, §4.11). `EventFormModalTests` covers which controls each mode shows, the create-only mode lock (D96), and that data typed before a switch survives it. `CalendarRenderTests`/`CalendarFilterTests` give `Calendar.razor` its first render coverage, including per-category off-ice filtering (D97). `CalendarClosureCrossCheckTests` pins the closure overlap predicate at its boundaries — the all-day case it did **not** previously handle is the D98 bug (§8).
 - Staff vs. member authorization (§6.5) — two layers. `StaffAccessServiceTests` covers the membership check itself: it matches on the specific configured group id (not any group match) and fails closed when the Graph call throws (`FakeGraphGroupGateway.ThrowOnCheck`). `StaffAuthorizationPolicyTests` covers the *policy wiring*, evaluating the real `StaffAuthorizationPolicies` objects against `ClaimsPrincipal`s constructed the way Microsoft.Identity.Web constructs them (overridden `NameClaimType`/`RoleClaimType`) - staff allowed, non-staff denied, anonymous denied, the practice ice carve-out reachable by a non-staff member, and the fallback policy actually being the strict one. That second file exists because its absence let a real lockout ship (§8): policies defined inline in `Program.cs` were unreachable from tests. `FacilityConfigurationTests` additionally covers `StaffGroupId`'s required-field validation. **Still not covered, and not coverable against fakes:** whether the per-page `[Authorize]` attribute overrides `FallbackPolicy` in the real Blazor routing pipeline. The policies themselves are now proven correct in isolation; how ASP.NET Core selects between them for a given page still needs a real non-staff sign-in to confirm (§6.5/§8).
 
 **Practice ice hosting's real-tenant verification gap.** This test suite covers the feature's logic, not the Graph/Exchange operational plumbing that turned out to be the harder part in practice: the `Mail.Send` application permission grant, the Application Access Policy group-membership scoping (D73), and the actual claim shape a real sign-in produces (D71) were all verified live against the real tenant by the operator directly on 2026-08-11 - none of that is (or reasonably could be) covered by an automated test running against fakes, consistent with this whole suite's standing limitation that it has never run against a real Azure AD/Graph tenant (§8). The staff-vs-member authorization work (D74) carries the same class of gap and has not yet had its equivalent live-verification pass.
@@ -975,7 +932,7 @@ To reuse this for bowling lanes, tennis courts, or other facilities: the resourc
 **Known gaps**, left for a future pass rather than addressed now:
 - `CreateSeriesAsync`'s excluded-date deletion relies on Graph's recurring-instance expansion (`GetInstancesAsync`), which the fake doesn't model — no test exercises that path.
 - Endpoint coverage is unit-level (D60), not a full HTTP-level integration test through the real ASP.NET Core pipeline (routing, rate limiting, the Entra auth handler) — would need a `WebApplicationFactory`-based host fed dummy Azure AD/Graph config.
-- `Calendar.razor` and the `ClubEvents`/series-wizard UI have no bUnit coverage yet - they pull in more child modal components than `Settings.razor` does, making them a bigger lift.
+- `ClubEvents.razor` (the Off-Ice Events list page) still has no bUnit coverage. `Calendar.razor` and the unified event form gained theirs during the D95 work; the series wizard is covered at the logic level (`SeriesSeasonClipTests`, `SeriesWizardStatusBannerTests`) but not as a rendered component.
 - The practice ice Blazor pages (`PracticeIceRequest.razor`, `PracticeIceApprovals.razor`) have no bUnit coverage either; their logic lives in `PracticeIceRequestService`, which is covered directly.
 - `FindByExternalIdAsync`'s defensive "prefer Confirmed over Hold on multiple matches" branch (guarding a data invariant this app's own writers always maintain) has no realistic production code path to construct a violating scenario from, so it isn't covered.
 
