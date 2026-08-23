@@ -32,18 +32,22 @@
         </div>
         <div style="position:relative">
             <span @onclick="ToggleNewMenu" style="background:#c62f2f;color:#fff;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;display:inline-flex;align-items:center;gap:5px">
-                + New Booking <span style="font-size:10px">&#9662;</span>
+                + New Event <span style="font-size:10px">&#9662;</span>
             </span>
             @if (_newMenuOpen)
             {
-                <div style="position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #d7dfe5;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);z-index:20;min-width:170px;overflow:hidden">
-                    <div @onclick="SelectNewBooking" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer">New Booking</div>
-                    <div @onclick="SelectNewSeries" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">New Series</div>
-                    <div @onclick="SelectNewClubEvent" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">New Club Event</div>
+                <div style="position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #d7dfe5;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);z-index:20;min-width:200px;overflow:hidden">
+                    <div @onclick="SelectNewEvent" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer">New Event</div>
+                    <div @onclick="SelectNewOffIceEvent" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">New Off-Ice Event</div>
+                    @* Series is on-ice only - off-ice events have no recurrence concept, so the hint
+                       says so rather than letting the option look broken when it opens a sheet-only wizard. *@
+                    <div @onclick="SelectNewSeries" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">
+                        New Series <span style="font-weight:400;color:#90a0ab;font-size:12px">on-ice only</span>
+                    </div>
                 </div>
             }
         </div>
-        <a href="/club-events" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none">Club Events</a>
+        <a href="/club-events" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none">Off-Ice Events</a>
         <a href="/search" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none">Search</a>
     </div>
 
@@ -80,8 +84,7 @@
     }
 </div>
 
-<BookingFormModal IsOpen="_formOpen" Draft="_draft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" />
-<ClubEventFormModal IsOpen="_clubEventFormOpen" Draft="_clubEventDraft" IsSaving="_isSavingClubEvent" OnSave="SaveClubEventDraft" OnCancel="CloseClubEventForm" OnDelete="DeleteClubEventDraft" />
+<EventFormModal IsOpen="_formOpen" Draft="_eventDraft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveEventDraft" OnCancel="CloseForm" OnDelete="DeleteOffIceEventDraft" />
 <ClubEventDetailModal ClubEvent="_clubEventDetail" OnClose="() => _clubEventDetail = null" OnEdit="StartEditClubEvent" OnDelete="DeleteClubEventDirect" />
 <BookingDetailModal Group="_detailGroup" OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" OnEditSeries="StartEditSeries" />
 <SeriesEditModal Group="_seriesEditGroup" Conflicts="_seriesEditConflicts" IsSaving="_isSavingSeriesEdit" OnSave="SaveSeries" OnCancel="CloseSeriesEdit" />
@@ -134,14 +137,13 @@
     private readonly HashSet<BookingCategory> _selectedCategories = [.. CalendarStyles.SheetCategories];
     private bool _showClubEvents = true;
 
+    // One draft and one open flag for both kinds - the dialog's own mode toggle decides which service
+    // the save dispatches to, so the page no longer tracks two parallel form states.
     private bool _formOpen;
-    private BookingDraft _draft = new();
+    private EventDraft _eventDraft = new();
     private List<SheetBooking> _formConflicts = [];
     private bool _isSaving;
 
-    private bool _clubEventFormOpen;
-    private ClubEventDraft _clubEventDraft = new();
-    private bool _isSavingClubEvent;
     private ClubEvent? _clubEventDetail;
 
     private List<SheetBooking>? _detailGroup;
@@ -289,10 +291,10 @@
 
     private void ToggleNewMenu() => _newMenuOpen = !_newMenuOpen;
 
-    private void SelectNewBooking()
+    private void SelectNewEvent()
     {
         _newMenuOpen = false;
-        OpenCreateForm();
+        OpenCreateForm(EventMode.OnIce);
     }
 
     private void SelectNewSeries()
@@ -301,55 +303,40 @@
         OpenSeriesWizard();
     }
 
-    private void SelectNewClubEvent()
+    private void SelectNewOffIceEvent()
     {
         _newMenuOpen = false;
-        OpenCreateClubEventForm();
+        OpenCreateForm(EventMode.OffIce);
     }
 
-    // Anchored on _anchorDate (what's currently in view), not Facility.Today - same spirit as
-    // OpenCreateForm's use of _anchorDate for a new single booking. The standalone Club Events
-    // page's own "+ New Club Event" has no "currently in view" concept, so it anchors on today
-    // instead - that's a different, equally correct default for a different context.
-    private void OpenCreateClubEventForm()
+    /// <summary>Opens the unified dialog for a new event. Anchored on _anchorDate (what's currently in
+    /// view), not Facility.Today - and now for both modes, where the old separate club-event path
+    /// anchored a day later than the booking path for no stated reason. The standalone Off-Ice Events
+    /// page has no "currently in view" concept and anchors on today instead.</summary>
+    private void OpenCreateForm(EventMode mode, IEnumerable<string>? initialSheets = null, DateTime? initialStart = null)
     {
-        _clubEventDraft = new ClubEventDraft();
-        _clubEventDraft.Reset(_anchorDate);
-        _clubEventFormOpen = true;
-    }
-
-    private void OpenCreateForm()
-    {
-        _draft = new BookingDraft();
-        _draft.Reset(Facility.Today, initialStart: _anchorDate.AddHours(18));
+        _eventDraft = new EventDraft();
+        _eventDraft.ResetForCreate(mode, Facility.Today, initialSheets, initialStart ?? _anchorDate.AddHours(18));
         _formConflicts = [];
         _formOpen = true;
     }
 
-    private void OpenSlotForm((string Sheet, DateTime Start) slot)
-    {
-        _draft = new BookingDraft();
-        _draft.Reset(Facility.Today, initialSheets: [slot.Sheet], initialStart: slot.Start);
-        _formConflicts = [];
-        _formOpen = true;
-    }
+    // Grid slot clicks are unambiguously an on-ice gesture - off-ice events were never creatable this
+    // way. Staff who change their mind get the toggle, and the clicked time survives it.
+    private void OpenSlotForm((string Sheet, DateTime Start) slot) =>
+        OpenCreateForm(EventMode.OnIce, initialSheets: [slot.Sheet], initialStart: slot.Start);
 
     // Week view has no sheet dimension (bookings across sheets are consolidated into one lane-packed
     // timeline per day), so unlike OpenSlotForm above there's no clicked sheet to prefill - staff pick
     // one in the dialog itself.
-    private void OpenWeekSlotForm(DateTime start)
-    {
-        _draft = new BookingDraft();
-        _draft.Reset(Facility.Today, initialStart: start);
-        _formConflicts = [];
-        _formOpen = true;
-    }
+    private void OpenWeekSlotForm(DateTime start) =>
+        OpenCreateForm(EventMode.OnIce, initialStart: start);
 
     private void StartEdit(List<SheetBooking> group)
     {
         _detailGroup = null;
-        _draft = new BookingDraft();
-        _draft.LoadForEdit(group);
+        _eventDraft = new EventDraft();
+        _eventDraft.LoadForEdit(group);
         _formConflicts = [];
         _formOpen = true;
     }
@@ -431,25 +418,34 @@
         _formConflicts = [];
     }
 
-    private async Task SaveDraft()
+    /// <summary>The one save entry point for both kinds. Which service the event lands on is decided
+    /// here, from the dialog's mode, rather than by which of two dialogs the staff member opened.</summary>
+    private async Task SaveEventDraft()
     {
-        var canSave = _draft.Category.HasValue
-            && _draft.SelectedSheets.Count > 0
-            && !string.IsNullOrWhiteSpace(_draft.RenterName)
-            && _draft.End > _draft.Start
-            && (_draft.Category != BookingCategory.GroupEvent || _draft.CreateAsConfirmed.HasValue);
-
-        if (_isSaving || !canSave)
+        if (_isSaving || !EventDraft.Validate(_eventDraft).CanSave)
         {
             return;
         }
+
+        if (_eventDraft.Mode == EventMode.OffIce)
+        {
+            await SaveOffIceEvent();
+            return;
+        }
+
+        await SaveOnIceEvent();
+    }
+
+    private async Task SaveOnIceEvent()
+    {
+        var draft = _eventDraft.OnIce;
 
         _isSaving = true;
         StateHasChanged();
 
         try
         {
-            var closures = await GetActiveClosuresAsync(_draft.Start, _draft.End);
+            var closures = await GetActiveClosuresAsync(draft.Start, draft.End);
             if (closures.Count > 0)
             {
                 _formConflicts = closures.Select(ClosureConflict).ToList();
@@ -457,25 +453,25 @@
             }
 
             var bookedBy = await GetCurrentUserNameAsync();
-            var newState = _draft.CreateAsConfirmed == true ? BookingState.Confirmed : BookingState.Hold;
+            var newState = draft.CreateAsConfirmed == true ? BookingState.Confirmed : BookingState.Hold;
 
-            if (_draft.EditingGroup is null)
+            if (draft.EditingGroup is null)
             {
                 var template = new SheetBooking
                 {
                     SheetMailbox = "", // overwritten per-sheet inside CreateAcrossSheetsAsync
-                    Start = _draft.Start,
-                    End = _draft.End,
-                    Category = _draft.Category!.Value,
+                    Start = draft.Start,
+                    End = draft.End,
+                    Category = draft.Category!.Value,
                     State = newState,
-                    RenterName = _draft.RenterName,
-                    RenterPhone = _draft.RenterPhone,
-                    RenterEmail = _draft.RenterEmail,
-                    Notes = _draft.Notes,
+                    RenterName = draft.RenterName,
+                    RenterPhone = draft.RenterPhone,
+                    RenterEmail = draft.RenterEmail,
+                    Notes = draft.Notes,
                     BookedBy = bookedBy
                 };
 
-                var result = await BookingService.CreateAcrossSheetsAsync(_draft.SelectedSheets, template, bookedBy);
+                var result = await BookingService.CreateAcrossSheetsAsync(draft.SelectedSheets, template, bookedBy);
                 if (result.IsSuccess)
                 {
                     CloseForm();
@@ -491,19 +487,19 @@
                 var updatedFields = new SheetBooking
                 {
                     SheetMailbox = "",
-                    Start = _draft.Start,
-                    End = _draft.End,
-                    Category = _draft.Category!.Value,
+                    Start = draft.Start,
+                    End = draft.End,
+                    Category = draft.Category!.Value,
                     State = newState,
-                    RenterName = _draft.RenterName,
-                    RenterPhone = _draft.RenterPhone,
-                    RenterEmail = _draft.RenterEmail,
-                    Notes = _draft.Notes,
+                    RenterName = draft.RenterName,
+                    RenterPhone = draft.RenterPhone,
+                    RenterEmail = draft.RenterEmail,
+                    Notes = draft.Notes,
                     BookedBy = bookedBy
                 };
 
-                var membersToUpdate = _draft.EditingGroup.Where(m => _draft.SelectedSheets.Contains(m.SheetMailbox)).ToList();
-                var newSheets = _draft.SelectedSheets.Except(_draft.EditingGroup.Select(m => m.SheetMailbox)).ToList();
+                var membersToUpdate = draft.EditingGroup.Where(m => draft.SelectedSheets.Contains(m.SheetMailbox)).ToList();
+                var newSheets = draft.SelectedSheets.Except(draft.EditingGroup.Select(m => m.SheetMailbox)).ToList();
 
                 // Deselecting a sheet leaves it untouched (still part of whatever it was before -
                 // e.g. an open rental hold). If that leaves it behind, it needs to split off into
@@ -512,7 +508,7 @@
                 // fresh group id whenever a member currently has none (Guid.Empty - an untouched
                 // recurring occurrence, see OpenDetail) so an edit gives it a real, persisted identity
                 // instead of writing Guid.Empty right back.
-                var isPartialEdit = membersToUpdate.Count < _draft.EditingGroup.Count;
+                var isPartialEdit = membersToUpdate.Count < draft.EditingGroup.Count;
                 var needsFreshGroupId = isPartialEdit || membersToUpdate.Any(m => m.BookingGroupId == Guid.Empty);
                 var splitGroupId = needsFreshGroupId ? Guid.NewGuid() : (Guid?)null;
 
@@ -717,14 +713,10 @@
     private void StartEditClubEvent(ClubEvent ce)
     {
         _clubEventDetail = null;
-        _clubEventDraft = new ClubEventDraft();
-        _clubEventDraft.LoadForEdit(ce);
-        _clubEventFormOpen = true;
-    }
-
-    private void CloseClubEventForm()
-    {
-        _clubEventFormOpen = false;
+        _eventDraft = new EventDraft();
+        _eventDraft.LoadForEdit(ce);
+        _formConflicts = [];
+        _formOpen = true;
     }
 
     private async Task DeleteClubEventDirect(ClubEvent ce)
@@ -740,26 +732,22 @@
         await LoadAsync();
     }
 
-    private async Task SaveClubEventDraft()
+    /// <summary>The off-ice half of SaveEventDraft. No closure cross-check and no season gate, by
+    /// design (§4.4) - the dialog says so inline in off-ice mode rather than leaving staff to notice
+    /// that one kind of event is validated differently from the other.</summary>
+    private async Task SaveOffIceEvent()
     {
-        var canSave = _clubEventDraft.Category.HasValue
-            && !string.IsNullOrWhiteSpace(_clubEventDraft.Title)
-            && (_clubEventDraft.IsAllDay ? _clubEventDraft.EndDate.Date >= _clubEventDraft.StartDate.Date : _clubEventDraft.End > _clubEventDraft.Start);
+        var draft = _eventDraft.OffIce;
 
-        if (_isSavingClubEvent || !canSave)
-        {
-            return;
-        }
-
-        _isSavingClubEvent = true;
+        _isSaving = true;
         StateHasChanged();
 
         try
         {
             var bookedBy = await GetCurrentUserNameAsync();
-            var clubEvent = _clubEventDraft.ToClubEvent(bookedBy);
+            var clubEvent = draft.ToClubEvent(bookedBy);
 
-            if (_clubEventDraft.EditingEvent is null)
+            if (draft.EditingEvent is null)
             {
                 await ClubEventService.CreateAsync(clubEvent, bookedBy);
             }
@@ -768,25 +756,25 @@
                 await ClubEventService.UpdateAsync(clubEvent, bookedBy);
             }
 
-            CloseClubEventForm();
+            CloseForm();
             await LoadAsync();
         }
         finally
         {
-            _isSavingClubEvent = false;
+            _isSaving = false;
         }
     }
 
-    private async Task DeleteClubEventDraft()
+    private async Task DeleteOffIceEventDraft()
     {
-        if (_clubEventDraft.EditingEvent?.EventId is null)
+        if (_eventDraft.OffIce.EditingEvent?.EventId is null)
         {
             return;
         }
 
         var actingUser = await GetCurrentUserNameAsync();
-        await ClubEventService.CancelAsync(_clubEventDraft.EditingEvent.EventId, actingUser);
-        CloseClubEventForm();
+        await ClubEventService.CancelAsync(_eventDraft.OffIce.EditingEvent.EventId, actingUser);
+        CloseForm();
         await LoadAsync();
     }
 
