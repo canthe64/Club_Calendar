@@ -1,0 +1,417 @@
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject FacilityConfiguration Facility
+
+@if (IsOpen)
+{
+    <div style="position:fixed;inset:0;background:rgba(30,42,51,.45);display:flex;align-items:center;justify-content:center;z-index:50">
+        <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:720px;max-width:94vw;max-height:88vh;overflow:auto">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
+                <span style="font-size:17px;font-weight:600;color:#1e2a33">@(Draft.IsEditing ? "Edit Event" : "New Event")</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="color:#90a0ab;font-size:16px;cursor:pointer;padding:2px 6px">&#10005;</span>
+            </div>
+
+            @* On-ice only - an off-ice event is never conflict-checked (D13), so this can't populate. *@
+            @if (IsOnIce && Conflicts.Count > 0)
+            {
+                <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+                    <div style="font-size:14px;font-weight:600;color:#a02c21;margin-bottom:4px">This time conflicts with:</div>
+                    @foreach (var c in Conflicts)
+                    {
+                        @if (c.SheetMailbox == "__season__")
+                        {
+                            @* SheetBookingService.SeasonConflictSheetMailbox - not a real closure, no sheet/time to show, just the reason. *@
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">@c.RenterName</div>
+                        }
+                        else if (string.IsNullOrEmpty(c.SheetMailbox))
+                        {
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">Off-ice event "@c.RenterName": @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") — closes all sheets</div>
+                        }
+                        else
+                        {
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">@SheetLabel(c.SheetMailbox): @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") (@c.Category)</div>
+                        }
+                    }
+                    <div style="font-size:12px;color:#8a5049;margin-top:4px">Nothing was saved — deselect the sheet, or change the time.</div>
+                </div>
+            }
+
+            <div style="display:flex;flex-direction:column;gap:11px;font-size:13px;color:#5a7183">
+                @* Sheets and the mode toggle share one row: the toggle is what makes the sheet chips
+                   meaningful or not, so putting it anywhere else would separate the control from the
+                   thing it governs. *@
+                <div>
+                    <div style="display:flex;align-items:center;margin-bottom:3px">
+                        <span style="font-weight:600;color:#1e2a33">
+                            Sheets
+                            @if (IsOnIce)
+                            {
+                                <span style="font-weight:400;color:#90a0ab">— tap to toggle</span>
+                            }
+                        </span>
+                        <span style="margin-left:auto;display:flex;gap:0">
+                            @if (Draft.IsEditing)
+                            {
+                                @* Converting a saved event between modes would mean deleting N events
+                                   across N sheet mailboxes and creating one on the club-events mailbox,
+                                   non-transactionally across two deliberately-decoupled services, with
+                                   no rollback path. Shown as a locked badge rather than silently
+                                   omitted so the mode is still legible while editing. *@
+                                <span title="An existing event can't be moved between on-ice and off-ice — delete it and create a new one."
+                                      style="background:#f1f4f6;color:#90a0ab;border:1px solid #d7dfe5;padding:4px 12px;border-radius:6px;font-weight:600;cursor:default">
+                                    @(IsOnIce ? "On the ice" : "Off the ice")
+                                </span>
+                            }
+                            else
+                            {
+                                <span @onclick="() => SetMode(EventMode.OnIce)"
+                                      style="background:@(IsOnIce ? "#2d5f8a" : "#fff");color:@(IsOnIce ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;border-radius:6px 0 0 6px;padding:4px 14px;font-weight:600;cursor:pointer">
+                                    On the ice
+                                </span>
+                                <span @onclick="() => SetMode(EventMode.OffIce)"
+                                      style="background:@(IsOnIce ? "#fff" : "#2d5f8a");color:@(IsOnIce ? "#2d5f8a" : "#fff");border:1px solid #2d5f8a;border-left:none;border-radius:0 6px 6px 0;padding:4px 14px;font-weight:600;cursor:pointer">
+                                    Off the ice
+                                </span>
+                            }
+                        </span>
+                    </div>
+                    @* Greyed rather than hidden: the layout stays put across a toggle, and it stays
+                       visible WHY sheets aren't available instead of the concept vanishing. *@
+                    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;opacity:@(IsOnIce ? "1" : ".45")">
+                        @foreach (var sheet in Facility.SheetMailboxes)
+                        {
+                            var isSelected = IsOnIce && Draft.OnIce.SelectedSheets.Contains(sheet);
+                            <span @onclick="() => ToggleSheet(sheet)"
+                                  style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:72px;text-align:center;border-radius:6px;font-weight:600;cursor:@(IsOnIce ? "pointer" : "default")">
+                                @SheetLabel(sheet)
+                            </span>
+                        }
+                        <span @onclick="SelectAllSheets"
+                              style="border:1px dashed #2d5f8a;color:#2d5f8a;padding:5px 10px;border-radius:6px;font-weight:600;cursor:@(IsOnIce ? "pointer" : "default")">
+                            All Sheets
+                        </span>
+                    </div>
+                </div>
+
+                @if (!IsOnIce)
+                {
+                    <div style="display:flex;align-items:start;gap:6px;padding:8px 10px;background:#eaf1f8;border-radius:6px;font-size:12.5px;color:#2d5f8a;line-height:1.5">
+                        <span>&#8505;</span>
+                        <span>Off-ice events aren't tied to a sheet. They aren't checked against the booking season or against existing ice bookings.</span>
+                    </div>
+                }
+
+                <div>
+                    <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Category</div>
+                    @* nowrap on the chips: six off-ice categories, one of them "Out of Town Bonspiels",
+                       don't fit on one row - without wrap the row overflows and clips the last chip,
+                       without nowrap the long label breaks across three lines. *@
+                    <div style="display:flex;gap:6px;flex-wrap:wrap">
+                        @if (IsOnIce)
+                        {
+                            @foreach (var cat in CalendarStyles.SheetCategories)
+                            {
+                                var isSelected = Draft.OnIce.Category == cat;
+                                <span @onclick="() => Draft.OnIce.SetCategory(cat)"
+                                      style="background:@(isSelected ? CalendarStyles.CategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.CategoryColor(cat));border:1px solid @CalendarStyles.CategoryColor(cat);padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+                                    @CalendarStyles.CategoryLabel(cat)
+                                </span>
+                            }
+                        }
+                        else
+                        {
+                            @foreach (var cat in CalendarStyles.ClubEventCategories)
+                            {
+                                var isSelected = Draft.OffIce.Category == cat;
+                                <span @onclick="() => Draft.OffIce.Category = cat"
+                                      style="background:@(isSelected ? CalendarStyles.ClubEventCategoryColor(cat) : "#fff");color:@(isSelected ? "#fff" : CalendarStyles.ClubEventCategoryColor(cat));border:1px solid @CalendarStyles.ClubEventCategoryColor(cat);padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+                                    @CalendarStyles.ClubEventCategoryLabel(cat)
+                                </span>
+                            }
+                        }
+                    </div>
+                </div>
+
+                @if (!IsOnIce)
+                {
+                    <div><span @onclick="() => Draft.OffIce.IsAllDay = !Draft.OffIce.IsAllDay" style="cursor:pointer;font-weight:600;color:#1e2a33">
+                        <input type="checkbox" checked="@Draft.OffIce.IsAllDay" style="pointer-events:none" /> All day
+                    </span></div>
+                }
+
+                <div>
+                    <div style="display:flex;gap:8px">
+                        <div style="flex:1">
+                            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Start date</div>
+                            <input type="date" value="@StartDate.ToString("yyyy-MM-dd")" @onchange="OnStartDateChanged"
+                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                        </div>
+                        <div style="flex:1">
+                            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">End date</div>
+                            <input type="date" value="@EndDate.ToString("yyyy-MM-dd")" @onchange="OnEndDateChanged"
+                                   style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box">
+                        </div>
+                    </div>
+                    @* Only once the two dates actually differ - the common single-day event stays as
+                       compact as it was before multi-day existed. *@
+                    @if (EndDate.Date != StartDate.Date)
+                    {
+                        var days = (EndDate.Date - StartDate.Date).Days + 1;
+                        <div style="display:flex;align-items:center;gap:6px;margin-top:6px;padding:6px 10px;background:#eaf1f8;border-radius:6px;font-size:12.5px;color:#2d5f8a;font-weight:600">
+                            <span>&#8505;</span>
+                            <span>Spans @days days — @StartDate.ToString("ddd, MMM d") through @EndDate.ToString("ddd, MMM d")</span>
+                        </div>
+                    }
+                </div>
+
+                @if (ShowTimePickers)
+                {
+                    <div style="display:flex;gap:8px">
+                        <div style="flex:1">
+                            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">
+                                From
+                                @if (EndDate.Date != StartDate.Date)
+                                {
+                                    <span style="font-weight:400;color:#90a0ab">(on the start date)</span>
+                                }
+                            </div>
+                            <select value="@StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
+                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
+                                {
+                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
+                                }
+                            </select>
+                        </div>
+                        <div style="flex:1">
+                            <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">
+                                To
+                                @if (EndDate.Date != StartDate.Date)
+                                {
+                                    <span style="font-weight:400;color:#90a0ab">(on the end date)</span>
+                                }
+                            </div>
+                            <select value="@EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
+                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
+                                {
+                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
+                                }
+                            </select>
+                        </div>
+                    </div>
+                }
+
+                @if (!IsOnIce)
+                {
+                    <div>
+                        <span @onclick="() => Draft.OffIce.MarksSheetsUnavailable = !Draft.OffIce.MarksSheetsUnavailable" style="cursor:pointer;font-weight:600;color:#1e2a33">
+                            <input type="checkbox" checked="@Draft.OffIce.MarksSheetsUnavailable" style="pointer-events:none" /> Closes all sheets for this time
+                        </span>
+                        <div style="color:#90a0ab;font-size:12px;margin-top:2px">Blocks new ice bookings during this window and shows on the public calendar as all sheets reserved.</div>
+                    </div>
+                }
+
+                @* Hold/Confirmed and the contact fields need no mode gating of their own - GroupEvent
+                   is an on-ice category, so both disappear off-ice for free. *@
+                @if (IsOnIce && Draft.OnIce.Category == BookingCategory.GroupEvent)
+                {
+                    <div>
+                        <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Booking status</div>
+                        <div style="display:flex;gap:6px">
+                            <span @onclick="() => Draft.OnIce.CreateAsConfirmed = false"
+                                  style="flex:1;text-align:center;background:@(Draft.OnIce.CreateAsConfirmed == false ? "#2d5f8a" : "#fff");color:@(Draft.OnIce.CreateAsConfirmed == false ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;border-radius:6px;font-weight:600;cursor:pointer">
+                                Hold for future group event
+                            </span>
+                            <span @onclick="() => Draft.OnIce.CreateAsConfirmed = true"
+                                  style="flex:1;text-align:center;background:@(Draft.OnIce.CreateAsConfirmed == true ? "#2d5f8a" : "#fff");color:@(Draft.OnIce.CreateAsConfirmed == true ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;border-radius:6px;font-weight:600;cursor:pointer">
+                                Confirmed booking
+                            </span>
+                        </div>
+                    </div>
+                }
+
+                <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Event Title</div>
+                    <input value="@Title" @oninput="OnTitleInput" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
+
+                @if (IsOnIce && Draft.OnIce.Category == BookingCategory.GroupEvent)
+                {
+                    <div style="display:flex;gap:8px">
+                        <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Phone <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                            <input value="@Draft.OnIce.RenterPhone" @oninput="e => Draft.OnIce.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
+                        <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Email <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                            <input value="@Draft.OnIce.RenterEmail" @oninput="e => Draft.OnIce.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
+                    </div>
+                }
+
+                <div><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Notes <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
+                    <input value="@Notes" @oninput="OnNotesInput" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
+            </div>
+
+            <div style="display:flex;gap:8px;margin-top:14px;font-size:14px;font-weight:600">
+                <span @onclick="HandleSaveClick" style="flex:1;text-align:center;background:@(IsSaving ? "#d98e8e" : CanSave ? "#c62f2f" : "#e8b4ae");color:#fff;padding:8px 0;border-radius:6px;cursor:@(IsSaving || !CanSave ? "default" : "pointer")">@(IsSaving ? "Saving..." : "Save")</span>
+                <span @onclick="() => OnCancel.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;padding:8px 16px;border-radius:6px;cursor:pointer">Cancel</span>
+            </div>
+            @if (!CanSave)
+            {
+                <div style="font-size:12px;color:#a02c21;margin-top:6px">@ValidationMessage</div>
+            }
+
+            @* Off-ice deletion is a plain delete. On-ice deletion goes through BookingDetailModal's
+               Cancel Booking, which owns the "reopen the slot as a group-event hold?" choice - a
+               question that has no off-ice equivalent. *@
+            @if (!IsOnIce && Draft.IsEditing)
+            {
+                @if (_confirmingDelete)
+                {
+                    <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-top:10px;font-size:13px">
+                        <div style="color:#a02c21;font-weight:600;margin-bottom:6px">Delete this event? This can't be undone.</div>
+                        <div style="display:flex;gap:8px;font-weight:600">
+                            <span @onclick="HandleDeleteClick" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:6px 0;cursor:pointer">Yes, delete</span>
+                            <span @onclick="() => _confirmingDelete = false" style="flex:1;text-align:center;color:#90a0ab;cursor:pointer;padding:6px 0">Never mind</span>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <div style="text-align:center;margin-top:10px">
+                        <span @onclick="() => _confirmingDelete = true" style="font-size:12.5px;color:#a02c21;cursor:pointer;text-decoration:underline">Delete Event</span>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public bool IsOpen { get; set; }
+    [Parameter, EditorRequired] public EventDraft Draft { get; set; } = new();
+    [Parameter] public List<SheetBooking> Conflicts { get; set; } = [];
+    [Parameter] public bool IsSaving { get; set; }
+    [Parameter] public EventCallback OnSave { get; set; }
+    [Parameter] public EventCallback OnCancel { get; set; }
+    [Parameter] public EventCallback OnDelete { get; set; }
+
+    private bool _confirmingDelete;
+    private bool _wasOpen;
+
+    private bool IsOnIce => Draft.Mode == EventMode.OnIce;
+    private bool ShowTimePickers => IsOnIce || !Draft.OffIce.IsAllDay;
+
+    // Read/write proxies for the fields both modes share, so the markup stays one copy rather than
+    // branching on Mode at every input.
+    private DateTime StartDate => IsOnIce ? Draft.OnIce.StartDate : Draft.OffIce.StartDate;
+    private DateTime EndDate => IsOnIce ? Draft.OnIce.EndDate : Draft.OffIce.EndDate;
+    private int StartMinutes => IsOnIce ? Draft.OnIce.StartMinutes : Draft.OffIce.StartMinutes;
+    private int EndMinutes => IsOnIce ? Draft.OnIce.EndMinutes : Draft.OffIce.EndMinutes;
+    private string? Title => IsOnIce ? Draft.OnIce.RenterName : Draft.OffIce.Title;
+    private string? Notes => IsOnIce ? Draft.OnIce.Notes : Draft.OffIce.Notes;
+
+    private bool CanSave => EventDraft.Validate(Draft).CanSave;
+    private string ValidationMessage => EventDraft.Validate(Draft).Message;
+
+    protected override void OnParametersSet()
+    {
+        if (IsOpen && !_wasOpen)
+        {
+            _confirmingDelete = false;
+        }
+        _wasOpen = IsOpen;
+    }
+
+    private void SetMode(EventMode mode)
+    {
+        if (!Draft.IsEditing)
+        {
+            Draft.SetMode(mode);
+        }
+    }
+
+    private Task HandleSaveClick() => (IsSaving || !CanSave) ? Task.CompletedTask : OnSave.InvokeAsync();
+    private Task HandleDeleteClick() => OnDelete.InvokeAsync();
+
+    private void ToggleSheet(string sheet)
+    {
+        if (!IsOnIce)
+        {
+            return;
+        }
+
+        if (!Draft.OnIce.SelectedSheets.Remove(sheet))
+        {
+            Draft.OnIce.SelectedSheets.Add(sheet);
+        }
+    }
+
+    private void SelectAllSheets()
+    {
+        if (IsOnIce)
+        {
+            Draft.OnIce.SelectedSheets = [.. Facility.SheetMailboxes];
+        }
+    }
+
+    private void OnTitleInput(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (IsOnIce) { Draft.OnIce.RenterName = value; } else { Draft.OffIce.Title = value; }
+    }
+
+    private void OnNotesInput(ChangeEventArgs e)
+    {
+        var value = e.Value?.ToString();
+        if (IsOnIce) { Draft.OnIce.Notes = value; } else { Draft.OffIce.Notes = value; }
+    }
+
+    private void OnStartDateChanged(ChangeEventArgs e)
+    {
+        if (!DateTime.TryParse(e.Value?.ToString(), out var d))
+        {
+            return;
+        }
+
+        // Pushing the start past the current end would otherwise leave an invalid range on screen
+        // until End is also touched - follow it forward to keep the range valid. Only ever pulls End
+        // forward, never back, so a multi-day span already set up is preserved unless the new start
+        // actually outruns it.
+        if (IsOnIce)
+        {
+            Draft.OnIce.StartDate = d;
+            if (Draft.OnIce.EndDate.Date < d.Date) { Draft.OnIce.EndDate = d.Date; }
+        }
+        else
+        {
+            Draft.OffIce.StartDate = d;
+            if (Draft.OffIce.EndDate.Date < d.Date) { Draft.OffIce.EndDate = d.Date; }
+        }
+    }
+
+    private void OnEndDateChanged(ChangeEventArgs e)
+    {
+        if (DateTime.TryParse(e.Value?.ToString(), out var d))
+        {
+            if (IsOnIce) { Draft.OnIce.EndDate = d; } else { Draft.OffIce.EndDate = d; }
+        }
+    }
+
+    private void OnStartMinutesChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var m))
+        {
+            if (IsOnIce) { Draft.OnIce.StartMinutes = m; } else { Draft.OffIce.StartMinutes = m; }
+        }
+    }
+
+    private void OnEndMinutesChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var m))
+        {
+            if (IsOnIce) { Draft.OnIce.EndMinutes = m; } else { Draft.OffIce.EndMinutes = m; }
+        }
+    }
+
+    private static string SheetLabel(string sheetMailbox)
+    {
+        var localPart = sheetMailbox.Split('@')[0];
+        var digits = new string(localPart.Where(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
+    }
+}
