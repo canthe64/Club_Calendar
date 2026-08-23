@@ -371,7 +371,7 @@ public static class PublicCalendarEndpoint
             <div style="display:flex;gap:16px;margin-top:12px;font-size:13px;color:#5a7183;flex-wrap:wrap">
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#2d5f8a;vertical-align:-2px"></span> Confirmed</span>
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#eaf1f8;border:1.5px dashed #2d5f8a;vertical-align:-2px"></span> Hold (not yet confirmed)</span>
-                <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#c2622f;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;vertical-align:-2px"></span> Club event — dotted outline</span>
+                <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#c2622f;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;vertical-align:-2px"></span> Off-ice event — dotted outline</span>
             </div>
             """);
     }
@@ -423,7 +423,7 @@ public static class PublicCalendarEndpoint
 
         foreach (var ce in dayClubEvents)
         {
-            var note = ce.MarksSheetsUnavailable ? "All sheets reserved" : "";
+            var note = ce.MarksSheetsUnavailable ? "All sheets closed" : "";
             // ce.Start belongs to the event's actual first day only - on a later day of a multi-day
             // timed club event, prefixing it here would misleadingly read as starting that day too.
             var cellTitleText = ce.IsAllDay || cell.Date != ce.Start.Date ? ce.Title : $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}";
@@ -572,11 +572,11 @@ public static class PublicCalendarEndpoint
             sb.Append($"""<div style="display:flex;flex-direction:column;gap:2px;height:{allDayRowHeightPx}px;padding:2px 0;box-sizing:border-box">""");
             foreach (var ce in allDayEvents)
             {
-                var text = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title;
+                var text = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets closed" : ce.Title;
                 var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
                 var chipText = $"{(ceContBefore ? "← " : "")}{text}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
-                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets reserved" : "")}"
+                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}"
                          style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(chipText)}</div>
                     """);
             }
@@ -607,7 +607,7 @@ public static class PublicCalendarEndpoint
                 var titleText = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
                 var title = $"{(ceContBefore ? "← " : "")}{titleText}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
-                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets reserved" : "")}"
+                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}"
                          style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:{CalendarStyles.ClubEventBorderStyle};color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
                     """);
             }

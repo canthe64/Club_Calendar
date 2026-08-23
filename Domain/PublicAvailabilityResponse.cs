@@ -15,7 +15,7 @@ public record PublicAvailabilityResponse(
 public record PublicSheetSlot(string SheetLabel, DateTime Start, DateTime End);
 
 /// <summary>A whole-club event's public label - distinct from sheet slots per the architecture
-/// doc's decision (§4.4), e.g. "Aug 15-17: Summer Bonspiel - all sheets reserved".</summary>
+/// doc's decision (§4.4), e.g. "Aug 15-17: Summer Bonspiel - all sheets closed".</summary>
 public record PublicClubEventLabel(string Title, ClubEventCategory Category, DateTime Start, DateTime End, bool IsAllDay, bool MarksSheetsUnavailable);
 
 /// <summary>

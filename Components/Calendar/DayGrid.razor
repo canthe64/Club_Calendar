@@ -99,7 +99,7 @@
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#8a97a3;vertical-align:-2px"></span> Maintenance</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#1e8a8a;vertical-align:-2px"></span> Practice Ice</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#9c9690;vertical-align:-2px"></span> Other</span>
-        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#6b7680;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;vertical-align:-2px"></span> Club event — dotted outline</span>
+        <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#6b7680;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;vertical-align:-2px"></span> Off-ice event — dotted outline</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#f6f8f9;border:1px solid #eef1f3;vertical-align:-2px"></span> No ice time — click to book anyway</span>
     </div>
 </div>
@@ -134,14 +134,14 @@
     {
         if (ce.IsAllDay)
         {
-            return ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets reserved" : ce.Title;
+            return ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets closed" : ce.Title;
         }
 
         // Same reasoning as booking titles: ce.Start belongs to the event's actual first day only -
         // on a later day of a multi-day timed club event, prefixing it here would read as if it
         // starts that day too.
         var titleWithTime = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
-        return ce.MarksSheetsUnavailable ? $"{titleWithTime} - all sheets reserved" : titleWithTime;
+        return ce.MarksSheetsUnavailable ? $"{titleWithTime} - all sheets closed" : titleWithTime;
     }
 
     private List<SheetBooking> BookingsForSheet(string sheet) =>

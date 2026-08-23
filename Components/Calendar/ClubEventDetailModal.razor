@@ -12,7 +12,7 @@
             <div style="font-size:13px;color:#5a7183;margin-bottom:12px">@DateRangeText(ce)</div>
 
             <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:13.5px">
-                <span style="color:#5a7183">Marks sheets unavailable</span><span style="color:#1e2a33">@(ce.MarksSheetsUnavailable ? "Yes" : "No")</span>
+                <span style="color:#5a7183">Closes all sheets</span><span style="color:#1e2a33">@(ce.MarksSheetsUnavailable ? "Yes" : "No")</span>
             </div>
             @if (!string.IsNullOrWhiteSpace(ce.Notes))
             {
@@ -30,7 +30,7 @@
             @if (_confirmingDelete)
             {
                 <div style="background:#fdf1f0;border:1px solid #e8b4ae;border-radius:8px;padding:10px 12px;margin-top:12px;font-size:13px">
-                    <div style="color:#a02c21;font-weight:600;margin-bottom:6px">Delete this club event? This can't be undone.</div>
+                    <div style="color:#a02c21;font-weight:600;margin-bottom:6px">Delete this event? This can't be undone.</div>
                     <div style="display:flex;gap:8px;font-weight:600">
                         <span @onclick="() => OnDelete.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:6px 0;cursor:pointer">Yes, delete</span>
                         <span @onclick="() => _confirmingDelete = false" style="flex:1;text-align:center;color:#90a0ab;cursor:pointer;padding:6px 0">Never mind</span>
@@ -50,7 +50,7 @@
                     else
                     {
                         <span @onclick="() => OnEdit.InvokeAsync(ce)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit event…</span>
-                        <span @onclick="() => _confirmingDelete = true" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Delete Club Event</span>
+                        <span @onclick="() => _confirmingDelete = true" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Delete Event</span>
                         <span @onclick="() => OnClose.InvokeAsync()" style="text-align:center;border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 14px;cursor:pointer">Close</span>
                     }
                 </div>

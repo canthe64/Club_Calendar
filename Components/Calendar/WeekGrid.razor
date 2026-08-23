@@ -29,7 +29,7 @@
                         @foreach (var ce in dayAllDayEvents)
                         {
                             var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
-                            var ceText = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets" : ce.Title;
+                            var ceText = ce.MarksSheetsUnavailable ? $"{ce.Title} - all sheets closed" : ce.Title;
                             <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
                                  style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:12px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">@(ceContBefore ? "← " : "")@ceText@(ceContAfter ? " →" : "")</div>
                         }
