@@ -29,28 +29,33 @@ public static class PublicCalendarEndpoint
 {
     internal enum ViewMode { Month, Week, Day }
 
-    /// <summary>Which sheet categories are showing, and whether Club Events are showing - mirrors
-    /// the staff calendar's own SHOW row granularity exactly (6 sheet categories + one club-events
-    /// toggle, not finer-grained per-club-event-category filtering, since the staff calendar
-    /// doesn't have that either).</summary>
-    internal sealed record FilterState(bool IsFiltered, HashSet<BookingCategory> Categories, bool ShowClubEvents)
+    /// <summary>Which categories are showing on each side - mirrors the staff calendar's own SHOW
+    /// row granularity exactly, which is now per-category on both sides rather than six on-ice chips
+    /// plus a single all-or-nothing off-ice toggle.</summary>
+    internal sealed record FilterState(bool IsFiltered, HashSet<BookingCategory> Categories, HashSet<ClubEventCategory> ClubCategories)
     {
-        public static readonly FilterState Default = new(false, AllCategories, true);
+        public static readonly FilterState Default = new(false, AllCategories, AllClubCategories);
+
+        /// <summary>Kept truthful for any external reader of the query string, and for the legacy
+        /// parse path below - it means exactly what it always did, "is anything off-ice showing".</summary>
+        public bool ShowClubEvents => ClubCategories.Count > 0;
     }
 
     // Event is reserved for Club Events (CalendarStyles.SheetCategories already excludes it) - not
     // a sheet-booking category a member could filter by here.
     internal static readonly HashSet<BookingCategory> AllCategories = [.. CalendarStyles.SheetCategories];
+    internal static readonly HashSet<ClubEventCategory> AllClubCategories = [.. CalendarStyles.ClubEventCategories];
 
     public static void MapPublicCalendarEndpoint(this WebApplication app)
     {
         app.MapGet("/public/calendar", async (string? view, string? month, string? date,
             string? filtered, string[]? categories, string? showClubEvents,
+            string? clubFiltered, string[]? clubCategories,
             PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
         {
             var today = facility.Today;
             var mode = ParseView(view);
-            var filter = ParseFilter(filtered, categories, showClubEvents);
+            var filter = ParseFilter(filtered, categories, showClubEvents, clubFiltered, clubCategories);
             var html = mode switch
             {
                 ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
@@ -127,7 +132,8 @@ public static class PublicCalendarEndpoint
     // fallback: unlike the multi-select category chips, it's a single on/off toggle where "off" is
     // the entire point of unchecking it, so its absence has to reliably mean off once filtered=1 is
     // present.
-    internal static FilterState ParseFilter(string? filtered, string[]? categories, string? showClubEvents)
+    internal static FilterState ParseFilter(string? filtered, string[]? categories, string? showClubEvents,
+        string? clubFiltered = null, string[]? clubCategories = null)
     {
         if (string.IsNullOrEmpty(filtered))
         {
@@ -135,7 +141,38 @@ public static class PublicCalendarEndpoint
         }
 
         var selected = ParseCategories(categories);
-        return new FilterState(true, selected.Count == 0 ? AllCategories : selected, !string.IsNullOrEmpty(showClubEvents));
+
+        // clubFiltered is the marker distinguishing "this page's SHOW form was submitted with every
+        // off-ice box unchecked" from "this URL predates per-category off-ice filtering". Without it,
+        // a bookmark or embed carrying only the old showClubEvents=1 would parse as "zero off-ice
+        // categories selected" and silently hide everything it used to show.
+        HashSet<ClubEventCategory> club;
+        if (string.IsNullOrEmpty(clubFiltered))
+        {
+            club = string.IsNullOrEmpty(showClubEvents) ? [] : AllClubCategories;
+        }
+        else
+        {
+            // Deliberately NOT the fall-back-to-all the sheet categories get one line above: this is
+            // the family that replaced a single on/off toggle, and D67's rule still applies to it -
+            // for something whose whole point is being switchable off, "none checked" has to mean off.
+            club = ParseClubCategories(clubCategories);
+        }
+
+        return new FilterState(true, selected.Count == 0 ? AllCategories : selected, club);
+    }
+
+    internal static HashSet<ClubEventCategory> ParseClubCategories(string[]? categories)
+    {
+        if (categories is null || categories.Length == 0)
+        {
+            return [];
+        }
+
+        return [.. categories
+            .Select(c => Enum.TryParse<ClubEventCategory>(c, out var parsed) && AllClubCategories.Contains(parsed) ? (ClubEventCategory?)parsed : null)
+            .Where(c => c is not null)
+            .Select(c => c!.Value)];
     }
 
     internal static HashSet<BookingCategory> ParseCategories(string[]? categories)
@@ -189,16 +226,28 @@ public static class PublicCalendarEndpoint
             }
         }
 
+        // Emitted for any external reader still keying off the old parameter, and so a link copied
+        // out of this page keeps meaning the same thing to the legacy parse path above.
         if (filter.ShowClubEvents)
         {
             yield return ("showClubEvents", "1");
+        }
+
+        yield return ("clubFiltered", "1");
+
+        if (!filter.ClubCategories.SetEquals(AllClubCategories))
+        {
+            foreach (var category in filter.ClubCategories)
+            {
+                yield return ("clubCategories", category.ToString());
+            }
         }
     }
 
     private static PublicMonthView ApplyFilter(PublicMonthView view, FilterState filter) => view with
     {
         Bookings = [.. view.Bookings.Where(b => filter.Categories.Contains(ParseCategory(b.CategoryLabel)))],
-        ClubEvents = filter.ShowClubEvents ? view.ClubEvents : []
+        ClubEvents = [.. view.ClubEvents.Where(ce => filter.ClubCategories.Contains(ce.Category))]
     };
 
     private static string MonthHref(DateTime month, string filterQuery) => $"/public/calendar?view=month&month={month:yyyy-MM}{filterQuery}";
@@ -337,7 +386,7 @@ public static class PublicCalendarEndpoint
             : $"""<input type="hidden" name="date" value="{anchor:yyyy-MM-dd}">""";
         var viewField = $"""<input type="hidden" name="view" value="{mode.ToString().ToLowerInvariant()}">""";
 
-        var categoryLabels = CalendarStyles.SheetCategories.Select(cat =>
+        var onIceLabels = CalendarStyles.SheetCategories.Select(cat =>
         {
             var isOn = filter.Categories.Contains(cat);
             return $"""
@@ -349,18 +398,36 @@ public static class PublicCalendarEndpoint
                 """;
         });
 
+        var offIceLabels = CalendarStyles.ClubEventCategories.Select(cat =>
+        {
+            var isOn = filter.ClubCategories.Contains(cat);
+            return $"""
+                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
+                    <input type="checkbox" name="clubCategories" value="{cat}"{(isOn ? " checked" : "")}>
+                    <span style="display:inline-block;width:9px;height:9px;border-radius:2px;background:{CalendarStyles.ClubEventCategoryColor(cat)}"></span>
+                    {H(CalendarStyles.ClubEventCategoryLabel(cat))}
+                </label>
+                """;
+        });
+
+        // Two labeled rows rather than one flat run of twelve checkboxes: both families contain
+        // "Other", and on-ice Bonspiel vs off-ice Out of Town Bonspiels is the pair D81 renamed
+        // because staff conflated them. Matches the staff calendar's own grouped SHOW rows.
         return $"""
-            <form method="get" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:13px">
+            <form method="get" style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:13px">
                 <input type="hidden" name="filtered" value="1">
+                <input type="hidden" name="clubFiltered" value="1">
                 {viewField}
                 {anchorField}
-                <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em">SHOW</span>
-                {string.Join("", categoryLabels)}
-                <label style="display:flex;align-items:center;gap:4px;cursor:pointer;white-space:nowrap">
-                    <input type="checkbox" name="showClubEvents" value="1"{(filter.ShowClubEvents ? " checked" : "")}>
-                    Off-Ice Events
-                </label>
-                <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:52px;flex-shrink:0">ON ICE</span>
+                    {string.Join("", onIceLabels)}
+                </div>
+                <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+                    <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:52px;flex-shrink:0">OFF ICE</span>
+                    {string.Join("", offIceLabels)}
+                    <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
+                </div>
             </form>
             """;
     }

@@ -147,6 +147,7 @@ public class PublicCalendarEndpointTests
         var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: null);
 
         Assert.False(filter.ShowClubEvents);
+        Assert.Empty(filter.ClubCategories);
     }
 
     [Fact]
@@ -155,6 +156,60 @@ public class PublicCalendarEndpointTests
         var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: "1");
 
         Assert.True(filter.ShowClubEvents);
+    }
+
+    // ---- Off-ice per-category filtering, and its legacy-URL back-compat -------------------------
+
+    [Fact]
+    public void ParseFilter_LegacyShowClubEventsWithoutClubFiltered_StillShowsEveryOffIceCategory()
+    {
+        // The back-compat case this whole clubFiltered marker exists for: a bookmark or embed made
+        // before off-ice gained per-category filtering carries only showClubEvents=1. It has to keep
+        // meaning "show everything off-ice", not parse as "zero categories selected".
+        var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: "1",
+            clubFiltered: null, clubCategories: null);
+
+        Assert.Equal(PublicCalendarEndpoint.AllClubCategories, filter.ClubCategories);
+    }
+
+    [Fact]
+    public void ParseFilter_LegacyWithoutShowClubEvents_StillHidesEveryOffIceCategory()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: null,
+            clubFiltered: null, clubCategories: null);
+
+        Assert.Empty(filter.ClubCategories);
+    }
+
+    [Fact]
+    public void ParseFilter_ClubFilteredWithNoClubCategories_HidesEveryOffIceEvent()
+    {
+        // Deliberately NOT the fall-back-to-all the sheet categories get: this family replaced a
+        // single on/off toggle, and D67's rule still applies - "none checked" has to mean off.
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: null,
+            clubFiltered: "1", clubCategories: null);
+
+        Assert.Empty(filter.ClubCategories);
+        Assert.False(filter.ShowClubEvents);
+    }
+
+    [Fact]
+    public void ParseFilter_ClubFilteredWithSomeClubCategories_KeepsOnlyThose()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: "1",
+            clubFiltered: "1", clubCategories: ["Meetings", "Closure"]);
+
+        Assert.Equal(
+            new HashSet<ClubEventCategory> { ClubEventCategory.Meetings, ClubEventCategory.Closure },
+            filter.ClubCategories);
+    }
+
+    [Fact]
+    public void ParseClubCategories_UnknownOrGarbageValues_AreIgnored()
+    {
+        var result = PublicCalendarEndpoint.ParseClubCategories(["Meetings", "NotACategory", ""]);
+
+        Assert.Equal(new HashSet<ClubEventCategory> { ClubEventCategory.Meetings }, result);
     }
 
     [Fact]
@@ -190,9 +245,31 @@ public class PublicCalendarEndpointTests
     {
         // The common case - a member only toggled Club Events, or hasn't excluded anything - should
         // produce a short URL, since ParseFilter already treats "no categories present" as "all".
-        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: "1");
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: "1",
+            clubFiltered: "1", clubCategories: [.. PublicCalendarEndpoint.AllClubCategories.Select(c => c.ToString())]);
 
-        Assert.Equal("&filtered=1&showClubEvents=1", PublicCalendarEndpoint.FilterQuery(filter));
+        // clubFiltered is what distinguishes "submitted with every off-ice box unchecked" from "a URL
+        // that predates off-ice category filtering", so it is emitted even when nothing is excluded.
+        Assert.Equal("&filtered=1&showClubEvents=1&clubFiltered=1", PublicCalendarEndpoint.FilterQuery(filter));
+    }
+
+    [Fact]
+    public void FilterQuery_PartialClubCategorySelection_ListsEachSelectedClubCategory()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: "1",
+            clubFiltered: "1", clubCategories: ["Meetings"]);
+
+        Assert.Equal("&filtered=1&showClubEvents=1&clubFiltered=1&clubCategories=Meetings",
+            PublicCalendarEndpoint.FilterQuery(filter));
+    }
+
+    [Fact]
+    public void FilterQuery_EveryOffIceCategoryUnchecked_OmitsShowClubEventsEntirely()
+    {
+        var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: null,
+            clubFiltered: "1", clubCategories: null);
+
+        Assert.Equal("&filtered=1&clubFiltered=1", PublicCalendarEndpoint.FilterQuery(filter));
     }
 
     [Fact]
@@ -200,6 +277,46 @@ public class PublicCalendarEndpointTests
     {
         var filter = PublicCalendarEndpoint.ParseFilter("1", ["League"], showClubEvents: null);
 
-        Assert.Equal("&filtered=1&categories=League", PublicCalendarEndpoint.FilterQuery(filter));
+        // clubFiltered=1 is emitted for any filtered state, so a link copied out of this page always
+        // round-trips through the modern parse path rather than the legacy one.
+        Assert.Equal("&filtered=1&categories=League&clubFiltered=1", PublicCalendarEndpoint.FilterQuery(filter));
+    }
+
+    [Fact]
+    public void FilterQuery_RoundTripsThroughParseFilter_ForEveryShape()
+    {
+        // The emitted query string has to parse back to the same state, or a Prev/Next click would
+        // quietly change what the member is looking at.
+        (string? Filtered, string[]? Cats, string? Show, string? ClubFiltered, string[]? ClubCats)[] cases =
+        [
+            ("1", null, "1", "1", null),
+            ("1", ["League"], null, "1", null),
+            ("1", null, "1", "1", ["Meetings"]),
+            ("1", ["League", "Bonspiel"], "1", "1", ["Meetings", "Closure"]),
+        ];
+
+        foreach (var (filtered, cats, show, clubFiltered, clubCats) in cases)
+        {
+            var original = PublicCalendarEndpoint.ParseFilter(filtered, cats, show, clubFiltered, clubCats);
+            var query = PublicCalendarEndpoint.FilterQuery(original);
+
+            var pairs = query.TrimStart('&').Split('&', StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Split('=', 2))
+                .ToList();
+            string? Single(string name) => pairs.FirstOrDefault(p => p[0] == name)?[1];
+            string[]? Many(string name)
+            {
+                var values = pairs.Where(p => p[0] == name).Select(p => p[1]).ToArray();
+                return values.Length == 0 ? null : values;
+            }
+
+            var reparsed = PublicCalendarEndpoint.ParseFilter(
+                Single("filtered"), Many("categories"), Single("showClubEvents"),
+                Single("clubFiltered"), Many("clubCategories"));
+
+            Assert.Equal(original.Categories, reparsed.Categories);
+            Assert.Equal(original.ClubCategories, reparsed.ClubCategories);
+            Assert.Equal(original.IsFiltered, reparsed.IsFiltered);
+        }
     }
 }
