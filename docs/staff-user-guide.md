@@ -46,8 +46,8 @@ a day's name/date header in Week view, jumps to that day's Day view.
 axis down the left edge — Day view has one column per sheet, Week view has one column per day. If a
 booking spans multiple sheets at once, Week view shows it as a single item (e.g. "League Practice ·
 5 sheets") rather than repeating it in every sheet's row. Every cell's title is prefixed with its
-start time (e.g. "7PM - League Practice") **on its actual starting day only** — a booking or Club
-Event that spans multiple days doesn't repeat that time on later days, since it didn't start again
+start time (e.g. "7PM - League Practice") **on its actual starting day only** — an event that spans
+multiple days doesn't repeat that time on later days, since it didn't start again
 at that hour each day. A multi-day item shows a **→** on days before its last and a **←** on days
 after its first instead, so its chips read as one continuous event rather than unrelated repeats.
 
@@ -133,7 +133,7 @@ adjust the sheets or time and try again.
 
 ## 4. Creating a Recurring Series
 
-Click **+ New Booking ▾ → New Series**. This is a two-step wizard:
+Click **+ New Event ▾ → New Series**. This is a two-step wizard:
 
 **Step 1** — same fields as a single booking, plus:
 - **First date** / **Last date** — the series repeats weekly on the first date's day of the week,
