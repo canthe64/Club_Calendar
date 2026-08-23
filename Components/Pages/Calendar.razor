@@ -51,19 +51,40 @@
         <a href="/search" style="border:1px solid #d7dfe5;color:#2d5f8a;padding:8px 15px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:pointer;text-decoration:none">Search</a>
     </div>
 
-    <div style="background:#fff;border-bottom:1px solid #e2e8ec;padding:9px 0;display:flex;align-items:center;gap:8px;font-size:13px;flex-wrap:wrap;margin-bottom:12px">
-        <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em">SHOW</span>
-        @foreach (var cat in CalendarStyles.SheetCategories)
-        {
-            var isOn = _selectedCategories.Contains(cat);
-            <span @onclick="() => ToggleCategory(cat)"
-                  style="border:1px solid @CalendarStyles.CategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.CategoryColor(cat));background:@(isOn ? CalendarStyles.CategoryColor(cat) : "#fff");padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer">
-                @CalendarStyles.CategoryLabel(cat)
+    @* Two labeled groups rather than one flat row: both category families contain "Other", and
+       on-ice "Bonspiel" vs off-ice "Out of Town Bonspiels" is the exact pair staff already confused
+       once (D81). Position under a group heading is what disambiguates them. Each group keeps an
+       All/None link so "hide everything off-ice" stays one click, as it was when this was a single
+       checkbox. *@
+    <div style="background:#fff;border-bottom:1px solid #e2e8ec;padding:9px 0;margin-bottom:12px;display:flex;flex-direction:column;gap:7px;font-size:13px">
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:52px;flex-shrink:0">ON ICE</span>
+            @foreach (var cat in CalendarStyles.SheetCategories)
+            {
+                var isOn = _onIceCategories.Contains(cat);
+                <span @onclick="() => ToggleOnIceCategory(cat)"
+                      style="border:1px solid @CalendarStyles.CategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.CategoryColor(cat));background:@(isOn ? CalendarStyles.CategoryColor(cat) : "#fff");padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+                    @CalendarStyles.CategoryLabel(cat)
+                </span>
+            }
+            <span @onclick="ToggleAllOnIce" style="margin-left:auto;color:#2d5f8a;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline">
+                @(_onIceCategories.Count == 0 ? "All" : "None")
             </span>
-        }
-        <span @onclick="() => _showClubEvents = !_showClubEvents" style="margin-left:auto;display:flex;align-items:center;gap:6px;color:#1e2a33;font-weight:600;cursor:pointer">
-            <input type="checkbox" checked="@_showClubEvents" style="pointer-events:none" /> Show Off-Ice Events
-        </span>
+        </div>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+            <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:52px;flex-shrink:0">OFF ICE</span>
+            @foreach (var cat in CalendarStyles.ClubEventCategories)
+            {
+                var isOn = _offIceCategories.Contains(cat);
+                <span @onclick="() => ToggleOffIceCategory(cat)"
+                      style="border:1px solid @CalendarStyles.ClubEventCategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.ClubEventCategoryColor(cat));background:@(isOn ? CalendarStyles.ClubEventCategoryColor(cat) : "#fff");padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
+                    @CalendarStyles.ClubEventCategoryLabel(cat)
+                </span>
+            }
+            <span @onclick="ToggleAllOffIce" style="margin-left:auto;color:#2d5f8a;font-size:12px;font-weight:600;cursor:pointer;text-decoration:underline">
+                @(_offIceCategories.Count == 0 ? "All" : "None")
+            </span>
+        </div>
     </div>
 
     @if (_loading)
@@ -134,8 +155,10 @@
     private bool _newMenuOpen;
     private bool _loading = true;
 
-    private readonly HashSet<BookingCategory> _selectedCategories = [.. CalendarStyles.SheetCategories];
-    private bool _showClubEvents = true;
+    // Per-category on both sides now. The off-ice half replaced a single show/hide checkbox, so the
+    // SHOW row's All/None links exist to keep "hide everything off-ice" a one-click action.
+    private readonly HashSet<BookingCategory> _onIceCategories = [.. CalendarStyles.SheetCategories];
+    private readonly HashSet<ClubEventCategory> _offIceCategories = [.. CalendarStyles.ClubEventCategories];
 
     // One draft and one open flag for both kinds - the dialog's own mode toggle decides which service
     // the save dispatches to, so the page no longer tracks two parallel form states.
@@ -165,10 +188,12 @@
     private DateTime WeekStart => _anchorDate.Date.AddDays(-(int)_anchorDate.DayOfWeek);
 
     private List<SheetBooking> FilteredBookings => _allBookings
-        .Where(b => _selectedCategories.Contains(b.Category))
+        .Where(b => _onIceCategories.Contains(b.Category))
         .ToList();
 
-    private List<ClubEvent> VisibleClubEvents => _showClubEvents ? _activeClubEvents : [];
+    private List<ClubEvent> VisibleClubEvents => _activeClubEvents
+        .Where(ce => _offIceCategories.Contains(ce.Category))
+        .ToList();
 
     private string AnchorLabel => View switch
     {
@@ -276,11 +301,45 @@
         await LoadAsync();
     }
 
-    private void ToggleCategory(BookingCategory cat)
+    private void ToggleOnIceCategory(BookingCategory cat)
     {
-        if (!_selectedCategories.Remove(cat))
+        if (!_onIceCategories.Remove(cat))
         {
-            _selectedCategories.Add(cat);
+            _onIceCategories.Add(cat);
+        }
+    }
+
+    private void ToggleOffIceCategory(ClubEventCategory cat)
+    {
+        if (!_offIceCategories.Remove(cat))
+        {
+            _offIceCategories.Add(cat);
+        }
+    }
+
+    // Any selection at all collapses to none; only an already-empty group expands to all. So the
+    // link reads "None" whenever something is showing and "All" only once nothing is.
+    private void ToggleAllOnIce()
+    {
+        if (_onIceCategories.Count == 0)
+        {
+            _onIceCategories.UnionWith(CalendarStyles.SheetCategories);
+        }
+        else
+        {
+            _onIceCategories.Clear();
+        }
+    }
+
+    private void ToggleAllOffIce()
+    {
+        if (_offIceCategories.Count == 0)
+        {
+            _offIceCategories.UnionWith(CalendarStyles.ClubEventCategories);
+        }
+        else
+        {
+            _offIceCategories.Clear();
         }
     }
 

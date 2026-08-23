@@ -17,7 +17,10 @@ public class CalendarRenderTests : BunitContext
         var cut = Render<Calendar>();
 
         var markup = cut.Markup;
-        Assert.Contains("SHOW", markup);
+        // The single "SHOW" heading became two group headings when off-ice gained per-category
+        // filtering; CalendarFilterTests covers the groups themselves.
+        Assert.Contains("ON ICE", markup);
+        Assert.Contains("OFF ICE", markup);
         Assert.Contains("Today", markup);
         Assert.Contains("Month", markup);
         Assert.Contains("Week", markup);
