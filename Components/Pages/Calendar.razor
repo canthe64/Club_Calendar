@@ -686,8 +686,15 @@
     private async Task<List<ClubEvent>> GetActiveClosuresAsync(DateTime start, DateTime end)
     {
         var events = await ClubEventService.GetEventsAsync(start.Date, end.Date.AddDays(1));
-        return events.Where(ce => ce.MarksSheetsUnavailable && ce.Start < end && ce.End > start).ToList();
+        return ActiveClosures(events, start, end);
     }
+
+    /// <summary>The overlap predicate behind the closure cross-check, extracted from the fetch so the
+    /// boundary cases are testable without a Graph round-trip (D75). Half-open on both sides: a closure
+    /// ending exactly when a booking starts, or starting exactly when one ends, doesn't conflict -
+    /// matching how SheetBookingService's own conflict check treats abutting bookings.</summary>
+    internal static List<ClubEvent> ActiveClosures(IEnumerable<ClubEvent> events, DateTime start, DateTime end) =>
+        events.Where(ce => ce.MarksSheetsUnavailable && ce.Start < end && ce.End > start).ToList();
 
     private static SheetBooking ClosureConflict(ClubEvent ce) => new()
     {

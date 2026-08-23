@@ -51,18 +51,7 @@ public class EventSearchTests : BunitContext
     {
         var facility = TestFacility.Create();
         var gateway = new CountingGateway(new FakeGraphEventGateway(facility.ZoneInfo));
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create();
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(appLog, viewCache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-
-        Services.AddSingleton(facility);
-        Services.AddSingleton(bookingService);
-        Services.AddSingleton(clubEventService);
-        Services.AddSingleton<AuthenticationStateProvider>(new FakeAuthStateProvider());
-
+        StaffPageServices.Register(this, gateway);
         return gateway;
     }
 
