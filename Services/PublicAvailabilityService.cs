@@ -293,7 +293,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
         var closures = clubEvents
             .Where(ce => ce.MarksSheetsUnavailable)
-            .Select(ce => (ce.Start, End: ce.IsAllDay ? ce.End.Date.AddDays(1) : ce.End))
+            .Select(ce => (ce.Start, End: ce.ExclusiveEnd))
             .ToList();
 
         var result = new List<PublicSheetSlot>();

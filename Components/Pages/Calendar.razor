@@ -692,9 +692,12 @@
     /// <summary>The overlap predicate behind the closure cross-check, extracted from the fetch so the
     /// boundary cases are testable without a Graph round-trip (D75). Half-open on both sides: a closure
     /// ending exactly when a booking starts, or starting exactly when one ends, doesn't conflict -
-    /// matching how SheetBookingService's own conflict check treats abutting bookings.</summary>
+    /// matching how SheetBookingService's own conflict check treats abutting bookings.
+    ///
+    /// Compares against ClubEvent.ExclusiveEnd, not raw End - an all-day closure's End is the inclusive
+    /// last day at midnight, so raw End made an all-day closure block nothing on its own final day.</summary>
     internal static List<ClubEvent> ActiveClosures(IEnumerable<ClubEvent> events, DateTime start, DateTime end) =>
-        events.Where(ce => ce.MarksSheetsUnavailable && ce.Start < end && ce.End > start).ToList();
+        events.Where(ce => ce.MarksSheetsUnavailable && ce.Start < end && ce.ExclusiveEnd > start).ToList();
 
     private static SheetBooking ClosureConflict(ClubEvent ce) => new()
     {

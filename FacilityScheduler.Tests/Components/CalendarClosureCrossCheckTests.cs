@@ -81,43 +81,47 @@ public class CalendarClosureCrossCheckTests
         Assert.True(closures[0].MarksSheetsUnavailable);
     }
 
-    // An all-day club event stores End as the INCLUSIVE last day at midnight (ClubEventService's
-    // all-day wire translation, and ClubEventDraft.End when IsAllDay). So a single-day all-day
-    // closure has Start == End == that day's midnight, and the half-open overlap test above can
-    // never see it as covering any time later that day.
-    //
-    // These two tests pin the CURRENT behavior, which is a live bug: all-day is the DEFAULT for a
-    // club event (ClubEvent.IsAllDay = true), so the most natural way to record "we're closed
-    // Tuesday" does not block Tuesday bookings at all. PublicAvailabilityService already compensates
-    // for exactly this (`ce.IsAllDay ? ce.End.Date.AddDays(1) : ce.End`); this path never did.
-    // Deliberately NOT fixed here - step 0 is a zero-behavior-change extraction, and the fix is a
-    // real behavior change that needs its own decision. Flagged to the user.
+    // An all-day club event stores End as the INCLUSIVE last day at midnight, so a single-day all-day
+    // closure has Start == End == that day's midnight. Comparing a booking against that raw End made
+    // the closure block nothing at all on its own day - and since IsAllDay defaults to true, that was
+    // the most natural way to record a closure. Fixed 2026-08-23 by comparing against
+    // ClubEvent.ExclusiveEnd. These three tests are the regression guard.
     [Fact]
-    public void ActiveClosures_SingleDayAllDayClosure_DoesNotBlockThatDay_KnownBug()
+    public void ActiveClosures_SingleDayAllDayClosure_BlocksBookingsThatDay()
     {
         var closures = Calendar.ActiveClosures(
             [Closure(Day, Day, isAllDay: true)], Day.AddHours(18), Day.AddHours(20));
 
-        Assert.Empty(closures);
+        Assert.Single(closures);
     }
 
     [Fact]
-    public void ActiveClosures_MultiDayAllDayClosure_DoesNotBlockItsFinalDay_KnownBug()
+    public void ActiveClosures_MultiDayAllDayClosure_BlocksItsFinalDay()
     {
-        // Aug 24-25 all-day: End is Aug 25 midnight, so Aug 25 evening reads as after it.
+        // Aug 24-25 all-day: End is Aug 25 midnight, but it actually runs through Aug 25.
         var closures = Calendar.ActiveClosures(
             [Closure(Day.AddDays(-1), Day, isAllDay: true)], Day.AddHours(18), Day.AddHours(20));
 
-        Assert.Empty(closures);
+        Assert.Single(closures);
     }
 
     [Fact]
-    public void ActiveClosures_MultiDayAllDayClosure_StillBlocksItsEarlierDays()
+    public void ActiveClosures_MultiDayAllDayClosure_BlocksItsEarlierDays()
     {
-        // The same Aug 24-25 closure does block Aug 24, since Aug 25 midnight is after Aug 24 evening.
         var closures = Calendar.ActiveClosures(
             [Closure(Day.AddDays(-1), Day, isAllDay: true)], Day.AddDays(-1).AddHours(18), Day.AddDays(-1).AddHours(20));
 
         Assert.Single(closures);
+    }
+
+    [Fact]
+    public void ActiveClosures_AllDayClosure_DoesNotBlockTheDayAfterItEnds()
+    {
+        // The exclusive end is Aug 26 midnight, so Aug 26 itself is clear - the fix must not
+        // over-correct into blocking a day the closure never covered.
+        var closures = Calendar.ActiveClosures(
+            [Closure(Day, Day, isAllDay: true)], Day.AddDays(1).AddHours(18), Day.AddDays(1).AddHours(20));
+
+        Assert.Empty(closures);
     }
 }
