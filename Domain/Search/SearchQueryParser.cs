@@ -72,7 +72,7 @@ internal static class SearchQueryParser
                             // whether either one actually has a match in the searched range. Saying
                             // "shown below" reads as a promise of results that may not be there.
                             notices.Add(new SearchNotice(SearchNoticeKind.CategoryCollision,
-                                $"\"category:{value}\" matches both a sheet booking category and a club event category - both were included in the search."));
+                                $"\"category:{value}\" matches both an on-ice and an off-ice category - both were included in the search."));
                         }
                     }
 
@@ -93,18 +93,22 @@ internal static class SearchQueryParser
                     break;
 
                 case "type":
-                    if (normalizedValue is "booking" or "bookings")
+                    // Normalize strips non-alphanumerics, so "on-ice" arrives as "onice" and
+                    // "off-ice" as "office". The old booking/clubevent tokens stay as silent aliases:
+                    // they're in the wild in staff bookmarks and muscle memory, and rejecting them
+                    // would break a search that used to work for no benefit.
+                    if (normalizedValue is "onice" or "booking" or "bookings")
                     {
-                        kind = SearchKindFilter.BookingOnly;
+                        kind = SearchKindFilter.OnIceOnly;
                     }
-                    else if (normalizedValue is "clubevent" or "clubevents")
+                    else if (normalizedValue is "office" or "clubevent" or "clubevents")
                     {
-                        kind = SearchKindFilter.ClubEventOnly;
+                        kind = SearchKindFilter.OffIceOnly;
                     }
                     else
                     {
                         notices.Add(new SearchNotice(SearchNoticeKind.UnknownValue,
-                            $"\"type:{value}\" isn't \"booking\" or \"clubevent\", so it was ignored."));
+                            $"\"type:{value}\" isn't \"on-ice\" or \"off-ice\", so it was ignored."));
                     }
 
                     break;

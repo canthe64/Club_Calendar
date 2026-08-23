@@ -13,7 +13,7 @@
 <div style="padding:16px 24px">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
         <span style="font-size:18px;font-weight:600;color:#1e2a33">Event Search</span>
-        <span style="font-size:15px;color:#90a0ab">Find a booking or Club Event by day, category, or title.</span>
+        <span style="font-size:15px;color:#90a0ab">Find any event by day, category, or title.</span>
     </div>
 
     <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">
@@ -62,12 +62,12 @@
             <div style="display:flex;flex-direction:column;gap:5px">
                 <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:bonspiel</code> - matches a category, e.g. league, bonspiel, practiceice, closure</div>
                 <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:saturday</code> - a day of the week (full name or 3-letter abbreviation)</div>
-                <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:booking</code> / <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:clubevent</code> - restrict to one kind</div>
+                <div><code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:on-ice</code> / <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:off-ice</code> - restrict to one kind</div>
                 <div>any other word matches the title, e.g. <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">smith wedding</code></div>
             </div>
             <div style="margin-top:8px;color:#90a0ab">
                 Terms combine with AND; multiple <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:</code> or <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:</code> terms combine with OR (<code style="background:#eef1f3;padding:1px 6px;border-radius:4px">day:saturday day:sunday</code> means the weekend).
-                <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:bonspiel</code> matches both the sheet-booking category and the club event category "Out of Town Bonspiels" - add <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:booking</code> to narrow.
+                <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">category:bonspiel</code> matches both the on-ice category and the off-ice category "Out of Town Bonspiels" - add <code style="background:#eef1f3;padding:1px 6px;border-radius:4px">type:on-ice</code> to narrow.
             </div>
             <div style="margin-top:8px;color:#90a0ab">
                 The date range covers at most @SearchRange.MaxSpanDays days at a time - move Start/End
@@ -100,7 +100,7 @@
                 }
                 else
                 {
-                    <span>@totalMatched result@(totalMatched == 1 ? "" : "s") - @_bookingMatchCount booking@(_bookingMatchCount == 1 ? "" : "s"), @_clubEventMatchCount club event@(_clubEventMatchCount == 1 ? "" : "s") - @_lastResolvedStart.ToString("MMM d, yyyy") to @_lastResolvedEnd.ToString("MMM d, yyyy")</span>
+                    <span>@totalMatched result@(totalMatched == 1 ? "" : "s") - @_onIceMatchCount on the ice, @_offIceMatchCount off the ice - @_lastResolvedStart.ToString("MMM d, yyyy") to @_lastResolvedEnd.ToString("MMM d, yyyy")</span>
                 }
             </div>
 
@@ -141,7 +141,7 @@
                                 <span style="font-weight:600;color:#1e2a33;font-size:14px">@uce.Title</span>
                                 <span style="font-size:13px;color:#5a7183">@FormatClubEventRange(uce)</span>
                                 <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
-                                    Club event
+                                    Off-ice
                                     @if (uce.MarksSheetsUnavailable)
                                     {
                                         <span style="color:#a02c21;font-weight:600">All sheets closed</span>
@@ -183,7 +183,7 @@
                                 <span style="font-weight:600;color:#1e2a33;font-size:14px">@pce.Title</span>
                                 <span style="font-size:13px;color:#5a7183">@FormatClubEventRange(pce)</span>
                                 <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
-                                    Club event
+                                    Off-ice
                                     @if (pce.MarksSheetsUnavailable)
                                     {
                                         <span style="color:#a02c21;font-weight:600">All sheets closed</span>
@@ -237,8 +237,8 @@
     private string? _rangeWarning;
     private DateTime _lastResolvedStart;
     private DateTime _lastResolvedEnd;
-    private int _bookingMatchCount;
-    private int _clubEventMatchCount;
+    private int _onIceMatchCount;
+    private int _offIceMatchCount;
     private List<ResultRow> _cappedUpcoming = [];
     private List<ResultRow> _cappedPast = [];
     private List<ResultRow> _upcoming = [];
@@ -365,8 +365,8 @@
             .Select(ce => new ResultRow(ce.Start, ce.End, null, ce));
 
         var allRows = bookingRows.Concat(clubEventRows).ToList();
-        _bookingMatchCount = allRows.Count(r => r.Booking is not null);
-        _clubEventMatchCount = allRows.Count(r => r.ClubEvent is not null);
+        _onIceMatchCount = allRows.Count(r => r.Booking is not null);
+        _offIceMatchCount = allRows.Count(r => r.ClubEvent is not null);
 
         var today = Facility.Today;
         _upcoming = allRows.Where(r => r.End.Date >= today.Date)

@@ -16,7 +16,7 @@ internal static class EventSearchMatcher
 {
     public static bool Matches(SheetBooking booking, SearchQuery query)
     {
-        if (query.IsEmpty || query.Kind == SearchKindFilter.ClubEventOnly)
+        if (query.IsEmpty || query.Kind == SearchKindFilter.OffIceOnly)
         {
             return false;
         }
@@ -36,7 +36,7 @@ internal static class EventSearchMatcher
 
     public static bool Matches(ClubEvent clubEvent, SearchQuery query)
     {
-        if (query.IsEmpty || query.Kind == SearchKindFilter.BookingOnly)
+        if (query.IsEmpty || query.Kind == SearchKindFilter.OnIceOnly)
         {
             return false;
         }

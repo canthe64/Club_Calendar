@@ -1,11 +1,13 @@
 namespace FacilityScheduler.Domain.Search;
 
-/// <summary>Which record kind(s) a parsed search is restricted to via a <c>type:</c> term.</summary>
+/// <summary>Which record kind(s) a parsed search is restricted to via a <c>type:</c> term.
+/// Named for where an event happens rather than which mailbox it lands on - the vocabulary the rest
+/// of the UI now uses. Internal and never serialized, so the rename costs nothing on the wire.</summary>
 internal enum SearchKindFilter
 {
     Any,
-    BookingOnly,
-    ClubEventOnly
+    OnIceOnly,
+    OffIceOnly
 }
 
 internal enum SearchNoticeKind

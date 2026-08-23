@@ -134,9 +134,16 @@ public class SearchQueryParserTests
     // expected value travels as a string and is compared via ToString(), same workaround
     // PublicCalendarEndpointTests uses for ViewMode.
     [Theory]
-    [InlineData("type:booking", "BookingOnly")]
-    [InlineData("type:clubevent", "ClubEventOnly")]
-    [InlineData("type:club-events", "ClubEventOnly")]
+    [InlineData("type:on-ice", "OnIceOnly")]
+    [InlineData("type:onice", "OnIceOnly")]
+    [InlineData("type:off-ice", "OffIceOnly")]
+    [InlineData("type:office", "OffIceOnly")]
+    // The pre-rename tokens stay as silent aliases - they're in staff bookmarks and muscle memory,
+    // and rejecting them would break searches that used to work for no benefit.
+    [InlineData("type:booking", "OnIceOnly")]
+    [InlineData("type:bookings", "OnIceOnly")]
+    [InlineData("type:clubevent", "OffIceOnly")]
+    [InlineData("type:club-events", "OffIceOnly")]
     public void Parse_TypeValue_SetsTheExpectedKindFilter(string raw, string expected)
     {
         var query = SearchQueryParser.Parse(raw);
