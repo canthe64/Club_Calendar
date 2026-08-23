@@ -24,8 +24,8 @@ Everything is behind the **menu button** (the three-line icon at the top left):
 |---|---|
 | **Staff Calendar** | The main working page (§2) |
 | **Public Calendar** | What members see — opens in a new tab |
-| **Club Events** | Whole-club events and closures (§5) |
-| **Search** | Find a booking or Club Event by day, category, or title (§6) |
+| **Off-Ice Events** | Whole-club events and closures (§5) |
+| **Search** | Find any event by day, category, or title (§6) |
 | **Practice Ice** | The member-facing page showing open practice ice times — opens in a new tab |
 | **Practice Ice Approvals** | Pending member requests to host (§10) |
 | **Settings** | Booking rules and the activity log (§8) |
@@ -51,33 +51,61 @@ Event that spans multiple days doesn't repeat that time on later days, since it 
 at that hour each day. A multi-day item shows a **→** on days before its last and a **←** on days
 after its first instead, so its chips read as one continuous event rather than unrelated repeats.
 
-Club Events (§5) render inline in every view — a pinned row at the top for all-day events, or a
+Off-ice events (§5) render inline in every view — a pinned row at the top for all-day events, or a
 full-width band at the right hour for timed ones — with a **dotted border** distinguishing them from
 sheet bookings (dashed = Hold, solid = Confirmed).
 
-### The SHOW row
+### The SHOW rows
 
-Below the toolbar, a row of controls filters what's currently displayed — this only affects what you
+Below the toolbar, two rows of chips filter what's currently displayed — this only affects what you
 see, not the underlying data:
 
-- **Category chips** (Group Event, League, Bonspiel, Maintenance, Practice Ice, Other) — click to
-  toggle a category on or off.
-- **Show Off-Ice Events** — toggles whether Club Events (§5) appear on the calendar at all. The
-  checkbox says "Off-Ice Events"; the underlying feature (§5) is still called Club Events throughout
-  this guide and in the app's own data model.
+- **ON ICE** (Group Event, League, Bonspiel, Maintenance, Practice Ice, Other) — click to toggle a
+  category on or off.
+- **OFF ICE** (Out of Town Bonspiels, Competitions, Activities, Meetings, Closure, Other) — the same,
+  for off-ice events (§5).
+
+Each row has an **All** / **None** link on the right to switch that whole row at once — so hiding
+everything off-ice is still one click.
+
+Note both rows contain an **Other** chip, and that on-ice **Bonspiel** (one held on our ice) is a
+different thing from off-ice **Out of Town Bonspiels** (members travelling to play elsewhere). Which
+row a chip sits in is what tells them apart.
 
 ---
 
-## 3. Creating a Booking
+## 3. Creating an Event
 
-Click the **+ New Booking ▾** button. A small menu opens with two options:
+Everything on the calendar is an **event**. The only question the form asks is whether it happens
+**on the ice** (it takes up sheets) or **off the ice** (it doesn't).
 
-- **New Booking** — a single one-off booking (§3.1).
-- **New Series** — a recurring weekly booking (§4).
+Click the **+ New Event ▾** button. A small menu opens with three options:
 
-You can also open the New Booking form directly by clicking an empty slot in Day or Week view. In
-Day view this also fills in the sheet you clicked; Week view doesn't show sheets separately, so pick
-one in the form.
+- **New Event** — a single one-off event, opening on the ice (§3.1).
+- **New Off-Ice Event** — the same form, opening off the ice (§5).
+- **New Series** — a recurring weekly booking (§4). On-ice only.
+
+You can also open the form directly by clicking an empty slot in Day or Week view; those always open
+on the ice. In Day view this also fills in the sheet you clicked; Week view doesn't show sheets
+separately, so pick one in the form.
+
+### On the ice vs off the ice
+
+The toggle sits at the top right of the form, next to the sheet buttons it governs.
+
+- **On the ice** — pick one or more sheets. The event is checked against existing bookings and
+  against the booking season (§8), and can't be saved if it collides.
+- **Off the ice** — the sheet buttons grey out. Off-ice events aren't tied to a sheet, and are
+  deliberately **not** checked against the booking season or against existing ice bookings, so
+  closures and next-season planning can always be recorded. The form says so while you're in it.
+
+Switching the toggle mid-entry keeps the date, time, title and notes you've already typed. Anything
+that only applies to one side — sheets, the category, Hold/Confirmed, contact details, "closes all
+sheets" — waits where you left it, so flipping over and back loses nothing.
+
+**You can't move an event between on-ice and off-ice after it's saved.** The toggle shows as a greyed
+badge when you open an existing event. If something was filed on the wrong side, delete it and create
+it again.
 
 ### 3.1 The booking form
 
@@ -97,7 +125,7 @@ one in the form.
 - **Event Title** — required for every category.
 - **Phone / Email** (Group Event only, optional) and **Notes** (optional, any category).
 
-Click **Save**. If the requested sheets/time conflict with an existing booking, or with a Club Event
+Click **Save**. If the requested sheets/time conflict with an existing booking, or with an off-ice event
 flagged as closing all sheets, nothing is saved — a red banner lists exactly what conflicts, and you
 adjust the sheets or time and try again.
 
@@ -114,7 +142,7 @@ Click **+ New Booking ▾ → New Series**. This is a two-step wizard:
 Click **Review N dates →** to move to Step 2.
 
 **Step 2** — every date the series will create is listed. Conflicts (against existing sheet bookings,
-or a closure Club Event) are flagged per date but **never automatically skipped** — you decide,
+or a closure off-ice event) are flagged per date but **never automatically skipped** — you decide,
 per date, using the **Skip**/**Include** toggle next to each one. Click **Create series** once you're
 satisfied with the selection.
 
@@ -171,34 +199,37 @@ Group Event Hold; there's nothing special to do with it beyond booking or cancel
 
 ---
 
-## 5. Club Events
+## 5. Off-Ice Events
 
-Club Events are whole-club events (bonspiels, closures, club activities) that aren't tied to a
-specific sheet. Reach them either via the **Club Events** button in the calendar toolbar (goes to the
-dedicated `/club-events` list page) or by clicking a Club Event chip directly on the calendar, which
-opens the same edit form inline without leaving the calendar page.
+Off-ice events are whole-club events (bonspiels away, meetings, closures, social events) that aren't
+tied to a specific sheet. Reach them either via the **Off-Ice Events** button in the calendar toolbar
+(goes to the dedicated list page) or by clicking an off-ice chip directly on the calendar, which opens
+the same edit form inline without leaving the calendar page.
+
+They use the same form as on-ice events, opened with the toggle set to off-ice (§3). The fields below
+are the ones that only appear on that side.
 
 - **Category** — Out of Town Bonspiels, Competitions, Activities, Meetings, Closure, or Other.
   Required, no default. "Out of Town Bonspiels" is members travelling to play elsewhere — not to be
-  confused with a bonspiel category on a sheet booking, which is one held on this club's own ice.
+  confused with the on-ice Bonspiel category, which is one held on this club's own ice.
 - **Event Title** — required.
 - **All day** — toggle on/off. When off, set **From**/**To** times (same 30-minute increments as
   bookings).
 - **Start date** / **End date** — moving Start date past the current End date pulls End date forward
   to match, so the range never goes invalid; it never pulls End date backward, so a span you've
   already set up is preserved unless the new start actually outruns it.
-- **Marks all sheets unavailable** — off by default. Turn this on if the event actually closes the
-  ice (not every club event does — e.g. a promotional tournament listing might not).
+- **Closes all sheets for this time** — off by default. Turn this on if the event actually closes the
+  ice (not every off-ice event does — e.g. a promotional tournament listing might not).
 - **Notes** (optional).
 
-When **Marks all sheets unavailable** is on, that event is cross-checked against new sheet bookings
+When **Closes all sheets for this time** is on, that event is cross-checked against new sheet bookings
 and series: attempting to book a sheet during that window is blocked (for a single booking) or
 flagged per-date (for a series preview) the same way a real sheet conflict is.
 
-To delete a Club Event, open it for editing and use the **Delete Club Event** link at the bottom of
+To delete an off-ice event, open it for editing and use the **Delete Event** link at the bottom of
 the form.
 
-**A Club Event titled "⚠ Web booking needs review"** is created automatically, not by staff, when a
+**An off-ice event titled "⚠ Web booking needs review"** is created automatically, not by staff, when a
 booking notification from the Breely booking website doesn't match any open group-event slot on any
 sheet — the booking is still made (onto a fallback sheet) so it's never lost, but it needs a human to
 check it landed on the right sheet and reassign it if not. Its notes include a link back to that
@@ -222,18 +253,18 @@ page or adjusting the date range alone doesn't search on its own.
 
 | Term | Matches |
 |---|---|
-| `category:bonspiel` | A category — bookings and Club Events both use this prefix, e.g. `league`, `bonspiel`, `practiceice`, `closure` |
+| `category:bonspiel` | A category — on-ice and off-ice events both use this prefix, e.g. `league`, `bonspiel`, `practiceice`, `closure` |
 | `day:saturday` | A day of the week — full name or 3-letter abbreviation (`sat`) |
-| `type:booking` / `type:clubevent` | Restrict results to just sheet bookings or just Club Events |
-| any other word | Matches the title — a renter's name for a booking, the event name for a Club Event |
+| `type:on-ice` / `type:off-ice` | Restrict results to just on-ice or just off-ice events (the older `type:booking` / `type:clubevent` still work) |
+| any other word | Matches the title — a renter's name for an on-ice booking, the event name for an off-ice event |
 
 Terms combine — `category:league day:tuesday junior` finds Tuesday league bookings with "junior" in
 the name. Multiple `day:` or `category:` terms combine as *either*: `day:saturday day:sunday` finds
 anything on the weekend.
 
-`category:bonspiel` deliberately matches **both** a sheet-booking Bonspiel and a Club Event under "Out
+`category:bonspiel` deliberately matches **both** an on-ice Bonspiel and an off-ice event under "Out
 of Town Bonspiels" — a note explains this and suggests `category:outoftownbonspiels` or
-`type:booking` if you meant just one, since both were included in the search.
+`type:on-ice` if you meant just one, since both were included in the search.
 
 Search only looks at **titles and categories** — not phone numbers, email addresses, or notes. Open a
 result to see that information; it was never meant to be searchable text.
@@ -256,8 +287,8 @@ Whenever a red conflict banner appears, it lists one of two kinds of conflict:
 
 - **A sheet conflict** — another booking already occupies that sheet/time. Shown as
   `Sheet N: <time range> (<category>)`.
-- **A closure conflict** — a Club Event marked "closes all sheets" overlaps the requested time.
-  Shown as `Club event "<title>": <time range> — closes all sheets`.
+- **A closure conflict** — an off-ice event marked "closes all sheets" overlaps the requested time.
+  Shown as `Off-ice event "<title>": <time range> — closes all sheets`.
 
 For a single booking or edit, either kind blocks the save entirely — nothing is written until you
 change the sheets or time. For the series wizard's review step, conflicts are informational: you
@@ -290,7 +321,7 @@ default) and nothing is hidden.
 
 Rejects new bookings — the staff form, series, and member practice ice requests — outside a
 start/end window, and stops the public search tool, the widget, and practice ice from advertising
-off-season slots in the first place. **Club Events are exempt** — closures, off-season committee
+off-season slots in the first place. **Off-ice events are exempt** — closures, off-season committee
 meetings, and next season's planning still go on the calendar regardless of this setting. Either date
 can be left blank to leave that side unrestricted (e.g. a start date with no end lets bookings begin
 once the season opens, with no cutoff on how far out they can go). Set one or both dates and click
@@ -308,7 +339,7 @@ much detail it captures.
 
 **Logging Level** — two options:
 
-- **Standard** (the default) — records only definitive actions: a booking, series, or Club Event
+- **Standard** (the default) — records only definitive actions: a booking, series, or off-ice event
   created, edited, or canceled, who did it, and which sheet/event it affects. This is what you'll
   normally leave it on.
 - **Debug** — adds staff sign-in events, full detail on every notification received from the
