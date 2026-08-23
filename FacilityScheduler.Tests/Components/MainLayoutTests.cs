@@ -55,7 +55,7 @@ public class MainLayoutTests : BunitContext
     }
 
     private static readonly string[] StaffOnlyLabels =
-        ["Staff Calendar", "Club Events", "Search", "Practice Ice Approvals", "Settings"];
+        ["Staff Calendar", "Off-Ice Events", "Search", "Practice Ice Approvals", "Settings"];
 
     // Reachable by anyone signed in - the two anonymous public pages, plus the way back out.
     private static readonly string[] AlwaysVisibleLabels =

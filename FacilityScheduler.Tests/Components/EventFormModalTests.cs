@@ -180,6 +180,24 @@ public class EventFormModalTests : BunitContext
     }
 
     [Fact]
+    public void AllowModeToggleFalse_LocksTheModeEvenWhenCreating()
+    {
+        // The Off-Ice Events page saves off-ice unconditionally, so a live toggle there would let a
+        // save land somewhere that page can't show.
+        var draft = CreateDraft(EventMode.OffIce);
+        StaffPageServices.Register(this);
+        var cut = Render<EventFormModal>(p => p
+            .Add(m => m.IsOpen, true)
+            .Add(m => m.Draft, draft)
+            .Add(m => m.AllowModeToggle, false));
+
+        Assert.DoesNotContain("On the ice", cut.Markup);
+        var badge = cut.FindAll("span").First(s => s.TextContent.Trim() == "Off the ice");
+        Assert.Throws<Bunit.MissingEventHandlerException>(() => badge.Click());
+        Assert.Equal(EventMode.OffIce, draft.Mode);
+    }
+
+    [Fact]
     public void CreatingAnEvent_ShowsBothToggleOptions()
     {
         var cut = RenderModal(CreateDraft(EventMode.OnIce));

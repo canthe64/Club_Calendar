@@ -50,14 +50,17 @@
                             }
                         </span>
                         <span style="margin-left:auto;display:flex;gap:0">
-                            @if (Draft.IsEditing)
+                            @if (ModeIsLocked)
                             {
-                                @* Converting a saved event between modes would mean deleting N events
-                                   across N sheet mailboxes and creating one on the club-events mailbox,
-                                   non-transactionally across two deliberately-decoupled services, with
-                                   no rollback path. Shown as a locked badge rather than silently
-                                   omitted so the mode is still legible while editing. *@
-                                <span title="An existing event can't be moved between on-ice and off-ice — delete it and create a new one."
+                                @* Locked for two reasons. Editing: converting a saved event between
+                                   modes would mean deleting N events across N sheet mailboxes and
+                                   creating one on the club-events mailbox, non-transactionally across
+                                   two deliberately-decoupled services, with no rollback path. Or the
+                                   host page only deals in one mode (the Off-Ice Events list), where a
+                                   toggle would let a save land somewhere that page can't show.
+                                   Rendered as a visible badge rather than omitted so the mode stays
+                                   legible either way. *@
+                                <span title="@(Draft.IsEditing ? "An existing event can't be moved between on-ice and off-ice — delete it and create a new one." : "Create an on-ice event from the calendar.")"
                                       style="background:#f1f4f6;color:#90a0ab;border:1px solid #d7dfe5;padding:4px 12px;border-radius:6px;font-weight:600;cursor:default">
                                     @(IsOnIce ? "On the ice" : "Off the ice")
                                 </span>
@@ -290,10 +293,16 @@
     [Parameter] public EventCallback OnCancel { get; set; }
     [Parameter] public EventCallback OnDelete { get; set; }
 
+    /// <summary>False on a host page that only deals in one mode - the Off-Ice Events list, whose save
+    /// path writes off-ice unconditionally. Defaults to true so the calendar, which handles both, gets
+    /// the toggle without opting in.</summary>
+    [Parameter] public bool AllowModeToggle { get; set; } = true;
+
     private bool _confirmingDelete;
     private bool _wasOpen;
 
     private bool IsOnIce => Draft.Mode == EventMode.OnIce;
+    private bool ModeIsLocked => Draft.IsEditing || !AllowModeToggle;
     private bool ShowTimePickers => IsOnIce || !Draft.OffIce.IsAllDay;
 
     // Read/write proxies for the fields both modes share, so the markup stays one copy rather than
@@ -319,7 +328,7 @@
 
     private void SetMode(EventMode mode)
     {
-        if (!Draft.IsEditing)
+        if (!ModeIsLocked)
         {
             Draft.SetMode(mode);
         }

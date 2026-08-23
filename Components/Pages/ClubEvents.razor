@@ -6,13 +6,13 @@
 @inject AuthenticationStateProvider AuthProvider
 @inject FacilityConfiguration Facility
 
-<PageTitle>Club Events</PageTitle>
+<PageTitle>Off-Ice Events</PageTitle>
 
 <div style="padding:16px 24px">
     <div style="display:flex;align-items:center;gap:14px;margin-bottom:14px">
-        <span style="font-size:18px;font-weight:600;color:#1e2a33">Club Events</span>
-        <span style="font-size:15px;color:#90a0ab">Whole-club events - bonspiels, tournaments, closures. Not tied to a sheet.</span>
-        <span @onclick="OpenCreateForm" style="margin-left:auto;background:#c62f2f;color:#fff;padding:8px 15px;border-radius:6px;font-weight:600;font-size:15.5px;cursor:pointer">+ New Club Event</span>
+        <span style="font-size:18px;font-weight:600;color:#1e2a33">Off-Ice Events</span>
+        <span style="font-size:15px;color:#90a0ab">Everything that isn't on the ice - bonspiels away, meetings, closures, social events.</span>
+        <span @onclick="OpenCreateForm" style="margin-left:auto;background:#c62f2f;color:#fff;padding:8px 15px;border-radius:6px;font-weight:600;font-size:15.5px;cursor:pointer">+ New Event</span>
     </div>
 
     @if (_loading)
@@ -24,7 +24,7 @@
         <div style="font-size:13px;font-weight:600;color:#90a0ab;letter-spacing:.05em;margin-bottom:6px">UPCOMING</div>
         @if (_upcoming.Count == 0)
         {
-            <div style="color:#c1ccd4;font-size:13px;margin-bottom:16px">No upcoming club events.</div>
+            <div style="color:#c1ccd4;font-size:13px;margin-bottom:16px">No upcoming off-ice events.</div>
         }
         else
         {
@@ -48,7 +48,7 @@
         <div style="font-size:13px;font-weight:600;color:#90a0ab;letter-spacing:.05em;margin-bottom:6px">PAST</div>
         @if (_past.Count == 0)
         {
-            <div style="color:#c1ccd4;font-size:13px">No past club events in the last 30 days.</div>
+            <div style="color:#c1ccd4;font-size:13px">No past off-ice events in the last 30 days.</div>
         }
         else
         {
@@ -71,7 +71,7 @@
     }
 </div>
 
-<ClubEventFormModal IsOpen="_formOpen" Draft="_draft" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" OnDelete="DeleteDraft" />
+<EventFormModal IsOpen="_formOpen" Draft="_draft" AllowModeToggle="false" IsSaving="_isSaving" OnSave="SaveDraft" OnCancel="CloseForm" OnDelete="DeleteDraft" />
 
 @code {
     private bool _loading = true;
@@ -79,7 +79,7 @@
     private List<ClubEvent> _past = [];
 
     private bool _formOpen;
-    private ClubEventDraft _draft = new();
+    private EventDraft _draft = new();
     private bool _isSaving;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -99,16 +99,19 @@
         _loading = false;
     }
 
+    // Anchored on today, unlike the calendar page's own create path - this page has no "currently in
+    // view" date to anchor to. The dialog opens locked to off-ice: this page only manages off-ice
+    // events, so offering the toggle here would let a save land somewhere the list can't show.
     private void OpenCreateForm()
     {
-        _draft = new ClubEventDraft();
-        _draft.Reset(Facility.Today);
+        _draft = new EventDraft();
+        _draft.ResetForCreate(EventMode.OffIce, Facility.Today);
         _formOpen = true;
     }
 
     private void StartEdit(ClubEvent e)
     {
-        _draft = new ClubEventDraft();
+        _draft = new EventDraft();
         _draft.LoadForEdit(e);
         _formOpen = true;
     }
@@ -120,7 +123,7 @@
 
     private async Task SaveDraft()
     {
-        if (_isSaving || !_draft.Category.HasValue || string.IsNullOrWhiteSpace(_draft.Title) || _draft.EndDate.Date < _draft.StartDate.Date)
+        if (_isSaving || !EventDraft.Validate(_draft).CanSave)
         {
             return;
         }
@@ -131,9 +134,9 @@
         try
         {
             var bookedBy = await GetCurrentUserNameAsync();
-            var clubEvent = _draft.ToClubEvent(bookedBy);
+            var clubEvent = _draft.OffIce.ToClubEvent(bookedBy);
 
-            if (_draft.EditingEvent is null)
+            if (_draft.OffIce.EditingEvent is null)
             {
                 await EventService.CreateAsync(clubEvent, bookedBy);
             }
@@ -153,13 +156,13 @@
 
     private async Task DeleteDraft()
     {
-        if (_draft.EditingEvent?.EventId is null)
+        if (_draft.OffIce.EditingEvent?.EventId is null)
         {
             return;
         }
 
         var actingUser = await GetCurrentUserNameAsync();
-        await EventService.CancelAsync(_draft.EditingEvent.EventId, actingUser);
+        await EventService.CancelAsync(_draft.OffIce.EditingEvent.EventId, actingUser);
         CloseForm();
         await LoadAsync();
     }

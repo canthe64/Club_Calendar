@@ -1390,7 +1390,7 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
     // Sentinel SheetMailbox, matching the class of trick ClosureConflict already uses for a
     // non-sheet blocker shown through the same conflict-rendering UI as a real double-booking - but
     // distinct from ClosureConflict's own "" sentinel, since that one renders hardcoded "closes all
-    // sheets" wording in BookingFormModal that would be wrong here.
+    // sheets" wording in EventFormModal that would be wrong here.
     private const string SeasonConflictSheetMailbox = "__season__";
 
     private static SheetBooking OutOfSeasonConflict(DateTime start, DateTime end, DateTime? seasonStart, DateTime? seasonEnd) => new()
