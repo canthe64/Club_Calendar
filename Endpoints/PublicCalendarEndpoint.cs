@@ -333,7 +333,7 @@ public static class PublicCalendarEndpoint
 
         return $"""
             <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px;flex-wrap:wrap">
-                <span style="font-size:16px;font-weight:600;color:#1e2a33">{H(titleText)}</span>
+                <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:250px;display:inline-block">{H(titleText)}</span>
                 <span style="display:flex;align-items:center;gap:8px;font-size:12px">
                     <a href="{prevHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">&#8249;</a>
                     <a href="{todayHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">Today</a>
@@ -420,11 +420,11 @@ public static class PublicCalendarEndpoint
                 {viewField}
                 {anchorField}
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:52px;flex-shrink:0">ON ICE</span>
+                    <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:68px;flex-shrink:0;white-space:nowrap">ON ICE</span>
                     {string.Join("", onIceLabels)}
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-                    <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:52px;flex-shrink:0">OFF ICE</span>
+                    <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:68px;flex-shrink:0;white-space:nowrap">OFF ICE</span>
                     {string.Join("", offIceLabels)}
                     <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
                 </div>
