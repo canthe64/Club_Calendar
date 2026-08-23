@@ -154,4 +154,44 @@ public class CalendarStylesTests
 
         Assert.Equal(CalendarStyles.CategoryLabel(BookingCategory.League), CalendarStyles.BookingDisplayTitle(booking));
     }
+
+    // The toolbar date label's width floor stops the nav controls next to it shifting while you step
+    // through dates. These pin the two properties that matter: each view gets enough room for the
+    // widest string its own format can produce, and the three are ordered by how long those strings
+    // get - so a future format change that outgrows its box shows up here rather than as controls
+    // that quietly start moving again.
+    [Theory]
+    [InlineData("Month", 132)]
+    [InlineData("Week", 182)]
+    [InlineData("Day", 260)]
+    public void AnchorLabelMinWidth_MatchesTheMeasuredWidthForEachView(string view, int expected)
+    {
+        Assert.Equal(expected, CalendarStyles.AnchorLabelMinWidthPx(view));
+    }
+
+    [Theory]
+    [InlineData("month")]
+    [InlineData("MONTH")]
+    [InlineData("Day")]
+    public void AnchorLabelMinWidth_IsCaseInsensitive(string view)
+    {
+        // Callers pass their own ViewMode.ToString() ("Month"), while the URLs both calendars build
+        // use the lowercase form - both have to resolve to the same box.
+        Assert.Equal(CalendarStyles.AnchorLabelMinWidthPx(view.ToLowerInvariant()), CalendarStyles.AnchorLabelMinWidthPx(view));
+    }
+
+    [Fact]
+    public void AnchorLabelMinWidth_UnknownView_FallsBackToTheMonthWidth()
+    {
+        // Month is the narrowest and the default view, so an unrecognized name degrades to a small
+        // box that still renders in full (min-width is a floor, not a clip) rather than a dead gap.
+        Assert.Equal(CalendarStyles.AnchorLabelMinWidthPx("Month"), CalendarStyles.AnchorLabelMinWidthPx("agenda"));
+    }
+
+    [Fact]
+    public void AnchorLabelMinWidth_GrowsWithHowLongEachViewsLabelGets()
+    {
+        Assert.True(CalendarStyles.AnchorLabelMinWidthPx("Month") < CalendarStyles.AnchorLabelMinWidthPx("Week"));
+        Assert.True(CalendarStyles.AnchorLabelMinWidthPx("Week") < CalendarStyles.AnchorLabelMinWidthPx("Day"));
+    }
 }

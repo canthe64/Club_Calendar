@@ -333,7 +333,7 @@ public static class PublicCalendarEndpoint
 
         return $"""
             <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px;flex-wrap:wrap">
-                <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:250px;display:inline-block">{H(titleText)}</span>
+                <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:{CalendarStyles.AnchorLabelMinWidthPx(current.ToString())}px;display:inline-block">{H(titleText)}</span>
                 <span style="display:flex;align-items:center;gap:8px;font-size:12px">
                     <a href="{prevHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">&#8249;</a>
                     <a href="{todayHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">Today</a>

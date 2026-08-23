@@ -229,6 +229,31 @@ public static class CalendarStyles
     public static readonly int LastHour = HourRows[^1] + 1; // exclusive upper bound (midnight cap)
     public const double PxPerHour = RowHeightPx + RowGapPx;
 
+    /// <summary>
+    /// A width floor for the calendar toolbar's date label, so the ‹/Today/› controls immediately
+    /// right of it hold still while you step through dates. Without one the label sizes to its
+    /// content and the controls move under the cursor - enough that clicking Next twice can land the
+    /// second click somewhere else.
+    ///
+    /// Per view, not one global maximum: a single floor sized for Day view's longest string left a
+    /// large dead gap in Month view, and nobody expects the controls to stay put across a view
+    /// *switch* - only while stepping within one. Each value is the widest string that format can
+    /// produce, measured exhaustively in the app's own 16px/600 font stack, plus ~10% headroom for
+    /// host font-stack variance (the same variance that wrapped "OFF ICE" on a machine where it
+    /// measured 46px inside a 52px box):
+    ///   month "September 2026" 120px | week "May 28 - May 30, 2026" 166px |
+    ///   day "Wednesday, September 30, 2026" 237px.
+    ///
+    /// Keyed by the lowercase view name both calendars already use in their own URLs, since the
+    /// staff and public pages each have their own private ViewMode enum.
+    /// </summary>
+    public static int AnchorLabelMinWidthPx(string view) => view.ToLowerInvariant() switch
+    {
+        "day" => 260,
+        "week" => 182,
+        _ => 132,
+    };
+
     public static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
 
     /// <summary>Hours-from-midnight as a double (not DateTime.Hour) so a half-hour start/end (e.g.

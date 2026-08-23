@@ -14,11 +14,11 @@
 <div style="padding:16px 24px">
     <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:10px">
         @* min-width, not width: the nav controls sit immediately right of this label, so letting it
-           size to its content moved ‹/Today/› by several pixels on every step (September vs May,
-           or Month's "August 2026" vs Day's "Wednesday, September 30, 2026") - enough that a second
-           click landed somewhere else. Sized for the widest of the three AnchorLabel formats. A floor
-           rather than a fixed width so an unexpectedly long string still renders in full. *@
-        <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:250px;display:inline-block">@AnchorLabel</span>
+           size to its content moved ‹/Today/› by several pixels on every step - enough that a second
+           click landed somewhere else. Sized per view (CalendarStyles.AnchorLabelMinWidthPx) rather
+           than to one global maximum, which left a dead gap in Month view. A floor rather than a
+           fixed width, so an unexpectedly long string still renders in full instead of clipping. *@
+        <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:@(CalendarStyles.AnchorLabelMinWidthPx(View.ToString()))px;display:inline-block">@AnchorLabel</span>
         <span style="display:flex;align-items:center;gap:8px;font-size:14px;color:#1e2a33">
             <span @onclick="GoPrevious" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 5px">&#8249;</span>
             <span @onclick="GoToday" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 5px">Today</span>
