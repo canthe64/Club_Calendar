@@ -28,7 +28,7 @@ The design is based around minimizing additional expense by utilizing your exist
 
 Each sheet of ice is modeled as an Exchange Online (EXO) resource mailbox, and every booking is a calendar event on that mailbox. There is no adjacent database — Exchange is the system of record, including for booking metadata like renter contact and notes. Outlook is not required and in fact discouraged for calendar management (only to be used as a backup if the app breaks for some reason).
 
-**Status:** As-built and in production use at one club. Licensed under Apache-2.0.
+**Status:** As-built and in production use at one club. Licensed under BSD-3-Clause.
 
 ---
 
@@ -184,4 +184,4 @@ What does change per facility is vocabulary and slot-granularity rules, which li
 
 ## License
 
-Apache License 2.0. See [LICENSE](LICENSE).
+BSD 3-Clause License. See [LICENSE](LICENSE).
