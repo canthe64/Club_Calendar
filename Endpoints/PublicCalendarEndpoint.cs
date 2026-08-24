@@ -297,6 +297,7 @@ public static class PublicCalendarEndpoint
             <meta charset="utf-8">
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Club Calendar</title>
+            <link rel="icon" type="image/svg+xml" href="/favicon.svg">
             </head>
             <body style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;margin:0;color:#1e2a33">
             <header style="background:#1e2a33;color:#fff;padding:10px 24px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:16px">
