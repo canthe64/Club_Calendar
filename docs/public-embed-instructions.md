@@ -44,8 +44,8 @@ Event holds mean "open for the public to book."
 There's also a complete, anonymous calendar page at `https://YOUR-APP-HOSTNAME/public/calendar` -
 Month, Week, and Day views (a toggle in the header switches between them, same as the staff
 calendar), Prev/Next/Today navigation, every category shown (League, Bonspiel, Maintenance,
-Practice Ice, Other, Group Event - not just open slots), plus club events (with a dotted border
-distinguishing them from sheet bookings, same as the staff calendar). This is the *primary* public
+Practice Ice, Other, Group Event - not just open slots), plus off-ice events, each shown in its own
+category color and filterable separately (D99). This is the *primary* public
 view; the list-style widget above is a subordinate, availability-focused feature.
 
 - `?view=month` (default), `?view=week`, or `?view=day` selects the view.

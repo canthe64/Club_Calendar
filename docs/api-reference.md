@@ -144,10 +144,8 @@ silent while the server computes the next view.
 
 **Response `200 OK`** — `text/html; charset=utf-8`
 
-**Month view:** a 7-column month grid with color-coded entry chips (confirmed booking, hold, club
-event - club event chips get a dotted border, matching the staff calendar's visual language for
-distinguishing them from sheet bookings). Every day shows up to 3 entries with a "+N more" expander
-for busier days.
+**Month view:** a 7-column month grid with color-coded entry chips (confirmed booking, hold, off-ice
+event). Every day shows up to 3 entries with a "+N more" expander for busier days.
 
 **Week view** (7-day) **and Day view** (single day): hourly grids sharing the same hour-axis math
 and lane-layout algorithm as the staff Week/Day grids (`CalendarStyles.LayoutLanes`) - genuinely

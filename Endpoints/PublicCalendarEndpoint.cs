@@ -438,7 +438,6 @@ public static class PublicCalendarEndpoint
             <div style="display:flex;gap:16px;margin-top:12px;font-size:13px;color:#5a7183;flex-wrap:wrap">
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#2d5f8a;vertical-align:-2px"></span> Confirmed</span>
                 <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#eaf1f8;border:1.5px dashed #2d5f8a;vertical-align:-2px"></span> Hold (not yet confirmed)</span>
-                <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#c2622f;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;vertical-align:-2px"></span> Off-ice event — dotted outline</span>
             </div>
             """);
     }
@@ -498,7 +497,7 @@ public static class PublicCalendarEndpoint
             var cellTitle = $"{(ceContBefore ? "← " : "")}{cellTitleText}{(ceContAfter ? " →" : "")}";
             sb.Append($"""
                 <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(note)}"
-                     style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
+                     style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:none;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
                 """);
         }
 
@@ -644,7 +643,7 @@ public static class PublicCalendarEndpoint
                 var chipText = $"{(ceContBefore ? "← " : "")}{text}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}"
-                         style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:{CalendarStyles.ClubEventBorderStyle};box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(chipText)}</div>
+                         style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:none;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(chipText)}</div>
                     """);
             }
             sb.Append("</div>");
@@ -675,7 +674,7 @@ public static class PublicCalendarEndpoint
                 var title = $"{(ceContBefore ? "← " : "")}{titleText}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
                     <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}"
-                         style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:{CalendarStyles.ClubEventBorderStyle};color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
+                         style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:none;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
                     """);
             }
             else if (laid.Item.Booking is { } b)
