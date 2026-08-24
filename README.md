@@ -106,8 +106,8 @@ Full detail, including the design decision record and the reasoning behind rejec
 ## Getting started
 
 ```bash
-git clone https://github.com/canthe64/GCC_Calendar.git
-cd GCC_Calendar
+git clone https://github.com/canthe64/Club_Calendar.git
+cd Club_Calendar
 dotnet restore
 ```
 
