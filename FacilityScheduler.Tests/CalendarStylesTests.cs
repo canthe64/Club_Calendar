@@ -155,6 +155,30 @@ public class CalendarStylesTests
         Assert.Equal(CalendarStyles.CategoryLabel(BookingCategory.League), CalendarStyles.BookingDisplayTitle(booking));
     }
 
+    [Fact]
+    public void TruncateForConflictDisplay_ShortTitle_ReturnedUnchanged()
+    {
+        Assert.Equal("Smith Wedding", CalendarStyles.TruncateForConflictDisplay("Smith Wedding"));
+    }
+
+    [Fact]
+    public void TruncateForConflictDisplay_TitleLongerThanTheCap_TrimsAndAppendsAnEllipsis()
+    {
+        var title = new string('a', 60);
+
+        var result = CalendarStyles.TruncateForConflictDisplay(title, maxChars: 40);
+
+        Assert.Equal(41, result.Length); // 40 kept chars + the ellipsis
+        Assert.EndsWith("…", result);
+        Assert.StartsWith(new string('a', 40), result);
+    }
+
+    [Fact]
+    public void TruncateForConflictDisplay_NullTitle_ReturnsEmptyString()
+    {
+        Assert.Equal("", CalendarStyles.TruncateForConflictDisplay(null));
+    }
+
     // The toolbar date label's width floor stops the nav controls next to it shifting while you step
     // through dates. These pin the two properties that matter: each view gets enough room for the
     // widest string its own format can produce, and the three are ordered by how long those strings

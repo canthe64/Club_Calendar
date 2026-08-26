@@ -78,7 +78,8 @@
                     <div style="color:#5a7183">
                         @foreach (var conflict in Conflicts.Take(6))
                         {
-                            <div>@conflict.Start.ToString("ddd MMM d") — @(string.IsNullOrWhiteSpace(conflict.RenterName) ? CalendarStyles.CategoryLabel(conflict.Category) : conflict.RenterName)</div>
+                            @* Narrower dialog (460px) than EventFormModal's - a shorter cap keeps room for the date prefix already on this same line. *@
+                            <div>@conflict.Start.ToString("ddd MMM d") — @(string.IsNullOrWhiteSpace(conflict.RenterName) ? CalendarStyles.CategoryLabel(conflict.Category) : CalendarStyles.TruncateForConflictDisplay(conflict.RenterName, maxChars: 28))</div>
                         }
                         @if (Conflicts.Count > 6)
                         {

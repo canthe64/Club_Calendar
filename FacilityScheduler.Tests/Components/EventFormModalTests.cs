@@ -318,6 +318,72 @@ public class EventFormModalTests : BunitContext
     }
 
     [Fact]
+    public void SheetConflict_WithARenterName_IncludesItAsTheConflictingEventTitle()
+    {
+        // Staff feedback: the conflicts panel only showed the sheet, time, and category - not enough
+        // to tell which of several same-category bookings it actually collided with.
+        StaffPageServices.Register(this);
+        var cut = Render<EventFormModal>(p => p
+            .Add(m => m.IsOpen, true)
+            .Add(m => m.Draft, CreateDraft(EventMode.OnIce))
+            .Add(m => m.Conflicts, [new SheetBooking
+            {
+                SheetMailbox = "sheet1@test.onmicrosoft.com",
+                Start = Today.AddHours(18),
+                End = Today.AddHours(20),
+                Category = BookingCategory.GroupEvent,
+                State = BookingState.Confirmed,
+                RenterName = "Smith Birthday Party",
+            }]));
+
+        Assert.Contains("\"Smith Birthday Party\"", cut.Markup);
+    }
+
+    [Fact]
+    public void SheetConflict_WithNoRenterName_DoesNotAppendARedundantTitle()
+    {
+        // No renter name means the category label already is the event's effective title (that's
+        // exactly what SheetBookingService.ToGraphEvent falls back to) - showing it a second time in
+        // quotes right next to the category would just be noise.
+        StaffPageServices.Register(this);
+        var cut = Render<EventFormModal>(p => p
+            .Add(m => m.IsOpen, true)
+            .Add(m => m.Draft, CreateDraft(EventMode.OnIce))
+            .Add(m => m.Conflicts, [new SheetBooking
+            {
+                SheetMailbox = "sheet1@test.onmicrosoft.com",
+                Start = Today.AddHours(18),
+                End = Today.AddHours(20),
+                Category = BookingCategory.League,
+                State = BookingState.Confirmed,
+            }]));
+
+        Assert.DoesNotContain("—\"", cut.Markup);
+        Assert.DoesNotContain(" — \"", cut.Markup);
+    }
+
+    [Fact]
+    public void SheetConflict_WithALongRenterName_IsTruncatedWithAnEllipsis()
+    {
+        StaffPageServices.Register(this);
+        var cut = Render<EventFormModal>(p => p
+            .Add(m => m.IsOpen, true)
+            .Add(m => m.Draft, CreateDraft(EventMode.OnIce))
+            .Add(m => m.Conflicts, [new SheetBooking
+            {
+                SheetMailbox = "sheet1@test.onmicrosoft.com",
+                Start = Today.AddHours(18),
+                End = Today.AddHours(20),
+                Category = BookingCategory.GroupEvent,
+                State = BookingState.Confirmed,
+                RenterName = "A Very Long Renter Name That Would Otherwise Overflow The Dialog Width",
+            }]));
+
+        Assert.Contains("…\"", cut.Markup);
+        Assert.DoesNotContain("Dialog Width", cut.Markup);
+    }
+
+    [Fact]
     public void ClosureConflict_ReadsAsAnOffIceEvent_NotAClubEvent()
     {
         StaffPageServices.Register(this);

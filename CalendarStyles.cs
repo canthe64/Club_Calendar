@@ -107,6 +107,15 @@ public static class CalendarStyles
     public static string BookingDisplayTitle(SheetBooking b) =>
         string.IsNullOrWhiteSpace(b.RenterName) ? CategoryLabel(b.Category) : b.RenterName;
 
+    /// <summary>Caps a title shown in a conflict list (staff feedback: include the conflicting
+    /// event's title, but a long renter name or off-ice event title shouldn't overflow the dialog
+    /// it's rendered in). Shared by every conflicts panel rather than each picking its own limit.</summary>
+    public static string TruncateForConflictDisplay(string? title, int maxChars = 40)
+    {
+        var text = title ?? "";
+        return text.Length <= maxChars ? text : text[..maxChars].TrimEnd() + "…";
+    }
+
     public static string EmptySlotBg { get; } = "#f6f8f9";
 
     /// <summary>
