@@ -161,7 +161,7 @@
                                 <span style="display:flex;gap:8px;align-items:center">
                                     @if (hasConflict && !isSkipped)
                                     {
-                                        <span style="font-size:12px;color:#a02c21">conflicts with @conflictList!.Count booking(s)</span>
+                                        <span style="font-size:12px;color:#a02c21">conflicts with @ConflictSummary(conflictList!)</span>
                                     }
                                     <span @onclick="() => ToggleSkip(date)" style="border:1px solid #d7dfe5;color:#2d5f8a;border-radius:5px;padding:2px 9px;font-weight:600;font-size:12.5px;cursor:pointer">@(isSkipped ? "Include" : "Skip")</span>
                                 </span>
@@ -299,4 +299,14 @@
         var digits = new string(localPart.Where(char.IsDigit).ToArray());
         return digits.Length > 0 ? $"Sheet {digits}" : localPart;
     }
+
+    // Staff feedback: this row only said "conflicts with N booking(s)" with nothing to tell which
+    // ones - same complaint as EventFormModal/SeriesEditModal's conflict lists, so it gets the same
+    // title treatment. Distinct() because two selected sheets can collide with the same booking
+    // (e.g. a multi-sheet League block) and repeating its title twice adds nothing. A shorter cap
+    // than the other dialogs' - this text shares its row with the date label and the Skip/Include
+    // button, not a line of its own.
+    internal static string ConflictSummary(List<SheetBooking> conflicts) =>
+        CalendarStyles.TruncateForConflictDisplay(
+            string.Join(", ", conflicts.Select(CalendarStyles.BookingDisplayTitle).Distinct()), maxChars: 30);
 }
