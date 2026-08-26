@@ -64,6 +64,34 @@ public class SheetBookingServiceTests
     }
 
     [Fact]
+    public async Task CreateAsync_ImmediatelyAdjacentBooking_SucceedsDespiteGraphsInclusiveCalendarViewBoundary()
+    {
+        // Live-found 2026-08-26: a 1pm-6pm booking request was rejected as conflicting with a
+        // pre-existing 9am-1pm event, because Graph's real calendarView returns events touching the
+        // query boundary, not just ones that actually overlap it. The default fake gateway already
+        // performs a correct strict-overlap query, so it can't reproduce that - flip on the quirk
+        // simulation to prove SheetBookingService's own re-check (not the gateway) is what protects
+        // against it.
+        var (service, gateway, facility, _) = Build();
+        gateway.SimulateInclusiveBoundaryQuirk = true;
+        var sheet = TestFacility.SheetMailboxes[0];
+        var day = facility.Today.AddDays(1);
+
+        var morning = await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(13), Category = BookingCategory.League, State = BookingState.Confirmed
+        }, "tester");
+        Assert.True(morning.IsSuccess);
+
+        var afternoon = await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(13), End = day.AddHours(18), Category = BookingCategory.GroupEvent, State = BookingState.Confirmed
+        }, "tester");
+
+        Assert.True(afternoon.IsSuccess);
+    }
+
+    [Fact]
     public async Task CreateAcrossSheetsAsync_ConflictOnOneSheet_CreatesNothingOnAnySheet()
     {
         var (service, gateway, facility, _) = Build();

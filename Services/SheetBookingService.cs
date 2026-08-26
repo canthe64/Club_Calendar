@@ -1275,8 +1275,18 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
         return FromGraphEvent(sheetMailbox, refreshed!);
     }
 
-    private Task<List<Event>> GetEventsInRangeAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct) =>
-        graph.GetCalendarViewAsync(sheetMailbox, facility.ToUtcQueryString(start), facility.ToUtcQueryString(end), ExtendedPropertiesExpand, ct: ct);
+    // Graph's calendarView is boundary-inclusive: an event ending exactly at `start` (or starting
+    // exactly at `end`) still comes back in the view even though it doesn't actually overlap
+    // [start, end) - live-found 2026-08-26, a 1pm-6pm booking request was rejected as conflicting
+    // with a pre-existing 9am-1pm event. Re-checked here with a strict overlap test so every caller
+    // (conflict checks, adjacency lookups, display reads) sees only events that genuinely overlap.
+    private async Task<List<Event>> GetEventsInRangeAsync(string sheetMailbox, DateTime start, DateTime end, CancellationToken ct)
+    {
+        var events = await graph.GetCalendarViewAsync(sheetMailbox, facility.ToUtcQueryString(start), facility.ToUtcQueryString(end), ExtendedPropertiesExpand, ct: ct);
+        return events.Where(e =>
+            facility.FromUtcResponseString(e.Start?.DateTime ?? DateTime.UtcNow.ToString("o")) < end &&
+            facility.FromUtcResponseString(e.End?.DateTime ?? DateTime.UtcNow.ToString("o")) > start).ToList();
+    }
 
     /// <summary>
     /// Best-effort compensation for a multi-sheet write that failed partway through: deletes the

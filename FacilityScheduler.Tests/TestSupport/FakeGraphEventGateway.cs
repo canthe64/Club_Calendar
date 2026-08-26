@@ -42,6 +42,13 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
     public Func<Task>? DelayDuringCalendarView { get; set; }
     public Func<Task>? DelayDuringFindEvents { get; set; }
 
+    /// <summary>Off by default (this fake's calendarView is a correct strict-overlap query). Flip
+    /// on to reproduce real Graph's boundary-inclusive calendarView behavior - an event ending
+    /// exactly at the query's start, or starting exactly at its end, is still returned - so a test
+    /// can pin that SheetBookingService's own defensive re-check (not this fake) is what protects
+    /// production against it.</summary>
+    public bool SimulateInclusiveBoundaryQuirk { get; set; }
+
     private static readonly Regex ExtendedPropertyFilter =
         new(@"ep/id eq '(?<id>[^']+)' and ep/value eq '(?<value>[^']*)'", RegexOptions.Compiled);
 
@@ -141,7 +148,9 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
 
         lock (_gate)
         {
-            return ExpandedView(mailbox).Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start).Select(Clone).ToList();
+            return SimulateInclusiveBoundaryQuirk
+                ? ExpandedView(mailbox).Where(e => ToUtc(e.Start) <= end && ToUtc(e.End) >= start).Select(Clone).ToList()
+                : ExpandedView(mailbox).Where(e => ToUtc(e.Start) < end && ToUtc(e.End) > start).Select(Clone).ToList();
         }
     }
 
