@@ -6,9 +6,9 @@
     <div style="display:flex;gap:3px;font-size:13px">
         <div style="width:56px;flex-shrink:0">
             <div style="height:20px"></div>
-            @if (AllDayClubEvents.Count > 0)
+            @if (ClubEventBand.Count > 0)
             {
-                <div style="height:@(AllDayRowHeightPx)px"></div>
+                <div style="height:@(ClubEventBandHeightPx)px"></div>
             }
             @foreach (var hour in CalendarStyles.HourRows)
             {
@@ -16,6 +16,30 @@
                 <div style="height:@(CalendarStyles.RowGapPx)px"></div>
             }
         </div>
+        @* The hour rails for timed club events, in their own narrow strip rather than over the sheet
+           columns. A club event belongs to no sheet, so it has no honest column to occupy - but its
+           band row alone can't say WHEN it runs, which is what moving club events into the timeline
+           bought in the first place (D19). The rail carries that, and because it lives outside the
+           sheet area it can never paint over a booking. Rail colour is exactly its band row's fill -
+           the category colour, with no separate treatment for a closure, because the rail's whole
+           job is to point at one row of the band. ("All sheets closed" is already carried by that
+           row's own label via ClubEventText.) Two concurrent events of the same category are told
+           apart by lane position, not by giving one a colour that isn't its category's. *@
+        @if (TimedClubEvents.Count > 0)
+        {
+            <div style="width:@(RailStripWidthPx)px;flex-shrink:0">
+                <div style="height:20px"></div>
+                <div style="height:@(ClubEventBandHeightPx)px"></div>
+                <div style="position:relative;height:@(HourColumnHeightPx)px">
+                    @foreach (var laid in CalendarStyles.LayoutLanes(TimedClubEvents, ce => ce.Start, ce => ce.ExclusiveEnd))
+                    {
+                        var ce = laid.Item;
+                        <div title="@ClubEventText(ce, Date)"
+                             style="position:absolute;pointer-events:none;top:@(CalendarStyles.TopPx(ce.Start, Date))px;left:@(laid.Lane * (RailWidthPx + RailGapPx))px;width:@(RailWidthPx)px;height:@(CalendarStyles.HeightPx(ce.Start, ce.ExclusiveEnd, Date))px;border-radius:3px;background:@CalendarStyles.ClubEventCategoryColor(ce.Category)"></div>
+                    }
+                </div>
+            </div>
+        }
         <div style="flex:1;min-width:0">
             <div style="display:flex;gap:3px">
                 @foreach (var sheet in Facility.SheetMailboxes)
@@ -23,10 +47,15 @@
                     <div style="flex:1;text-align:center;color:#5a7183;font-weight:600;height:20px">@SheetLabel(sheet)</div>
                 }
             </div>
-            @if (AllDayClubEvents.Count > 0)
+            @* One band for every club event on this day, all-day and timed alike. Timed ones used to
+               be full-width absolute overlays inside the hourly grid, which meant two overlapping
+               club events painted over each other and over every booking underneath (live-found
+               2026-08-27). They're rows here instead, so they stack instead of collide; their
+               position in time is carried by the rails to the left. *@
+            @if (ClubEventBand.Count > 0)
             {
                 <div style="display:flex;flex-direction:column;gap:2px;padding:2px 0 4px">
-                    @foreach (var ce in AllDayClubEvents)
+                    @foreach (var ce in ClubEventBand)
                     {
                         <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
                              style="background:@CalendarStyles.ClubEventCategoryColor(ce.Category);color:#fff;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;border-radius:4px;padding:3px 8px;font-size:12.5px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">
@@ -74,18 +103,6 @@
                         </div>
                     }
                 </div>
-                @if (TimedClubEvents.Count > 0)
-                {
-                    <div style="position:absolute;inset:0;pointer-events:none">
-                        @foreach (var ce in TimedClubEvents)
-                        {
-                            <div @onclick="() => OnClubEventClick.InvokeAsync(ce)"
-                                 style="pointer-events:auto;box-sizing:border-box;position:absolute;top:@(CalendarStyles.TopPx(ce.Start, Date))px;left:0;right:0;height:@(CalendarStyles.HeightPx(ce.Start, ce.End, Date))px;z-index:2;border-radius:5px;background:@(ce.MarksSheetsUnavailable ? "#a02c21" : CalendarStyles.ClubEventCategoryColor(ce.Category));border:@CalendarStyles.ClubEventBorderStyle;color:#fff;padding:2px 6px;overflow:hidden;cursor:pointer;opacity:.92">
-                                <div style="font-size:12.5px;font-weight:600">@ClubEventText(ce, Date)</div>
-                            </div>
-                        }
-                    </div>
-                }
             </div>
         </div>
     </div>
@@ -100,6 +117,7 @@
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#1e8a8a;vertical-align:-2px"></span> Practice Ice</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#9c9690;vertical-align:-2px"></span> Other</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#6b7680;border:@CalendarStyles.ClubEventBorderStyle;box-sizing:border-box;vertical-align:-2px"></span> Off-ice event — dotted outline</span>
+        <span><span style="display:inline-block;width:5px;height:11px;border-radius:2px;background:#6b7680;vertical-align:-2px"></span> When that off-ice event runs</span>
         <span><span style="display:inline-block;width:11px;height:11px;border-radius:2px;background:#f6f8f9;border:1px solid #eef1f3;vertical-align:-2px"></span> No ice time — click to book anyway</span>
     </div>
 </div>
@@ -112,21 +130,36 @@
     [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<(string Sheet, DateTime Start)> OnSlotClick { get; set; }
 
-    private const double AllDayChipHeightPx = 20;
-    private const double AllDayChipGapPx = 2;
+    private const double ClubEventChipHeightPx = 20;
+    private const double ClubEventChipGapPx = 2;
+
+    // The rail strip's geometry. Three concurrent club events is already an unusual day, so the
+    // strip is sized for that and lets a fourth-plus rail overflow rather than shrinking every rail
+    // on every ordinary day to accommodate a case that essentially doesn't happen.
+    private const double RailWidthPx = 6;
+    private const double RailGapPx = 2;
+    private const double RailStripWidthPx = 3 * RailWidthPx + 2 * RailGapPx;
 
     private List<ClubEvent> ActiveClubEvents =>
         ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date).ToList();
 
-    // All-day club events get their own pinned row at the top of the grid (no hour to position them
-    // at); timed ones are placed directly in the hourly timeline alongside bookings, as full-width
-    // bands spanning every sheet column - both live inside the same calendar box now, not a
-    // detached banner floating above it.
-    private List<ClubEvent> AllDayClubEvents => ActiveClubEvents.Where(ce => ce.IsAllDay).OrderBy(ce => ce.Title).ToList();
+    // Every club event on this day, in one band above the hourly grid: all-day first (no hour to
+    // sort them by), then timed ones in start order. Timed events used to sit in the timeline itself
+    // as full-width overlays; see the band's own comment in the markup for why they moved.
+    private List<ClubEvent> ClubEventBand =>
+        [
+            .. ActiveClubEvents.Where(ce => ce.IsAllDay).OrderBy(ce => ce.Title),
+            .. ActiveClubEvents.Where(ce => !ce.IsAllDay).OrderBy(ce => ce.Start)
+        ];
+
     private List<ClubEvent> TimedClubEvents => ActiveClubEvents.Where(ce => !ce.IsAllDay).OrderBy(ce => ce.Start).ToList();
 
-    private double AllDayRowHeightPx =>
-        AllDayClubEvents.Count * AllDayChipHeightPx + Math.Max(0, AllDayClubEvents.Count - 1) * AllDayChipGapPx + 6;
+    private double ClubEventBandHeightPx =>
+        ClubEventBand.Count * ClubEventChipHeightPx + Math.Max(0, ClubEventBand.Count - 1) * ClubEventChipGapPx + 6;
+
+    // The rails are absolutely positioned against their own container, so it has to be exactly as
+    // tall as the hour rows it sits beside - each row is a cell plus the gap below it.
+    private static double HourColumnHeightPx => CalendarStyles.HourRows.Length * CalendarStyles.PxPerHour;
 
     // Purely informational - no change to sheet booking/conflict logic here, matching the Club
     // Events architecture decision D13 ("no cross-check in either direction").

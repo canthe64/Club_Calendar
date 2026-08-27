@@ -51,9 +51,16 @@ multiple days doesn't repeat that time on later days, since it didn't start agai
 at that hour each day. A multi-day item shows a **→** on days before its last and a **←** on days
 after its first instead, so its chips read as one continuous event rather than unrelated repeats.
 
-Off-ice events (§5) render inline in every view — a pinned row at the top for all-day events, or a
-full-width band at the right hour for timed ones — with a **dotted border** distinguishing them from
-sheet bookings (dashed = Hold, solid = Confirmed).
+Off-ice events (§5) carry a **dotted border** distinguishing them from sheet bookings (dashed = Hold,
+solid = Confirmed). Where they sit depends on the view:
+
+- **Month and Week** — inline with everything else. All-day events pin to a row at the top of their
+  column; timed ones sit at their actual hour, sharing the width with any booking running at the
+  same time.
+- **Day** — all of them, all-day and timed alike, list in a band just above the hourly grid. Day
+  view's columns are sheets, and an off-ice event isn't on a sheet, so it gets no column of its own.
+  For a timed one, a thin coloured rail in the narrow strip left of Sheet 1 shows when it runs; the
+  rail is its band row's colour, and two off-ice events happening at once get side-by-side rails.
 
 ### The SHOW rows
 
