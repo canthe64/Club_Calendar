@@ -232,9 +232,9 @@
                 {
                     <div style="display:flex;gap:8px">
                         <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Phone <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                            <input value="@Draft.OnIce.RenterPhone" @oninput="e => Draft.OnIce.RenterPhone = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
+                            <input value="@Draft.OnIce.RenterPhone" @oninput="OnPhoneInput" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                         <div style="flex:1"><div style="font-weight:600;color:#1e2a33;margin-bottom:3px">Email <span style="font-weight:400;color:#90a0ab">(optional)</span></div>
-                            <input value="@Draft.OnIce.RenterEmail" @oninput="e => Draft.OnIce.RenterEmail = e.Value?.ToString()" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
+                            <input value="@Draft.OnIce.RenterEmail" @oninput="OnEmailInput" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13px;width:100%;box-sizing:border-box"></div>
                     </div>
                 }
 
@@ -310,6 +310,38 @@
     private bool CanSave => EventDraft.Validate(Draft).CanSave;
     private string ValidationMessage => EventDraft.Validate(Draft).Message;
 
+    /// <summary>Set by the free-text handlers to mark a render that only exists because a character
+    /// was typed; see <see cref="ShouldRender"/>.</summary>
+    private bool _textOnlyEdit;
+
+    private (bool CanSave, string Message) _lastValidation;
+
+    /// <summary>
+    /// Typing in Title/Notes/Phone/Email changes exactly one thing this dialog displays: the Save
+    /// button's enabled state and the validation line under it. Everything else - the sheet chips,
+    /// the category chips, the dates, both time pickers' 58 option elements - is identical before and
+    /// after the keystroke, and re-rendering it per character is what a staff member on a
+    /// high-latency connection reported as typing lag (2026-08-27).
+    ///
+    /// So a text-only edit renders only when validation actually flips: the first character typed
+    /// into an empty title still enables Save immediately, and the 30th costs nothing. Any other
+    /// interaction, and any parameter change from the calendar page, renders normally.
+    /// </summary>
+    protected override bool ShouldRender()
+    {
+        var validation = EventDraft.Validate(Draft);
+        var wasTextOnly = _textOnlyEdit;
+        _textOnlyEdit = false;
+
+        if (wasTextOnly && validation == _lastValidation)
+        {
+            return false;
+        }
+
+        _lastValidation = validation;
+        return true;
+    }
+
     protected override void OnParametersSet()
     {
         if (IsOpen && !_wasOpen)
@@ -355,12 +387,26 @@
     {
         var value = e.Value?.ToString();
         if (IsOnIce) { Draft.OnIce.RenterName = value; } else { Draft.OffIce.Title = value; }
+        _textOnlyEdit = true;
     }
 
     private void OnNotesInput(ChangeEventArgs e)
     {
         var value = e.Value?.ToString();
         if (IsOnIce) { Draft.OnIce.Notes = value; } else { Draft.OffIce.Notes = value; }
+        _textOnlyEdit = true;
+    }
+
+    private void OnPhoneInput(ChangeEventArgs e)
+    {
+        Draft.OnIce.RenterPhone = e.Value?.ToString();
+        _textOnlyEdit = true;
+    }
+
+    private void OnEmailInput(ChangeEventArgs e)
+    {
+        Draft.OnIce.RenterEmail = e.Value?.ToString();
+        _textOnlyEdit = true;
     }
 
     private void OnStartDateChanged(ChangeEventArgs e)

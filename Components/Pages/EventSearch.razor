@@ -19,7 +19,7 @@
     <div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:6px">
         <div style="flex:1;min-width:260px">
             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px;font-size:13px">Search</div>
-            <input value="@_query" @oninput="e => _query = e.Value?.ToString() ?? string.Empty" @onkeydown="OnQueryKeyDown"
+            <input value="@_query" @oninput="OnQueryInput" @onkeydown="OnQueryKeyDown"
                    placeholder="category:bonspiel day:saturday junior..."
                    style="border:1px solid #d7dfe5;border-radius:6px;padding:7px 10px;font-size:13.5px;width:100%;box-sizing:border-box">
         </div>
@@ -227,6 +227,10 @@
     private DateTime? _rangeStart;
     private DateTime? _rangeEnd;
 
+    /// <summary>Set by the query box's own handlers to mark a render that only exists because a
+    /// character was typed; see <see cref="ShouldRender"/>.</summary>
+    private bool _typingOnly;
+
     private bool _hasSearched;
     private bool _isSearching;
     private (DateTime Start, DateTime End)? _fetchedRange;
@@ -268,12 +272,49 @@
     // all - not delayed, genuinely never sent. The Search button's @onclick="RunSearch" binds
     // directly to the async method, which Blazor DOES await properly, which is why that path always
     // worked. Awaiting here instead of discarding makes the two paths identical.
-    private async Task OnQueryKeyDown(KeyboardEventArgs e)
+    //
+    // Returns RunSearch's own Task rather than awaiting it, and Task.CompletedTask synchronously for
+    // every other key. An `async Task` handler yields even when it does nothing, and Blazor renders
+    // both at that yield and again on completion - so every non-Enter keystroke cost two renders of
+    // this page instead of none. Returning an already-completed Task keeps the Enter path identical
+    // (Blazor still awaits what it's handed) while costing one render instead of two everywhere else.
+    private Task OnQueryKeyDown(KeyboardEventArgs e)
     {
         if (e.Key == "Enter")
         {
-            await RunSearch();
+            return RunSearch();
         }
+
+        _typingOnly = true;
+        return Task.CompletedTask;
+    }
+
+    private void OnQueryInput(ChangeEventArgs e)
+    {
+        _query = e.Value?.ToString() ?? string.Empty;
+        _typingOnly = true;
+    }
+
+    /// <summary>
+    /// Typing in the query box changes nothing this page displays - <see cref="_query"/> is read only
+    /// by <see cref="RunSearch"/>, and the browser already holds the text - but each keystroke fires
+    /// both onkeydown and oninput, and each of those re-rendered the entire results list. With the
+    /// render cap at <see cref="MaxRenderedRows"/> that was up to 600 row renders per character typed,
+    /// on top of the two SignalR round trips the model already costs. Live-reported 2026-08-27 as
+    /// typing lag by a staff member on a high-latency connection.
+    ///
+    /// Only the two typing handlers set the flag, so every other interaction - running a search,
+    /// changing a date, opening a result - renders normally.
+    /// </summary>
+    protected override bool ShouldRender()
+    {
+        if (!_typingOnly)
+        {
+            return true;
+        }
+
+        _typingOnly = false;
+        return false;
     }
 
     private void OnRangeStartChanged(ChangeEventArgs e)
