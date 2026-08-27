@@ -107,4 +107,45 @@ public class BookingDraftTests
         Assert.Equal(group[0].Start, draft.Start);
         Assert.Equal(group[0].End, draft.End);
     }
+
+    [Fact]
+    public void LoadForEdit_TimeEditedOutsideTheApp_SnapsOntoTheQuarterHourGrid()
+    {
+        // An Outlook-side edit can put a booking at any minute. The picker only offers quarters, and
+        // a <select> holding a value none of its options match displays its FIRST option - 12 AM -
+        // so an unsnapped 6:07 would show as midnight and save as midnight.
+        var group = new List<SheetBooking>
+        {
+            new()
+            {
+                SheetMailbox = "sheet1@example.com",
+                Start = new DateTime(2026, 8, 21, 18, 7, 0),
+                End = new DateTime(2026, 8, 21, 20, 22, 0),
+                Category = BookingCategory.League,
+                State = BookingState.Confirmed,
+                RenterName = "Edited in Outlook"
+            }
+        };
+
+        var draft = new BookingDraft();
+        draft.LoadForEdit(group);
+
+        Assert.Contains(draft.StartMinutes, CalendarStyles.TimeOptionsMinutes);
+        Assert.Contains(draft.EndMinutes, CalendarStyles.TimeOptionsMinutes);
+        Assert.Equal(new DateTime(2026, 8, 21, 18, 0, 0), draft.Start);
+        Assert.Equal(new DateTime(2026, 8, 21, 20, 15, 0), draft.End);
+    }
+
+    [Fact]
+    public void Reset_LateEveningSlot_SeedsAnEndTimeThePickerCanDisplay()
+    {
+        // 11 PM + the default two hours would be 1500, past the day's last option; it used to
+        // display as 12 AM. Clamped to end-of-day instead.
+        var draft = new BookingDraft();
+        draft.Reset(new DateTime(2026, 8, 19), initialStart: new DateTime(2026, 8, 20, 23, 0, 0));
+
+        Assert.Contains(draft.EndMinutes, CalendarStyles.TimeOptionsMinutes);
+        Assert.Equal(24 * 60, draft.EndMinutes);
+        Assert.True(draft.End > draft.Start);
+    }
 }

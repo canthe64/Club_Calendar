@@ -112,8 +112,9 @@ it again.
 - **Category** — required, no default. Pick one of the category chips before you can save.
 - **Sheets** — tap sheet chips to toggle which sheet(s) this booking covers, or click **All Sheets**
   to select every sheet at once. A booking can span multiple sheets as one conceptual unit.
-- **Start date** / **End date**, **From**, **To** — time fields are in 30-minute increments,
-  covering the full 24-hour day. Leave End date equal to Start date for an ordinary same-day
+- **Start date** / **End date**, **From**, **To** — each time is two dropdowns: the hour, then the
+  minutes past it (`:00`, `:15`, `:30`, `:45`), covering the full 24-hour day. Picking **Midnight**
+  as the hour greys out the minutes, since it means the end of that day. Leave End date equal to Start date for an ordinary same-day
   booking; set it later to span multiple days (e.g. a weekend bonspiel) — From/To then apply to the
   start and end date respectively, and a caption confirms the resolved span. The end date/time must
   be after the start date/time, and a span can't exceed 14 days. Moving Start date past the current
@@ -214,7 +215,7 @@ are the ones that only appear on that side.
   Required, no default. "Out of Town Bonspiels" is members travelling to play elsewhere — not to be
   confused with the on-ice Bonspiel category, which is one held on this club's own ice.
 - **Event Title** — required.
-- **All day** — toggle on/off. When off, set **From**/**To** times (same 30-minute increments as
+- **All day** — toggle on/off. When off, set **From**/**To** times (same hour + minutes dropdowns as
   bookings).
 - **Start date** / **End date** — moving Start date past the current End date pulls End date forward
   to match, so the range never goes invalid; it never pulls End date backward, so a span you've

@@ -32,7 +32,7 @@ public class BookingDraft
     public DateTime StartDate { get; set; } = DateTime.MinValue;
     public DateTime EndDate { get; set; } = DateTime.MinValue;
 
-    /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
+    /// <summary>Minutes from midnight, in 15-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
     /// 1440 represents midnight at the end of <see cref="StartDate"/>/<see cref="EndDate"/>
     /// respectively, not the start of it.</summary>
     public int StartMinutes { get; set; } = 18 * 60;
@@ -81,8 +81,15 @@ public class BookingDraft
         var effectiveStart = initialStart ?? today.AddDays(1);
         StartDate = effectiveStart.Date;
         EndDate = effectiveStart.Date;
-        StartMinutes = initialStart.HasValue ? initialStart.Value.Hour * 60 + initialStart.Value.Minute : 18 * 60;
-        EndMinutes = StartMinutes + 120;
+        // Snapped: the clicked slot comes from a grid the picker doesn't control, so it isn't
+        // guaranteed to land on the quarter-hour grid the way the 18*60 fallback is.
+        StartMinutes = initialStart.HasValue
+            ? CalendarStyles.SnapToQuarter(initialStart.Value.Hour * 60 + initialStart.Value.Minute)
+            : 18 * 60;
+        // Clamped so a late-evening slot can't seed an end past the day's last option: clicking the
+        // 11 PM slot used to produce 1500, which matched nothing and displayed as 12 AM. A shorter
+        // default beats an invalid one - staff can still extend it onto the next date.
+        EndMinutes = Math.Min(StartMinutes + 120, 24 * 60);
         RenterName = null;
         RenterPhone = null;
         RenterEmail = null;
@@ -102,8 +109,12 @@ public class BookingDraft
         // multi-day booking's EndMinutes would carry the day offset while EndDate is already
         // advanced, double-counting it back into a wrong End on save. (This exact bug shipped in
         // ClubEventDraft.LoadForEdit and was found/fixed while designing this - not repeated here.)
-        StartMinutes = (int)(first.Start - first.Start.Date).TotalMinutes;
-        EndMinutes = (int)(first.End - first.End.Date).TotalMinutes;
+        // Snapped, because a booking's stored time need not sit on the picker's grid - an
+        // Outlook-side edit, or an event created under the old 30-minute grid. An off-grid value
+        // matches no option and a <select> would silently display its first entry (12 AM), rewriting
+        // the time on the next save.
+        StartMinutes = CalendarStyles.SnapToQuarter((int)(first.Start - first.Start.Date).TotalMinutes);
+        EndMinutes = CalendarStyles.SnapToQuarter((int)(first.End - first.End.Date).TotalMinutes);
         RenterName = first.RenterName;
         RenterPhone = first.RenterPhone;
         RenterEmail = first.RenterEmail;

@@ -1,0 +1,71 @@
+@* A time-of-day value as two dropdowns - the hour, then the quarter past it.
+
+   One flat 15-minute list would be 97 options (CalendarStyles.TimeOptionsMinutes); splitting it
+   leaves the longest list at 25. Renders only the controls, never a label: EventFormModal's From/To
+   labels carry a conditional "(on the start date)" hint that belongs to the caller, not here.
+
+   The caller sees one int in minutes-from-midnight, exactly as it did when this was a single select,
+   so the drafts and their change handlers keep the shape they already had. *@
+
+<div style="display:flex;gap:8px">
+    <div style="flex:1;min-width:0">
+        <select value="@CalendarStyles.HourPartOf(Minutes)" @onchange="OnHourChanged" aria-label="@($"{AriaLabel} hour")"
+                style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
+            @foreach (var h in CalendarStyles.HourOptionsMinutes)
+            {
+                <option value="@h">@CalendarStyles.FormatMinutes(h)</option>
+            }
+        </select>
+    </div>
+    <div style="flex:1;min-width:0">
+        @* Midnight-at-the-end-of-day (1440) has no minute of its own - there is no 12:15 AM end of
+           the current day under that convention - so the control is disabled rather than offering
+           four values that would all mean the same thing. *@
+        <select value="@CalendarStyles.QuarterPartOf(Minutes)" @onchange="OnQuarterChanged" disabled="@IsEndOfDay"
+                aria-label="@($"{AriaLabel} minutes")"
+                style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%@(IsEndOfDay ? ";background:#f1f4f6;color:#90a0ab" : "")">
+            @foreach (var q in CalendarStyles.QuarterOptions)
+            {
+                <option value="@q">@($":{q:00}")</option>
+            }
+        </select>
+    </div>
+</div>
+
+@code {
+    /// <summary>Minutes from midnight, on the quarter-hour grid. 1440 is midnight at the end of the
+    /// anchor day.</summary>
+    [Parameter, EditorRequired] public int Minutes { get; set; }
+
+    [Parameter] public EventCallback<int> MinutesChanged { get; set; }
+
+    /// <summary>Prefix for the two selects' accessible names, e.g. "Start" gives "Start hour" and
+    /// "Start minutes" - the visible label sits in the caller's markup and isn't associated with
+    /// either control on its own.</summary>
+    [Parameter] public string AriaLabel { get; set; } = "Time";
+
+    private bool IsEndOfDay => Minutes >= 24 * 60;
+
+    private Task OnHourChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var hour))
+        {
+            return Task.CompletedTask;
+        }
+
+        // Selecting Midnight drops whatever quarter was showing; every other hour keeps it, so
+        // changing 6:45 PM to 7 PM lands on 7:45 PM rather than resetting to the top of the hour.
+        var total = hour >= 24 * 60 ? 24 * 60 : hour + CalendarStyles.QuarterPartOf(Minutes);
+        return MinutesChanged.InvokeAsync(total);
+    }
+
+    private Task OnQuarterChanged(ChangeEventArgs e)
+    {
+        if (IsEndOfDay || !int.TryParse(e.Value?.ToString(), out var quarter))
+        {
+            return Task.CompletedTask;
+        }
+
+        return MinutesChanged.InvokeAsync(CalendarStyles.HourPartOf(Minutes) + quarter);
+    }
+}

@@ -199,15 +199,54 @@ public static class CalendarStyles
         start.ToString(start.Minute == 0 ? "htt" : "h:mmtt");
 
     /// <summary>
-    /// Half-hour increments covering a full 24-hour day (midnight through the following midnight,
-    /// inclusive), shared by every booking/series/club-event time picker - staff can book any sheet
-    /// at any hour, not just a fixed daytime window. Midnight-at-the-end is expressed as 1440
-    /// (minutes from the anchor day's midnight) rather than 0, so an end time reads unambiguously
+    /// Quarter-hour increments covering a full 24-hour day (midnight through the following midnight,
+    /// inclusive) - the set of legal values for every draft's StartMinutes/EndMinutes. Staff can book
+    /// any sheet at any hour, not just a fixed daytime window. Midnight-at-the-end is expressed as
+    /// 1440 (minutes from the anchor day's midnight) rather than 0, so an end time reads unambiguously
     /// as the end of the current day rather than the start of it; 0 itself is unambiguous as a
     /// start time (there's nothing earlier in the same day to confuse it with).
+    ///
+    /// Not rendered as one list any more: 97 options is an unusable dropdown, so the pickers offer
+    /// <see cref="HourOptionsMinutes"/> and <see cref="QuarterOptions"/> as two controls. This array
+    /// stays the authority on what a valid stored value is.
     /// </summary>
     public static readonly int[] TimeOptionsMinutes =
-        Enumerable.Range(0, 49).Select(i => i * 30).ToArray();
+        Enumerable.Range(0, 97).Select(i => i * 15).ToArray();
+
+    /// <summary>
+    /// The hour half of the time picker: every whole hour from midnight through 11 PM, plus 1440 for
+    /// midnight-at-the-end-of-day. Values are minutes from midnight so they combine with
+    /// <see cref="QuarterOptions"/> by plain addition.
+    /// </summary>
+    public static readonly int[] HourOptionsMinutes =
+        [.. Enumerable.Range(0, 24).Select(i => i * 60), 24 * 60];
+
+    /// <summary>The minute half of the time picker - minutes past the selected hour.</summary>
+    public static readonly int[] QuarterOptions = [0, 15, 30, 45];
+
+    /// <summary>The hour a total sits in, as one of <see cref="HourOptionsMinutes"/>. Midnight-at-end
+    /// (1440) is its own hour rather than folding back to 0.</summary>
+    public static int HourPartOf(int minutesFromMidnight) =>
+        minutesFromMidnight >= 24 * 60 ? 24 * 60 : minutesFromMidnight / 60 * 60;
+
+    /// <summary>Minutes past the hour, as one of <see cref="QuarterOptions"/>. Always 0 at
+    /// midnight-at-end, which has no meaningful minute of its own.</summary>
+    public static int QuarterPartOf(int minutesFromMidnight) =>
+        minutesFromMidnight >= 24 * 60 ? 0 : minutesFromMidnight % 60;
+
+    /// <summary>
+    /// Rounds an arbitrary clock time onto the quarter-hour grid, for a time that reached us from
+    /// outside the picker - an Outlook-side edit, or an event created under the old 30-minute grid.
+    /// Without this a value like 18:07 matches no option, and a &lt;select&gt; silently falls back to
+    /// displaying its first entry (12 AM), quietly rewriting the event's time on the next save.
+    /// Ties round up, and anything past the last quarter of the day lands on 1440 rather than
+    /// wrapping to 0 - an end time must never become the start of the same day.
+    /// </summary>
+    public static int SnapToQuarter(int minutesFromMidnight)
+    {
+        var clamped = Math.Clamp(minutesFromMidnight, 0, 24 * 60);
+        return (clamped + 7) / 15 * 15;
+    }
 
     public static string FormatMinutes(int minutesFromMidnight)
     {

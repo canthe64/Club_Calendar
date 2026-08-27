@@ -63,24 +63,15 @@
                     </div>
                     <div style="font-size:12px;color:#90a0ab">Repeats weekly on @Draft.FirstDate.ToString("dddd")s, based on the first date above.</div>
 
+                    @* min-width:0 on each half - see the same note in EventFormModal's time row. *@
                     <div style="display:flex;gap:8px;align-items:end">
-                        <div style="flex:1">
+                        <div style="flex:1;min-width:0">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">From</div>
-                            <select value="@Draft.StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
-                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
-                                {
-                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
-                                }
-                            </select>
+                            <TimeOfDayPicker Minutes="Draft.StartMinutes" MinutesChanged="OnStartMinutesChanged" AriaLabel="Start" />
                         </div>
-                        <div style="flex:1">
+                        <div style="flex:1;min-width:0">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">To</div>
-                            <select value="@Draft.EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
-                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
-                                {
-                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
-                                }
-                            </select>
+                            <TimeOfDayPicker Minutes="Draft.EndMinutes" MinutesChanged="OnEndMinutesChanged" AriaLabel="End" />
                         </div>
                     </div>
 
@@ -277,21 +268,9 @@
         }
     }
 
-    private void OnStartMinutesChanged(ChangeEventArgs e)
-    {
-        if (int.TryParse(e.Value?.ToString(), out var m))
-        {
-            Draft.StartMinutes = m;
-        }
-    }
+    private void OnStartMinutesChanged(int m) => Draft.StartMinutes = m;
 
-    private void OnEndMinutesChanged(ChangeEventArgs e)
-    {
-        if (int.TryParse(e.Value?.ToString(), out var m))
-        {
-            Draft.EndMinutes = m;
-        }
-    }
+    private void OnEndMinutesChanged(int m) => Draft.EndMinutes = m;
 
     private static string DayGridSheetLabel(string sheetMailbox)
     {

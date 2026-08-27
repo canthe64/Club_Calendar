@@ -23,7 +23,7 @@ public class SeriesDraft
     public DateTime FirstDate { get; set; } = DateTime.MinValue;
     public DateTime LastDate { get; set; } = DateTime.MinValue;
 
-    /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
+    /// <summary>Minutes from midnight, in 15-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
     /// 1440 represents midnight at the end of the day, not the start of it.</summary>
     public int StartMinutes { get; set; } = 19 * 60;
     public int EndMinutes { get; set; } = 21 * 60;

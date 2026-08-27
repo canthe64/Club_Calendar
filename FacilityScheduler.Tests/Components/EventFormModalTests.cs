@@ -260,6 +260,8 @@ public class EventFormModalTests : BunitContext
         Assert.Empty(cut.FindAll("select"));
     }
 
+    // Four, not two: From and To are each a TimeOfDayPicker, which is an hour select plus a
+    // minutes select.
     [Fact]
     public void OffIceTimed_ShowsTheTimePickers()
     {
@@ -267,7 +269,7 @@ public class EventFormModalTests : BunitContext
         draft.OffIce.IsAllDay = false;
         var cut = RenderModal(draft);
 
-        Assert.Equal(2, cut.FindAll("select").Count);
+        Assert.Equal(4, cut.FindAll("select").Count);
     }
 
     [Fact]

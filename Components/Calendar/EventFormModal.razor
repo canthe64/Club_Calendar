@@ -169,8 +169,11 @@
 
                 @if (ShowTimePickers)
                 {
+                    @* min-width:0 on each half: two nested selects have a wider min-content size than
+                       the single dropdown these replaced, and without it a narrow screen overflows
+                       the dialog sideways instead of shrinking them. *@
                     <div style="display:flex;gap:8px">
-                        <div style="flex:1">
+                        <div style="flex:1;min-width:0">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">
                                 From
                                 @if (EndDate.Date != StartDate.Date)
@@ -178,14 +181,9 @@
                                     <span style="font-weight:400;color:#90a0ab">(on the start date)</span>
                                 }
                             </div>
-                            <select value="@StartMinutes" @onchange="OnStartMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
-                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
-                                {
-                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
-                                }
-                            </select>
+                            <TimeOfDayPicker Minutes="StartMinutes" MinutesChanged="OnStartMinutesChanged" AriaLabel="Start" />
                         </div>
-                        <div style="flex:1">
+                        <div style="flex:1;min-width:0">
                             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px">
                                 To
                                 @if (EndDate.Date != StartDate.Date)
@@ -193,12 +191,7 @@
                                     <span style="font-weight:400;color:#90a0ab">(on the end date)</span>
                                 }
                             </div>
-                            <select value="@EndMinutes" @onchange="OnEndMinutesChanged" style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 6px;font-size:13px;width:100%">
-                                @foreach (var m in CalendarStyles.TimeOptionsMinutes)
-                                {
-                                    <option value="@m">@CalendarStyles.FormatMinutes(m)</option>
-                                }
-                            </select>
+                            <TimeOfDayPicker Minutes="EndMinutes" MinutesChanged="OnEndMinutesChanged" AriaLabel="End" />
                         </div>
                     </div>
                 }
@@ -401,20 +394,14 @@
         }
     }
 
-    private void OnStartMinutesChanged(ChangeEventArgs e)
+    private void OnStartMinutesChanged(int m)
     {
-        if (int.TryParse(e.Value?.ToString(), out var m))
-        {
-            if (IsOnIce) { Draft.OnIce.StartMinutes = m; } else { Draft.OffIce.StartMinutes = m; }
-        }
+        if (IsOnIce) { Draft.OnIce.StartMinutes = m; } else { Draft.OffIce.StartMinutes = m; }
     }
 
-    private void OnEndMinutesChanged(ChangeEventArgs e)
+    private void OnEndMinutesChanged(int m)
     {
-        if (int.TryParse(e.Value?.ToString(), out var m))
-        {
-            if (IsOnIce) { Draft.OnIce.EndMinutes = m; } else { Draft.OffIce.EndMinutes = m; }
-        }
+        if (IsOnIce) { Draft.OnIce.EndMinutes = m; } else { Draft.OffIce.EndMinutes = m; }
     }
 
     private static string SheetLabel(string sheetMailbox)

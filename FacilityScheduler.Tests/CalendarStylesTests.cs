@@ -60,6 +60,75 @@ public class CalendarStylesTests
         Assert.False(after);
     }
 
+    // ---- Time-of-day picker: the two option lists and the split/combine helpers ----------------
+
+    [Fact]
+    public void TimeOptionsMinutes_CoversTheWholeDayOnQuarterHours()
+    {
+        Assert.Equal(97, CalendarStyles.TimeOptionsMinutes.Length);
+        Assert.Equal(0, CalendarStyles.TimeOptionsMinutes[0]);
+        Assert.Equal(24 * 60, CalendarStyles.TimeOptionsMinutes[^1]);
+        Assert.All(CalendarStyles.TimeOptionsMinutes, m => Assert.Equal(0, m % 15));
+    }
+
+    // The whole point of the split: the longest list a staff member scrolls is 25, not 97.
+    [Fact]
+    public void HourOptionsMinutes_IsEveryHourPlusEndOfDayMidnight()
+    {
+        Assert.Equal(25, CalendarStyles.HourOptionsMinutes.Length);
+        Assert.All(CalendarStyles.HourOptionsMinutes, m => Assert.Equal(0, m % 60));
+        Assert.Equal(24 * 60, CalendarStyles.HourOptionsMinutes[^1]);
+        Assert.Equal("Midnight", CalendarStyles.FormatMinutes(CalendarStyles.HourOptionsMinutes[^1]));
+    }
+
+    // Every combination the two dropdowns can produce has to be a value the drafts consider legal,
+    // or the picker can write a time that no picker can then display.
+    [Fact]
+    public void EveryHourAndQuarterCombination_IsAValidStoredValue()
+    {
+        foreach (var h in CalendarStyles.HourOptionsMinutes)
+        {
+            foreach (var q in CalendarStyles.QuarterOptions)
+            {
+                var total = h >= 24 * 60 ? 24 * 60 : h + q;
+                Assert.Contains(total, CalendarStyles.TimeOptionsMinutes);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(0, 0, 0)]           // midnight at the start of the day
+    [InlineData(1095, 1080, 15)]    // 6:15 PM
+    [InlineData(1425, 1380, 45)]    // 11:45 PM, the last real quarter
+    [InlineData(1440, 1440, 0)]     // midnight at the end of the day keeps its own hour
+    public void HourAndQuarterParts_SplitATotalBackIntoTheTwoControls(int total, int hour, int quarter)
+    {
+        Assert.Equal(hour, CalendarStyles.HourPartOf(total));
+        Assert.Equal(quarter, CalendarStyles.QuarterPartOf(total));
+    }
+
+    [Theory]
+    [InlineData(1095, 1095)]  // already on the grid - untouched
+    [InlineData(1087, 1080)]  // 6:07 PM rounds down
+    [InlineData(1088, 1095)]  // 6:08 PM rounds up
+    [InlineData(1090, 1095)]  // an exact tie rounds up
+    [InlineData(1110, 1110)]  // 6:30 PM, an old half-hour value, is still on the grid
+    [InlineData(1433, 1440)]  // 11:53 PM rounds to end-of-day, never wrapping to 0
+    [InlineData(1440, 1440)]  // end-of-day is a fixed point
+    public void SnapToQuarter_PutsAnOffGridTimeOnTheNearestQuarter(int input, int expected)
+    {
+        Assert.Equal(expected, CalendarStyles.SnapToQuarter(input));
+    }
+
+    [Fact]
+    public void SnapToQuarter_AlwaysLandsOnAnOptionThePickerCanDisplay()
+    {
+        for (var m = 0; m <= 24 * 60; m++)
+        {
+            Assert.Contains(CalendarStyles.SnapToQuarter(m), CalendarStyles.TimeOptionsMinutes);
+        }
+    }
+
     private static SheetBooking Booking(string sheet, Guid groupId, string? eventId = null, DateTime? start = null, DateTime? end = null) => new()
     {
         SheetMailbox = sheet,

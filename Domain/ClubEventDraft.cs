@@ -20,7 +20,7 @@ public class ClubEventDraft
     public DateTime StartDate { get; set; } = DateTime.MinValue;
     public DateTime EndDate { get; set; } = DateTime.MinValue;
 
-    /// <summary>Minutes from midnight, in 30-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
+    /// <summary>Minutes from midnight, in 15-minute steps (see <see cref="CalendarStyles.TimeOptionsMinutes"/>).
     /// 1440 represents midnight at the end of the day, not the start of it. Only meaningful when
     /// <see cref="IsAllDay"/> is false.</summary>
     public int StartMinutes { get; set; } = 9 * 60;
@@ -60,8 +60,10 @@ public class ClubEventDraft
         // Each Minutes field relative to its own Date field (not the other side's), matching how
         // the End/Start getters reconstruct them - otherwise a multi-day event's EndMinutes would
         // carry the day offset while EndDate is already advanced, double-counting it on save.
-        StartMinutes = clubEvent.IsAllDay ? 9 * 60 : (int)(clubEvent.Start - clubEvent.Start.Date).TotalMinutes;
-        EndMinutes = clubEvent.IsAllDay ? 17 * 60 : (int)(clubEvent.End - clubEvent.End.Date).TotalMinutes;
+        // Snapped for the same reason as BookingDraft.LoadForEdit: a stored time need not sit on the
+        // picker's quarter-hour grid, and an off-grid value would display as 12 AM and save as that.
+        StartMinutes = clubEvent.IsAllDay ? 9 * 60 : CalendarStyles.SnapToQuarter((int)(clubEvent.Start - clubEvent.Start.Date).TotalMinutes);
+        EndMinutes = clubEvent.IsAllDay ? 17 * 60 : CalendarStyles.SnapToQuarter((int)(clubEvent.End - clubEvent.End.Date).TotalMinutes);
         MarksSheetsUnavailable = clubEvent.MarksSheetsUnavailable;
         Notes = clubEvent.Notes;
         EditingEvent = clubEvent;

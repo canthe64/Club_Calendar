@@ -75,4 +75,27 @@ public class ClubEventDraftTests
         Assert.Equal(clubEvent.End, draft.End);
         Assert.Equal(clubEvent.End, draft.ToClubEvent("staff@example.com").End);
     }
+
+    [Fact]
+    public void LoadForEdit_TimeEditedOutsideTheApp_SnapsOntoTheQuarterHourGrid()
+    {
+        // Same rule as BookingDraft: a time that reached us from Outlook need not sit on the
+        // picker's grid, and an unsnapped value would display as 12 AM and save as that.
+        var clubEvent = new ClubEvent
+        {
+            Title = "Edited in Outlook",
+            Category = ClubEventCategory.Meetings,
+            IsAllDay = false,
+            Start = new DateTime(2026, 8, 21, 9, 7, 0),
+            End = new DateTime(2026, 8, 21, 17, 22, 0)
+        };
+
+        var draft = new ClubEventDraft();
+        draft.LoadForEdit(clubEvent);
+
+        Assert.Contains(draft.StartMinutes, CalendarStyles.TimeOptionsMinutes);
+        Assert.Contains(draft.EndMinutes, CalendarStyles.TimeOptionsMinutes);
+        Assert.Equal(new DateTime(2026, 8, 21, 9, 0, 0), draft.Start);
+        Assert.Equal(new DateTime(2026, 8, 21, 17, 15, 0), draft.End);
+    }
 }
