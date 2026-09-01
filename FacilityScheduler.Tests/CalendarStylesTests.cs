@@ -6,7 +6,11 @@ namespace FacilityScheduler.Tests;
 public class CalendarStylesTests
 {
     private static readonly DateTime Start = new(2026, 8, 21);
-    private static readonly DateTime End = new(2026, 8, 23);
+    // A real time-of-day, not bare midnight - OccursOnDay's end is genuinely exclusive now (D-2026-08-27
+    // fix, below), so a fixture meaning "spans through and including the 23rd" has to actually end
+    // sometime during the 23rd, not exactly at its start. ContinuationMarks (also exercised against
+    // these two constants) only ever compares by .Date, so this is invisible to those tests either way.
+    private static readonly DateTime End = new(2026, 8, 23, 20, 0, 0);
 
     // ---- BookingCategory colour/label completeness ------------------------------------------
 
@@ -82,6 +86,60 @@ public class CalendarStylesTests
         var day = new DateTime(2026, 8, 21);
         Assert.True(CalendarStyles.OccursOnDay(day, day, day));
         Assert.False(CalendarStyles.OccursOnDay(day, day, day.AddDays(1)));
+    }
+
+    [Fact]
+    public void OccursOnDay_EndingExactlyAtMidnight_DoesNotOccurOnTheFollowingDay()
+    {
+        // Live-found 2026-08-27: a 10PM-12AM booking still showed on the NEXT day's cell. The old
+        // implementation compared by .Date alone (start.Date <= day.Date && day.Date <= end.Date),
+        // and midnight's own .Date is the day it's the START of - so a booking ending exactly at
+        // midnight was (wrongly) considered to occur on the day that midnight begins, not just the
+        // evening that led up to it.
+        var start = new DateTime(2026, 8, 21, 22, 0, 0);
+        var end = new DateTime(2026, 8, 22, 0, 0, 0);
+
+        Assert.True(CalendarStyles.OccursOnDay(start, end, new DateTime(2026, 8, 21)));
+        Assert.False(CalendarStyles.OccursOnDay(start, end, new DateTime(2026, 8, 22)));
+    }
+
+    [Fact]
+    public void OccursOnDay_EndingAt1159PM_StillOccursOnlyOnTheDayItEndedOn()
+    {
+        // The boundary one minute earlier - only exact midnight was ever wrong, so this pins that the
+        // fix didn't overshoot into rejecting a booking that genuinely runs to the very end of a day.
+        var start = new DateTime(2026, 8, 21, 22, 0, 0);
+        var end = new DateTime(2026, 8, 21, 23, 59, 0);
+
+        Assert.True(CalendarStyles.OccursOnDay(start, end, new DateTime(2026, 8, 21)));
+        Assert.False(CalendarStyles.OccursOnDay(start, end, new DateTime(2026, 8, 22)));
+    }
+
+    [Fact]
+    public void OccursOnDay_ZeroDurationMarkerAtExactlyMidnight_OccursOnlyOnTheDayThatBegins()
+    {
+        // The one case OccursOnDay can't treat as a genuine half-open interval: Start == End (D104's
+        // off-ice zero-duration allowance). As an empty interval it would otherwise occur on NO day
+        // at all, which is wrong for a real point-in-time marker - it belongs to the day the instant
+        // itself falls on, i.e. the day that BEGINS at that midnight, not the one that ended there.
+        var midnight = new DateTime(2026, 8, 22, 0, 0, 0);
+
+        Assert.True(CalendarStyles.OccursOnDay(midnight, midnight, new DateTime(2026, 8, 22)));
+        Assert.False(CalendarStyles.OccursOnDay(midnight, midnight, new DateTime(2026, 8, 21)));
+    }
+
+    [Theory]
+    [InlineData(false)] // timed - End is already a real instant
+    [InlineData(true)]  // all-day - End is the inclusive last day; the real boundary is one day later
+    public void ClubEventExclusiveEnd_MatchesClubEventsOwnExclusiveEndProperty(bool isAllDay)
+    {
+        // ClubEvent.ExclusiveEnd delegates to this shared helper (PublicClubEventLabel can't carry
+        // the computed property itself - see the helper's own doc comment) - this pins that the two
+        // can never silently diverge, since there's only one implementation left to diverge from.
+        var end = new DateTime(2026, 8, 23, isAllDay ? 0 : 20, 0, 0);
+        var ce = new ClubEvent { Title = "t", Category = ClubEventCategory.Other, Start = end.AddDays(-1), End = end, IsAllDay = isAllDay };
+
+        Assert.Equal(ce.ExclusiveEnd, CalendarStyles.ClubEventExclusiveEnd(end, isAllDay));
     }
 
     [Fact]

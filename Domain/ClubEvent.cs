@@ -31,8 +31,10 @@ public class ClubEvent
     /// later that day - and since IsAllDay defaults to true, the most natural way to record "we're
     /// closed Tuesday" silently failed to block Tuesday bookings. PublicAvailabilityService had
     /// already open-coded this same fixup for practice ice; it lives here now so there's one
-    /// definition rather than a copy per caller.</summary>
-    public DateTime ExclusiveEnd => IsAllDay ? End.Date.AddDays(1) : End;
+    /// definition rather than a copy per caller. Delegates to CalendarStyles.ClubEventExclusiveEnd so
+    /// the public calendar's equivalent DTO (PublicClubEventLabel, which can't carry this as its own
+    /// property - see that shared helper's doc comment) computes it identically.</summary>
+    public DateTime ExclusiveEnd => CalendarStyles.ClubEventExclusiveEnd(End, IsAllDay);
 
     /// <summary>Whether this event closes every sheet for its duration - a per-event staff choice,
     /// not implied by category (e.g. a promotional tournament listing might not close the ice).</summary>

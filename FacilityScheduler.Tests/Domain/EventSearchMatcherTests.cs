@@ -106,6 +106,31 @@ public class EventSearchMatcherTests
     }
 
     [Fact]
+    public void Matches_Booking_EndingExactlyAtMidnight_DoesNotMatchTheFollowingWeekday()
+    {
+        // 10PM Tuesday -> 12AM Wednesday: the booking has zero real duration on Wednesday, so a
+        // day:wednesday search must not match it (the same exact-midnight boundary bug D107 fixed
+        // in CalendarStyles.OccursOnDay). It must still match day:tuesday.
+        var booking = Booking(
+            start: new DateTime(2026, 8, 25, 22, 0, 0), // Tuesday
+            end: new DateTime(2026, 8, 26, 0, 0, 0)); // exactly midnight, Wednesday
+
+        Assert.False(EventSearchMatcher.Matches(booking, SearchQueryParser.Parse("day:wednesday")));
+        Assert.True(EventSearchMatcher.Matches(booking, SearchQueryParser.Parse("day:tuesday")));
+    }
+
+    [Fact]
+    public void Matches_ClubEvent_DaySunday_StillMatchesAnAllDayFridayToSundayEvent()
+    {
+        // Guard against over-correcting the midnight fix: an all-day club event's End is the
+        // INCLUSIVE last day at midnight, so a Fri-Sun event genuinely covers Sunday. The club
+        // event call site passes ExclusiveEnd for exactly this reason.
+        var ce = ClubEvent(start: new DateTime(2026, 8, 21), end: new DateTime(2026, 8, 23));
+
+        Assert.True(EventSearchMatcher.Matches(ce, SearchQueryParser.Parse("day:sunday")));
+    }
+
+    [Fact]
     public void OccursOnAnyWeekday_SpanOfSevenOrMoreDays_MatchesEveryWeekday()
     {
         var start = new DateTime(2026, 8, 17); // Monday

@@ -46,7 +46,7 @@ internal static class EventSearchMatcher
             return false;
         }
 
-        if (query.Days is { } days && !OccursOnAnyWeekday(clubEvent.Start, clubEvent.End, days))
+        if (query.Days is { } days && !OccursOnAnyWeekday(clubEvent.Start, clubEvent.ExclusiveEnd, days))
         {
             return false;
         }
@@ -54,17 +54,22 @@ internal static class EventSearchMatcher
         return MatchesTitleTerms(clubEvent.Title, query.TitleTerms);
     }
 
-    /// <summary>Whether an item spanning [start, end] - inclusive by date, matching
-    /// <see cref="CalendarStyles.OccursOnDay"/>'s own convention - touches any of the given weekdays.
-    /// Iterates the whole inclusive range rather than checking Start/End's own DayOfWeek in
-    /// isolation: an all-day club event's End is inclusive (a Fri-Sun event's End.DayOfWeek is
-    /// Sunday, but Saturday only shows up by walking the days between), and a booking or event
-    /// spanning a week or more must match every weekday it touches, not just its first and last.</summary>
+    /// <summary>Whether an item spanning [start, end) touches any of the given weekdays. Walks every
+    /// calendar day the range could plausibly cover, but a day only counts when
+    /// <see cref="CalendarStyles.OccursOnDay"/> agrees the item genuinely occupies it - so the same
+    /// half-open-interval rule applies here as everywhere else (D107): a booking or timed event
+    /// ending exactly at midnight has zero real duration on the following day and must not match its
+    /// weekday, while a booking ending at 11:59PM still matches only its own day. Callers pass a real
+    /// exclusive instant for <paramref name="end"/> - a booking's own End, or a club event's
+    /// <see cref="ClubEvent.ExclusiveEnd"/> (never its raw inclusive-last-day End). Walking the range
+    /// rather than checking Start/End's DayOfWeek in isolation still matters: a Fri-Sun all-day club
+    /// event covers Saturday, which shows up only by walking the days between, and an item spanning a
+    /// week or more must match every weekday it touches, not just its first and last.</summary>
     internal static bool OccursOnAnyWeekday(DateTime start, DateTime end, HashSet<DayOfWeek> days)
     {
         for (var day = start.Date; day <= end.Date; day = day.AddDays(1))
         {
-            if (days.Contains(day.DayOfWeek))
+            if (days.Contains(day.DayOfWeek) && CalendarStyles.OccursOnDay(start, end, day))
             {
                 return true;
             }

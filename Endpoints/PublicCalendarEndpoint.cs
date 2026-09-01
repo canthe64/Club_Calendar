@@ -477,7 +477,12 @@ public static class PublicCalendarEndpoint
     private static void AppendDayCell(StringBuilder sb, DateTime cell, DateTime anchorMonth, PublicMonthView view)
     {
         var inMonth = cell.Month == anchorMonth.Month;
-        var dayClubEvents = view.ClubEvents.Where(ce => ce.Start.Date <= cell.Date && cell.Date <= ce.End.Date).ToList();
+        // CalendarStyles.ClubEventExclusiveEnd, not raw ce.End - a timed event ending exactly at
+        // midnight has zero real duration on the day a raw .Date comparison would put it on
+        // (live-found 2026-08-27); it also converts an all-day event's inclusive last day into a
+        // real boundary. PublicClubEventLabel can't carry this as its own computed property - see
+        // that helper's doc comment for why (it would leak into the public JSON response).
+        var dayClubEvents = view.ClubEvents.Where(ce => CalendarStyles.OccursOnDay(ce.Start, CalendarStyles.ClubEventExclusiveEnd(ce.End, ce.IsAllDay), cell.Date)).ToList();
         var dayBookings = view.Bookings
             .Where(b => CalendarStyles.OccursOnDay(b.Start, b.End, cell.Date))
             .Distinct()
@@ -706,7 +711,7 @@ public static class PublicCalendarEndpoint
     private sealed record DayItem(DateTime Start, DateTime End, PublicClubEventLabel? ClubEvent, PublicMonthBooking? Booking);
 
     private static List<PublicClubEventLabel> AllDayEventsForDay(PublicMonthView view, DateTime day) =>
-        view.ClubEvents.Where(ce => ce.IsAllDay && ce.Start.Date <= day.Date && day.Date <= ce.End.Date)
+        view.ClubEvents.Where(ce => ce.IsAllDay && CalendarStyles.OccursOnDay(ce.Start, CalendarStyles.ClubEventExclusiveEnd(ce.End, ce.IsAllDay), day))
             .OrderBy(ce => ce.Title)
             .ToList();
 
@@ -719,7 +724,7 @@ public static class PublicCalendarEndpoint
     private static List<DayItem> TimedItemsForDay(PublicMonthView view, DateTime day)
     {
         var timedClubEvents = view.ClubEvents
-            .Where(ce => !ce.IsAllDay && ce.Start.Date <= day.Date && day.Date <= ce.End.Date)
+            .Where(ce => !ce.IsAllDay && CalendarStyles.OccursOnDay(ce.Start, ce.End, day))
             .Select(ce => new DayItem(ce.Start, ce.End, ce, null));
 
         var bookings = view.Bookings

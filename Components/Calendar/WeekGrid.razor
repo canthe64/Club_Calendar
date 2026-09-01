@@ -93,7 +93,7 @@
     private List<DateTime> WeekDays => [.. Enumerable.Range(0, 7).Select(i => WeekStart.Date.AddDays(i))];
 
     private List<ClubEvent> AllDayEventsForDay(DateTime day) =>
-        ClubEvents.Where(ce => ce.IsAllDay && ce.Start.Date <= day.Date && day.Date <= ce.End.Date)
+        ClubEvents.Where(ce => ce.IsAllDay && CalendarStyles.OccursOnDay(ce.Start, ce.ExclusiveEnd, day))
             .OrderBy(ce => ce.Title)
             .ToList();
 
@@ -125,8 +125,12 @@
     // above (no specific hour to place them at).
     private List<DayItem> TimedItemsForDay(DateTime day)
     {
+        // ce.ExclusiveEnd, not raw ce.End - a timed event ending exactly at midnight has zero real
+        // duration on the day a raw .Date comparison would put it on (live-found 2026-08-27); it's a
+        // no-op here since ExclusiveEnd == End whenever IsAllDay is false, but keeps this call
+        // identical to AllDayEventsForDay's above rather than a second, subtly different comparison.
         var timedClubEvents = ClubEvents
-            .Where(ce => !ce.IsAllDay && ce.Start.Date <= day.Date && day.Date <= ce.End.Date)
+            .Where(ce => !ce.IsAllDay && CalendarStyles.OccursOnDay(ce.Start, ce.ExclusiveEnd, day))
             .Select(ce => new DayItem(ce.Start, ce.End, ce, null, 0));
 
         var consolidatedBookings = Bookings

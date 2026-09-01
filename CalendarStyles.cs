@@ -378,12 +378,52 @@ public static class CalendarStyles
         return segments;
     }
 
-    /// <summary>Whether an item spanning [start, end] (inclusive, by date) occurs on <paramref name="day"/> -
-    /// the range-containment form every multi-day rendering filter needs. Club Events already used this
-    /// shape inline; Bookings were fixed to match here, since a same-day-only equality check silently
-    /// dropped a multi-day booking after its first day.</summary>
-    public static bool OccursOnDay(DateTime start, DateTime end, DateTime day) =>
-        start.Date <= day.Date && day.Date <= end.Date;
+    /// <summary>
+    /// Whether an item spanning [start, end) occurs on <paramref name="day"/> - the range-containment
+    /// form every multi-day rendering filter needs. A sheet booking's own <c>End</c> is already a
+    /// real instant and can be passed directly; a Club Event's raw <c>End</c> is only that when timed
+    /// - an all-day event's is the inclusive last day - so a caller passes
+    /// <see cref="ClubEvent.ExclusiveEnd"/> (or, for the public calendar's DTO that can't carry the
+    /// same computed property, <see cref="ClubEventExclusiveEnd"/>) instead.
+    ///
+    /// <paramref name="end"/> is genuinely exclusive here - staff feedback 2026-08-27, live-found: a
+    /// booking or timed off-ice event ending exactly at midnight (e.g. 10PM-12AM) still showed on the
+    /// FOLLOWING day's cell, because the previous version compared by <c>.Date</c> alone
+    /// (<c>start.Date &lt;= day.Date &amp;&amp; day.Date &lt;= end.Date</c>) - and midnight's own
+    /// <c>.Date</c> is the day it's the start of, not the day whose evening led up to it. A booking
+    /// ending at 11:59PM still correctly shows only on the day it's on, same as one ending at 6PM;
+    /// only the exact-midnight boundary was ever wrong.
+    ///
+    /// The one case this can't treat as a half-open interval is <c>start == end</c> - a genuine
+    /// zero-duration event (D104's off-ice allowance), which as an empty interval would otherwise
+    /// occur on NO day at all. That's resolved as point membership instead: it belongs to whichever
+    /// calendar day contains that exact instant, by <c>.Date</c> - so a marker at exactly midnight
+    /// reads as happening at the START of that day, not the end of the previous one.
+    /// </summary>
+    public static bool OccursOnDay(DateTime start, DateTime end, DateTime day)
+    {
+        var dayStart = day.Date;
+
+        if (start == end)
+        {
+            return start >= dayStart && start < dayStart.AddDays(1);
+        }
+
+        return start < dayStart.AddDays(1) && end > dayStart;
+    }
+
+    /// <summary>
+    /// The exclusive-end instant for a club event, given its raw <c>End</c> and <c>IsAllDay</c> - an
+    /// all-day event's own <c>End</c> is the inclusive last day at midnight, not a real instant, so
+    /// the moment it actually runs until is the following midnight; a timed event's <c>End</c> is
+    /// already a real instant. Shared by <see cref="ClubEvent.ExclusiveEnd"/> and the public
+    /// calendar's <c>PublicClubEventLabel</c>, which can't carry the same computed property itself -
+    /// its own doc comment specifically warns that any property added there becomes public JSON
+    /// response surface by default (<c>System.Text.Json</c> serializes every public readable
+    /// property of a record, not just its constructor parameters).
+    /// </summary>
+    public static DateTime ClubEventExclusiveEnd(DateTime end, bool isAllDay) =>
+        isAllDay ? end.Date.AddDays(1) : end;
 
     /// <summary>
     /// Whether a multi-day item's chip on <paramref name="day"/> should show a continuation mark:

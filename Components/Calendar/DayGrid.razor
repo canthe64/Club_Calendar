@@ -141,8 +141,12 @@
     private const double RailGapPx = 2;
     private const double RailStripWidthPx = 3 * RailWidthPx + 2 * RailGapPx;
 
+    // CalendarStyles.OccursOnDay(ce.Start, ce.ExclusiveEnd, ...), not a raw ce.End comparison - a
+    // timed event ending exactly at midnight has zero real duration on the day .Date would put it on
+    // (live-found 2026-08-27); ExclusiveEnd also correctly converts an all-day event's inclusive last
+    // day into a real boundary, so the one call handles both without branching here.
     private List<ClubEvent> ActiveClubEvents =>
-        ClubEvents.Where(ce => ce.Start.Date <= Date.Date && Date.Date <= ce.End.Date).ToList();
+        ClubEvents.Where(ce => CalendarStyles.OccursOnDay(ce.Start, ce.ExclusiveEnd, Date)).ToList();
 
     // Every club event on this day, in one band above the hourly grid: all-day first (no hour to
     // sort them by), then timed ones in start order. Timed events used to sit in the timeline itself
