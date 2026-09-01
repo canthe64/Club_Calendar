@@ -545,6 +545,64 @@ occurrence within the searched range as a separate row — v1 does not collapse 
 need a key of `SeriesMasterId` (per-sheet) plus `BookingGroupId` and a decision about what date a
 collapsed row displays; flagged for the operator rather than guessed at.
 
+**CSV export (added 2026-08-27, D102/D103).** An "Export CSV" link beside Search, visible only once a
+search has actually returned at least one result, downloads every match as `event-search-<date>.csv`
+via a new endpoint (§5.7) — see `StaffSearchExportEndpoint` and `Domain/Search/SearchResultsCsv.cs`.
+
+*Why CSV, not PDF (D102).* PDF was the format first proposed and planned in detail, but the plan's
+central tension was real: a one-click download needs either a new non-Microsoft dependency
+(QuestPDF/similar) on a project that had none, or a print-friendly HTML view the user opens and saves
+via the browser's own print dialog — two clicks, and the exact output depends on the browser's print
+engine. CSV needs neither compromise: zero new dependencies (`System.Text` is the whole implementation)
+and a genuine one-click download, following the exact pattern `SettingsLogsEndpoint`'s log archive
+already established. XLSX was considered and set aside for the same reason PDF's library option was —
+it would be the project's first non-Microsoft package — revisit if staff end up reformatting every CSV
+export by hand, at which point that cost is measured rather than assumed.
+
+*Shares the screen's exact result set, not a second implementation of it (D103).* The match/group/sort
+logic that used to live only in `EventSearch.razor`'s private `ApplyResults` moved to
+`Domain/Search/SearchResultsBuilder.Build`, called by both the page and the export endpoint. Without
+this, the screen and the export would each carry their own copy of "what counts as a match" and "how a
+multi-sheet booking collapses to one row" — precisely the two-copies-drift failure this codebase's own
+history keeps citing (§4.5's `BookingGroupKey` consolidation, D75, D88's grouping-consolidation
+paragraph above). `SearchResultsBuilder` applies no row cap — `EventSearch.MaxRenderedRows` (300) is a
+render-cost concern for the live page, and a CSV silently missing rows past some cap would be strictly
+worse than a screen showing "showing the first 300 of N," since nothing on a static file says a row was
+dropped. The endpoint re-parses and re-fetches rather than trying to snapshot whatever the circuit
+currently holds: that's what makes the export URL shareable, keeps a page reload from invalidating it,
+and hits `SheetBookingService`'s existing 30-second view cache (§4.3) — exporting immediately after
+running the identical search on screen costs no extra Graph calls.
+
+The same reasoning extended one step further after the export shipped: it needed the "sheet mailbox →
+person-readable label" helper (`sheet3@…` → `Sheet 3`), which by then existed as five separate
+identical private copies (`EventSearch.razor`, `CancelChoiceModal.razor`, `DayGrid.razor`,
+`EventFormModal.razor`, `BookingDetailModal.razor`) — a sixth copy in the new CSV code would have made
+it worse rather than better. Hoisted to `CalendarStyles.SheetLabel`, the same home `BookingGroupKey`,
+`SiblingGroup`, and `BookingDisplayTitle` already share for exactly this reason. `SeriesEditModal`'s and
+`SeriesWizardModal`'s own private copies, and the two genuinely different implementations
+(`PublicAvailabilityService`'s public-safe label, `BreelyBookingProcessor`'s admin-log label), were left
+alone — consolidating those wasn't what this change needed, and folding them in without review risked
+conflating labels that read differently on purpose.
+
+*What's in a row.* `Date, Start, End, Title, Type, Category, Sheets, Status, All day`. Start/End are
+full timestamps (`yyyy-MM-dd HH:mm`) rather than bare times — a deliberate departure from how the
+column was first described, made once the multi-day case was worked through: a bare time would have
+silently dropped the end *date* of any multi-day booking or bonspiel, which the screen can get away
+with because a click opens the detail modal and a CSV row cannot. An all-day club event gets date-only
+Start/End (no fabricated midnight) rather than blank cells, so a multi-day closure's real end date
+still survives into the file. `RenterPhone`/`RenterEmail` are excluded outright, by operator decision —
+the search page already tells staff those fields aren't searched, and a spreadsheet is exactly the
+artifact that piece of customer contact data would most easily leave the building in.
+
+*Two correctness properties, not polish.* A leading UTF-8 BOM (`Encoding.UTF8.GetPreamble()`), because
+Excel on Windows — the realistic opener for a file with this name — guesses Windows-1252 without one
+and renders any non-ASCII renter name as mojibake. And a CSV-formula-injection guard (OWASP's standard
+one: a cell starting with `=`, `+`, `-`, `@`, tab, or CR gets a literal leading `'` prefixed) applied to
+Title — the one field in this export that can carry text nobody at the club reviewed before it landed
+here, since `RenterName` on a Breely-sourced booking comes straight from that platform's
+`ClientFullName` (§4.8). Without it, a booking named `=HYPERLINK(...)` becomes a live formula the
+instant the file is opened in Excel or Sheets.
+
 ---
 
 ## 5. API Interactions
@@ -606,6 +664,21 @@ The host's name is shown publicly in the booking title ("Practice Ice - Hosted b
 ### 5.6 Log Download Endpoint (Settings page support, §4.9)
 
 `GET /settings/logs/download` (`SettingsLogsEndpoint`) is the one staff-facing surface built as a plain Minimal API endpoint rather than a Blazor page — the same "raw HTTP semantics don't fit the SignalR circuit" reasoning as the public endpoints (D15), just gated by the app's default authenticated fallback policy instead of `.AllowAnonymous()`, since this one isn't meant to be public. It zips every rotated log file in `AppLog:LogDirectory` (§4.9) into a single in-memory archive and returns it as `application/zip` — small enough at this app's log volume to build in memory rather than streaming to a temp file. `404` if no log files exist yet (e.g. immediately after a fresh deploy with nothing logged).
+
+### 5.7 Search Export Endpoint (Event Search support, §4.12)
+
+`GET /search/export.csv` (`StaffSearchExportEndpoint`) is the second staff-facing plain-Minimal-API
+surface, added for the same reason as §5.6's: a file download is a real HTTP response, and the
+interactive-server circuit is the wrong place for one. Explicitly bound to
+`StaffAuthorizationPolicies.StaffOnly` rather than left to inherit the global fallback policy — the
+same belt-and-suspenders choice `SettingsLogsEndpoint` already made, since §8/D74 records that how
+ASP.NET Core resolves `FallbackPolicy` against a Minimal API endpoint's own metadata has never actually
+been confirmed against a real non-staff sign-in.
+
+Takes the same three inputs the search page's own state holds (`q`, `start`, `end`), re-parses and
+re-fetches rather than reading anything out of the circuit, and returns `400 Bad Request` for a blank
+query rather than a valid-but-pointless empty file. §4.12 covers what shaped the CSV itself; this
+section is only the endpoint's own contract.
 
 ---
 
@@ -931,6 +1004,7 @@ To reuse this for bowling lanes, tennis courts, or other facilities: the resourc
 - Staff UI via bUnit — `Settings.razor` (the D56 PII warning banner, the D55 interval dropdown), and `MainLayout.razor`'s header menu (D76): staff see every destination, non-staff see only the three they can use, the staff hrefs are absent from the DOM rather than merely hidden, open/close behaviour, and the greeting using the display-name claim rather than the UPN (D71). Those tests deliberately displace bUnit's placeholder `IAuthorizationService` and register the app's own `StaffAuthorizationPolicies` instead of using bUnit's `AddTestAuthorization()` — the point is to exercise the real policy, not a faked one, so the menu can't drift from what the pages enforce.
 - Practice ice hosting (§5.4.4) — the free-time gap computation (blocking parity between a Hold and a Confirmed booking, ice-blocking vs. non-blocking club events, eligible-hours/lead-time/horizon clamping, 30-minute grid alignment, the minimum-session floor), the public title's host-name/UPN-guard behavior (D69), and `PracticeIceRequestService`'s submit/approve/decline paths including the D70 mail-failure-resilience fix (a `FakeGraphMailGateway.ThrowOnSend` regression test for each of the three write paths) - `FacilityScheduler.Tests/Services/PracticeIceAvailabilityTests.cs`, `PracticeIceRequestServiceTests.cs`, `PracticeIceRulesTests.cs`, plus `FacilityConfigurationTests` additions for the new config section's validation.
 - The unified event form and the calendar page (§4.4, D95) — `EventDraftTests` pins the mode-switch carry-over, most importantly that flipping on-ice/off-ice and back never alters an event's `Start`/`End` (it reuses the exact multi-day fixture that caught the original `LoadForEdit` bug, §4.11). `EventFormModalTests` covers which controls each mode shows, the create-only mode lock (D96), and that data typed before a switch survives it. `CalendarRenderTests`/`CalendarFilterTests` give `Calendar.razor` its first render coverage, including per-category off-ice filtering (D97). `CalendarClosureCrossCheckTests` pins the closure overlap predicate at its boundaries — the all-day case it did **not** previously handle is the D98 bug (§8).
+- The CSV search export (§4.12/§5.7, D102/D103) — `SearchResultsBuilderTests` proves the extracted match/group/sort logic against the same cases the page's own behavior always depended on: a multi-sheet booking collapses to one row while two unrelated same-time bookings never merge, upcoming sorts soonest-first and past sorts most-recent-first, both bookings and club events are matched and counted, and no row cap is ever applied (400 seeded bookings, all 400 returned) - the property the export actually depends on. `SearchResultsCsvTests` covers the shaping itself: the header row, the UTF-8 BOM's exact 3 bytes, an on-ice row listing every sheet in its group, an all-day multi-day club event showing both dates with no time (the case that would otherwise silently lose its end date), phone/email never appearing anywhere in the file, RFC 4180 quoting for a comma or an embedded double quote, and - the property with real teeth - a title starting with `=`/`+`/`-`/`@` getting neutralized rather than reaching Excel as a live formula. `EventSearchExportTests` covers what the page controls: no link before a search, no link when a search returns nothing, the link's URL carrying the last RESOLVED query/range rather than whatever's currently typed. `StaffSearchExportEndpointTests` covers the one piece of endpoint logic worth unit-testing directly (date parsing); the endpoint's `StaffOnly` binding itself has the same live-verification gap as every other Minimal API authorization binding in this app (§8/D74).
 - Keystroke render cost (D101) — `KeystrokeRenderCostTests` asserts the *render count* of a single keystroke rather than any timing, so it's deterministic: typing in the query box and in Notes costs zero renders, the first character of a title costs one (it flips Save) and subsequent ones cost zero, while Enter, a category chip click, and the draft actually receiving the typed text all still work. Three of them fail against the pre-fix components. Worth keeping because the regression here is invisible in the UI — reintroducing an `async Task` handler or a `StateHasChanged()` would silently restore the cost with nothing on screen to show for it.
 - Day view's club-event band and rails (§4.4, D100) — `DayGridClubEventTests` is `DayGrid`'s first coverage of any kind. It pins that no element in the grid is a full-width absolute overlay (the shape that made one club event able to hide another), that a booking under a club event still renders, that concurrent club events get distinct rail lanes while sequential ones share one, that all-day and timed events share the single band, and that a rail is always its band row's category colour — including for a closure, where the deleted overlay's `#a02c21` had already crept into the first draft of the rail. Four of these fail against the pre-fix component, and the colour one against the first draft of the fix; that was verified by running them against both rather than assumed.
 - Quarter-hour time entry (§4.2) — `TimeOfDayPickerTests` pins the arithmetic between the two dropdowns (changing the hour keeps the chosen minutes; changing the minutes keeps the hour) and the end-of-day Midnight case, where the minutes control is disabled and carries no value of its own. `CalendarStylesTests` proves every hour × quarter combination the picker can produce is a value `TimeOptionsMinutes` considers legal, and that `SnapToQuarter` lands on a displayable option for every minute of the day. `BookingDraftTests`/`ClubEventDraftTests` cover the snap on load from an Outlook-side edit and the clamped late-evening seed — both cases where an off-grid value used to render as 12 AM and save as midnight.

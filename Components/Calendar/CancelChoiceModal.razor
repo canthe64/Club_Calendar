@@ -8,7 +8,7 @@
             <div style="font-size:16px;font-weight:600;color:#1e2a33;margin-bottom:4px">Cancel this booking?</div>
             <div style="font-size:13px;color:#5a7183;margin-bottom:12px">
                 @(string.IsNullOrWhiteSpace(first.RenterName) ? CalendarStyles.CategoryLabel(first.Category) : first.RenterName)
-                — @string.Join(", ", Group.Select(g => SheetLabel(g.SheetMailbox)))
+                — @string.Join(", ", Group.Select(g => CalendarStyles.SheetLabel(g.SheetMailbox)))
                 · @first.Start.ToString("MMM d, h:mmtt")-@first.End.ToString("h:mmtt")
             </div>
             <div style="display:flex;flex-direction:column;gap:7px;font-size:13.5px;font-weight:600">
@@ -33,11 +33,4 @@
     [Parameter] public List<SheetBooking>? Group { get; set; }
     [Parameter] public EventCallback<bool> OnChoice { get; set; }
     [Parameter] public EventCallback OnKeep { get; set; }
-
-    private static string SheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
-    }
 }

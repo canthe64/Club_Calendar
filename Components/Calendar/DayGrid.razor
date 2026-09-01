@@ -44,7 +44,7 @@
             <div style="display:flex;gap:3px">
                 @foreach (var sheet in Facility.SheetMailboxes)
                 {
-                    <div style="flex:1;text-align:center;color:#5a7183;font-weight:600;height:20px">@SheetLabel(sheet)</div>
+                    <div style="flex:1;text-align:center;color:#5a7183;font-weight:600;height:20px">@CalendarStyles.SheetLabel(sheet)</div>
                 }
             </div>
             @* One band for every club event on this day, all-day and timed alike. Timed ones used to
@@ -179,13 +179,6 @@
 
     private List<SheetBooking> BookingsForSheet(string sheet) =>
         Bookings.Where(b => b.SheetMailbox == sheet).ToList();
-
-    private static string SheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
-    }
 
     private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
 

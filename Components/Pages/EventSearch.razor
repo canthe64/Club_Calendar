@@ -1,6 +1,10 @@
 @page "/search"
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Domain.Search
+@* Alias so every existing ResultRow reference in this file (fields, OpenResult's parameter) keeps
+   working unchanged - the type itself moved to SearchResultsBuilder when the CSV export needed the
+   exact same match/group/sort logic the screen already used. *@
+@using ResultRow = FacilityScheduler.Domain.Search.SearchResultsBuilder.ResultRow
 @using FacilityScheduler.Services
 @using FacilityScheduler.Components.Calendar
 @inject SheetBookingService BookingService
@@ -37,6 +41,18 @@
               style="background:@(_isSearching || RangeBlocksSearch ? "#e8b4ae" : "#c62f2f");color:#fff;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:@(_isSearching || RangeBlocksSearch ? "default" : "pointer");white-space:nowrap">
             @(_isSearching ? "Searching…" : "Search")
         </span>
+        @* A plain <a>, not an @onclick handler - a file download has to be a real HTTP response, and
+           routing it through the SignalR circuit is the wrong tool (same reasoning as
+           SettingsLogsEndpoint's log download). Disabled by omitting href until a search has actually
+           run, rather than always present and erroring on an empty query. Exports the FULL match set,
+           not just what's on screen - MaxRenderedRows is a render-cost cap, not a real result limit. *@
+        @if (_hasSearched && (_upcoming.Count > 0 || _past.Count > 0))
+        {
+            <a href="@ExportUrl" title="Download every matching result as a CSV file"
+               style="border:1px solid #2d5f8a;color:#2d5f8a;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;white-space:nowrap;text-decoration:none">
+                Export CSV
+            </a>
+        }
     </div>
     @* Always visible, not just on the help card - this used to only mention the day cap before the
        first search, which is exactly when it matters least. Switches to a specific, actionable
@@ -125,7 +141,7 @@
                                 <span style="font-weight:600;color:#1e2a33;font-size:14px">@CalendarStyles.BookingDisplayTitle(ub)</span>
                                 <span style="font-size:13px;color:#5a7183">@FormatBookingRange(ub)</span>
                                 <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
-                                    @string.Join(", ", CalendarStyles.SiblingGroup(_allBookings, ub).Select(m => SheetLabel(m.SheetMailbox)))
+                                    @string.Join(", ", CalendarStyles.SiblingGroup(_allBookings, ub).Select(m => CalendarStyles.SheetLabel(m.SheetMailbox)))
                                     @if (ub.State == BookingState.Hold)
                                     {
                                         <span style="border:1px dashed #2d5f8a;color:#2d5f8a;padding:1px 8px;border-radius:8px;font-weight:600">Hold</span>
@@ -167,7 +183,7 @@
                                 <span style="font-weight:600;color:#1e2a33;font-size:14px">@CalendarStyles.BookingDisplayTitle(pb)</span>
                                 <span style="font-size:13px;color:#5a7183">@FormatBookingRange(pb)</span>
                                 <span style="margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:#5a7183;white-space:nowrap">
-                                    @string.Join(", ", CalendarStyles.SiblingGroup(_allBookings, pb).Select(m => SheetLabel(m.SheetMailbox)))
+                                    @string.Join(", ", CalendarStyles.SiblingGroup(_allBookings, pb).Select(m => CalendarStyles.SheetLabel(m.SheetMailbox)))
                                     @if (pb.State == BookingState.Hold)
                                     {
                                         <span style="border:1px dashed #2d5f8a;color:#2d5f8a;padding:1px 8px;border-radius:8px;font-weight:600">Hold</span>
@@ -203,8 +219,6 @@
 
 @code {
     private const int MaxRenderedRows = 300;
-
-    private sealed record ResultRow(DateTime Start, DateTime End, SheetBooking? Booking, ClubEvent? ClubEvent);
 
     internal enum SearchViewState { Idle, Searching, Results }
 
@@ -339,6 +353,12 @@
     private bool RangeTooWide => RequestedSpanDays is { } days && days > SearchRange.MaxSpanDays;
     private bool RangeBlocksSearch => RangeEndBeforeStart || RangeTooWide;
 
+    // Built from the last RESOLVED search (_query/_lastResolvedStart/_lastResolvedEnd), not the live
+    // text in the box - so the link always points at exactly the results currently on screen, not
+    // whatever's been typed since without yet pressing Search/Enter.
+    private string ExportUrl =>
+        $"/search/export.csv?q={Uri.EscapeDataString(_query)}&start={_lastResolvedStart:yyyy-MM-dd}&end={_lastResolvedEnd:yyyy-MM-dd}";
+
     private string? RangeBlockMessage =>
         RangeEndBeforeStart ? "End date is before start date - fix the dates to search." :
         RangeTooWide ? $"That's a {RequestedSpanDays}-day range - narrow it to {SearchRange.MaxSpanDays} days or fewer to search." :
@@ -395,39 +415,20 @@
 
     private void ApplyResults(SearchQuery query)
     {
-        var bookingRows = _allBookings
-            .Where(b => EventSearchMatcher.Matches(b, query))
-            .GroupBy(CalendarStyles.BookingGroupKey)
-            .Select(g => g.First())
-            .Select(b => new ResultRow(b.Start, b.End, b, null));
-
-        var clubEventRows = _allClubEvents
-            .Where(ce => EventSearchMatcher.Matches(ce, query))
-            .Select(ce => new ResultRow(ce.Start, ce.End, null, ce));
-
-        var allRows = bookingRows.Concat(clubEventRows).ToList();
-        _onIceMatchCount = allRows.Count(r => r.Booking is not null);
-        _offIceMatchCount = allRows.Count(r => r.ClubEvent is not null);
-
-        var today = Facility.Today;
-        _upcoming = allRows.Where(r => r.End.Date >= today.Date)
-            .OrderBy(r => r.Start).ThenBy(RowTitle).ThenBy(RowSheetKey)
-            .ToList();
-        _past = allRows.Where(r => r.End.Date < today.Date)
-            .OrderByDescending(r => r.Start).ThenBy(RowTitle).ThenBy(RowSheetKey)
-            .ToList();
+        var result = SearchResultsBuilder.Build(_allBookings, _allClubEvents, query, Facility.Today);
+        _onIceMatchCount = result.OnIceMatchCount;
+        _offIceMatchCount = result.OffIceMatchCount;
+        _upcoming = result.Upcoming;
+        _past = result.Past;
 
         // Upcoming first when the combined set exceeds the render cap - a stale past occurrence is
-        // less actionable than a future one when both can't fit.
+        // less actionable than a future one when both can't fit. The cap is a render-cost concern
+        // for THIS page only - SearchResultsBuilder itself never truncates, which is what lets the
+        // CSV export (StaffSearchExportEndpoint) return every match with nothing silently dropped.
         _cappedUpcoming = _upcoming.Take(MaxRenderedRows).ToList();
         var remaining = MaxRenderedRows - _cappedUpcoming.Count;
         _cappedPast = remaining > 0 ? _past.Take(remaining).ToList() : [];
     }
-
-    private static string RowTitle(ResultRow r) =>
-        r.Booking is { } b ? CalendarStyles.BookingDisplayTitle(b) : r.ClubEvent!.Title;
-
-    private static string RowSheetKey(ResultRow r) => r.Booking?.SheetMailbox ?? string.Empty;
 
     private void OpenResult(ResultRow row)
     {
@@ -464,12 +465,5 @@
         return ce.Start.Date == ce.End.Date
             ? $"{ce.Start:dddd, MMM d, yyyy} · {ce.Start:h:mmtt}-{ce.End:h:mmtt}"
             : $"{ce.Start:MMM d, h:mmtt} - {ce.End:MMM d, h:mmtt yyyy}";
-    }
-
-    private static string SheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
     }
 }

@@ -12,7 +12,7 @@
             <div style="font-size:13px;color:#5a7183;margin-bottom:12px">@first.Start.ToString("dddd, MMM d, h:mmtt")-@first.End.ToString("h:mmtt")</div>
 
             <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:13.5px">
-                <span style="color:#5a7183">Sheets</span><span style="color:#1e2a33">@string.Join(", ", Group.Select(g => SheetLabel(g.SheetMailbox)))</span>
+                <span style="color:#5a7183">Sheets</span><span style="color:#1e2a33">@string.Join(", ", Group.Select(g => CalendarStyles.SheetLabel(g.SheetMailbox)))</span>
             </div>
             <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:13.5px">
                 <span style="color:#5a7183">Category</span><span style="color:#1e2a33">@first.Category</span>
@@ -96,11 +96,4 @@
     // The search page is the only ReadOnly caller today.
     [Parameter] public bool ReadOnly { get; set; }
     [Parameter] public EventCallback<List<SheetBooking>> OnOpenOnCalendar { get; set; }
-
-    private static string SheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
-    }
 }

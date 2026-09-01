@@ -2,7 +2,7 @@
 
 ## Overview
 
-This app exposes **six** HTTP API endpoints. Staff functionality (creating and managing bookings,
+This app exposes **seven** HTTP API endpoints. Staff functionality (creating and managing bookings,
 club events) is built almost entirely as Blazor Server components rendered over an authenticated
 SignalR circuit, not called via HTTP — the endpoints below are the deliberate exceptions.
 
@@ -14,6 +14,7 @@ SignalR circuit, not called via HTTP — the endpoints below are the deliberate 
 | `GET /public/practice-ice` | Anonymous | Open times a member could volunteer to host practice ice |
 | `POST /api/webhooks/breely` | Shared secret | The one anonymous **write** surface — ingests Breely booking notifications (architecture doc §4.8/§5.5). A deliberate, bounded exception to "public surfaces are read-only," not a broadening of the rule. |
 | `GET /settings/logs/download` | Staff sign-in | Log archive download (architecture doc §5.6) |
+| `GET /search/export.csv` | Staff sign-in | CSV export of the staff event search (architecture doc §4.12/§5.7) |
 
 **Why these are Minimal API endpoints rather than Blazor pages** — a hard rule (D15), confirmed by a
 live incident: `.AllowAnonymous()` was once tried on the shared Razor Components registration to
@@ -286,14 +287,14 @@ Event marker for staff to reassign manually.
 
 ### `GET /settings/logs/download`
 
-The one staff-facing HTTP endpoint in the app (architecture doc §5.6) - built as a plain Minimal API
-endpoint rather than a Blazor page for the same "raw HTTP semantics don't fit the SignalR circuit"
+One of two staff-facing HTTP endpoints in the app (architecture doc §5.6) - built as a plain Minimal
+API endpoint rather than a Blazor page for the same "raw HTTP semantics don't fit the SignalR circuit"
 reason the anonymous endpoints above are, just gated by sign-in instead of `.AllowAnonymous()`.
 Backs the **Settings** page's (`/settings`, architecture doc §4.9) "Download full log archive" link.
 
-- **Auth:** staff sign-in required - covered by the app's default authenticated fallback policy
-  (`Program.cs:64-71`), same as every other page; no separate check needed since this route was
-  never marked anonymous.
+- **Auth:** staff sign-in required - explicitly bound to `StaffAuthorizationPolicies.StaffOnly`
+  rather than left to the app's default authenticated fallback policy (`Program.cs:64-71`), the same
+  belt-and-suspenders choice `/search/export.csv` below makes.
 - **Response `200 OK`** - `application/zip`, containing every rotated log file in `AppLog:LogDirectory`
   (architecture doc §4.9) as separate entries, built in memory (small enough at this app's log
   volume). Filename: `facility-scheduler-logs-yyyy-MM-dd.zip`.
@@ -302,9 +303,33 @@ Backs the **Settings** page's (`/settings`, architecture doc §4.9) "Download fu
 
 ---
 
+### `GET /search/export.csv`
+
+The other staff-facing HTTP endpoint (architecture doc §4.12/§5.7) - added for the same "a file
+download is a real HTTP response, not circuit work" reason as the log download above. Backs the
+**Event Search** page's (`/search`) "Export CSV" link, which only appears once a search has actually
+returned at least one result.
+
+- **Auth:** staff sign-in required, explicitly bound to `StaffAuthorizationPolicies.StaffOnly`.
+- **Query parameters:** `q` (the raw search text, same grammar as the page - architecture doc §4.12),
+  `start`/`end` (`yyyy-MM-dd`, optional - same defaulting/clamping as the page's own date range via
+  `SearchRange.Resolve`).
+- **Response `200 OK`** - `text/csv`, UTF-8 with a leading BOM (so Excel on Windows doesn't misread
+  non-ASCII renter names). Filename: `event-search-yyyy-MM-dd.csv`. Columns: `Date, Start, End, Title,
+  Type, Category, Sheets, Status, All day` - never `RenterPhone`/`RenterEmail` (operator decision).
+  Contains **every** match, not a capped subset - the 300-row render cap on the live page is a
+  render-cost concern, not a real result limit. A title beginning with `=`, `+`, `-`, `@`, tab, or CR
+  is prefixed with a literal `'` (CSV-formula-injection guard) before it's written.
+- **Response `400 Bad Request`** - the query resolved to nothing at all (a blank/whitespace `q`).
+- **Stateless:** re-parses `q` and re-fetches from `SheetBookingService`/`ClubEventService` rather than
+  reading anything held by a live circuit, which is what makes the URL shareable and lets it hit the
+  30-second view cache (architecture doc §4.3) instead of always re-fanning-out to Graph.
+
+---
+
 ## Staff-facing surface
 
-Aside from the one exception directly above, there is no staff API to call. Staff sign in via Entra
+Aside from the two exceptions directly above, there is no staff API to call. Staff sign in via Entra
 ID (`Program.cs:56-62`) and interact entirely through Blazor Server pages - every page except the
 public endpoints above requires authentication by default (`FallbackPolicy =
 RequireAuthenticatedUser()`, `Program.cs:64-71`). Guest-vs-member-vs-any-authenticated-user access is
@@ -416,7 +441,7 @@ lambdas were not, which is how a full staff lockout reached production (architec
 
 | Member | Purpose |
 |---|---|
-| `StaffOnly` (const) / `BuildStaffOnly()` | Signed in **and** carrying the `facility:staff` claim. Registered as both the `FallbackPolicy` (so every page/endpoint without explicit authorization metadata inherits it) and a named policy for endpoints that opt in explicitly, like `/settings/logs/download`. |
+| `StaffOnly` (const) / `BuildStaffOnly()` | Signed in **and** carrying the `facility:staff` claim. Registered as both the `FallbackPolicy` (so every page/endpoint without explicit authorization metadata inherits it) and a named policy for endpoints that opt in explicitly, like `/settings/logs/download` and `/search/export.csv`. |
 | `AnyAuthenticatedUser` (const) / `BuildAnyAuthenticatedUser()` | Signed in, staff or not — the single deliberate carve-out, used only by `/practice-ice/request`. |
 | `Configure(AuthorizationOptions)` | Wires both policies plus the fallback. Called by `Program.cs`; called directly by `StaffAuthorizationPolicyTests` so what's asserted is exactly what runs. |
 

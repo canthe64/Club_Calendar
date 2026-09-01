@@ -29,7 +29,7 @@
                         }
                         else
                         {
-                            <div style="font-size:13px;color:#8a5049;line-height:1.5">@SheetLabel(c.SheetMailbox): @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") (@c.Category)@(string.IsNullOrWhiteSpace(c.RenterName) ? "" : $" — \"{CalendarStyles.TruncateForConflictDisplay(c.RenterName)}\"")</div>
+                            <div style="font-size:13px;color:#8a5049;line-height:1.5">@CalendarStyles.SheetLabel(c.SheetMailbox): @c.Start.ToString("h:mmtt")-@c.End.ToString("h:mmtt") (@c.Category)@(string.IsNullOrWhiteSpace(c.RenterName) ? "" : $" — \"{CalendarStyles.TruncateForConflictDisplay(c.RenterName)}\"")</div>
                         }
                     }
                     <div style="font-size:12px;color:#8a5049;margin-top:4px">Nothing was saved — deselect the sheet, or change the time.</div>
@@ -86,7 +86,7 @@
                             var isSelected = IsOnIce && Draft.OnIce.SelectedSheets.Contains(sheet);
                             <span @onclick="() => ToggleSheet(sheet)"
                                   style="background:@(isSelected ? "#2d5f8a" : "#fff");color:@(isSelected ? "#fff" : "#2d5f8a");border:1px solid #2d5f8a;padding:5px 0;width:72px;text-align:center;border-radius:6px;font-weight:600;cursor:@(IsOnIce ? "pointer" : "default")">
-                                @SheetLabel(sheet)
+                                @CalendarStyles.SheetLabel(sheet)
                             </span>
                         }
                         <span @onclick="SelectAllSheets"
@@ -450,10 +450,4 @@
         if (IsOnIce) { Draft.OnIce.EndMinutes = m; } else { Draft.OffIce.EndMinutes = m; }
     }
 
-    private static string SheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
-    }
 }

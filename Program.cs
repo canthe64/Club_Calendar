@@ -222,6 +222,7 @@ app.MapPublicSearchEndpoint();
 app.MapPracticeIcePublicEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
 app.MapSettingsLogsEndpoint();
+app.MapStaffSearchExportEndpoint();
 
 // Debug-tier only - lets a Settings-page reader see "the app restarted at X" without needing Azure
 // portal access to the platform's own Activity Log. ApplicationStopping fires on a graceful

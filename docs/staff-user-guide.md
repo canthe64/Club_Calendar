@@ -288,6 +288,12 @@ Click a result to see its detail. From there, **Open on calendar** takes you to 
 Calendar page, where you can edit or cancel it the normal way — Search itself is read-only, so you
 always jump to the same working edit screen you'd use from the calendar directly.
 
+**Export CSV** appears once your search has found at least one result. It downloads *every* match —
+not just the ones on screen, even if there are more than fit — as a spreadsheet file you can open in
+Excel or Google Sheets, with one row per result: date, start and end time, title, on-ice/off-ice,
+category, sheet(s), and Hold/Confirmed status. It does **not** include phone numbers or email
+addresses, the same as the search results on screen.
+
 ---
 
 ## 7. Understanding Conflict Warnings

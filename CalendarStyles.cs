@@ -107,6 +107,17 @@ public static class CalendarStyles
     public static string BookingDisplayTitle(SheetBooking b) =>
         string.IsNullOrWhiteSpace(b.RenterName) ? CategoryLabel(b.Category) : b.RenterName;
 
+    /// <summary>A sheet resource mailbox as a person-readable label ("sheet3@..." -> "Sheet 3"),
+    /// falling back to the raw local part when it carries no digits. Shared by every calendar grid,
+    /// the booking modals, the search page and the CSV export so all of them name a sheet the same
+    /// way instead of each keeping its own copy of this rule.</summary>
+    public static string SheetLabel(string sheetMailbox)
+    {
+        var localPart = sheetMailbox.Split('@')[0];
+        var digits = new string(localPart.Where(char.IsDigit).ToArray());
+        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
+    }
+
     /// <summary>Caps a title shown in a conflict list (staff feedback: include the conflicting
     /// event's title, but a long renter name or off-ice event title shouldn't overflow the dialog
     /// it's rendered in). Shared by every conflicts panel rather than each picking its own limit.</summary>
