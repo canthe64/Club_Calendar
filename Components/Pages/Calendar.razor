@@ -119,8 +119,10 @@
 
 <EventFormModal IsOpen="_formOpen" Draft="_eventDraft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveEventDraft" OnCancel="CloseForm" OnDelete="DeleteOffIceEventDraft" />
 <ClubEventDetailModal ClubEvent="_clubEventDetail" OnClose="() => _clubEventDetail = null" OnEdit="StartEditClubEvent" OnDelete="DeleteClubEventDirect" />
-<BookingDetailModal Group="_detailGroup" OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" OnEditSeries="StartEditSeries" />
-<SeriesEditModal Group="_seriesEditGroup" Conflicts="_seriesEditConflicts" IsSaving="_isSavingSeriesEdit" OnSave="SaveSeries" OnCancel="CloseSeriesEdit" />
+<BookingDetailModal Group="_detailGroup" SeriesRange="_detailSeriesRange" IsLoadingSeriesRange="_isLoadingDetailSeriesRange"
+                     OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" OnEditSeries="StartEditSeries" />
+<SeriesEditModal Group="_seriesEditGroup" SeriesRange="_seriesEditRange" IsLoadingSeriesRange="_isLoadingSeriesEditRange"
+                  Conflicts="_seriesEditConflicts" IsSaving="_isSavingSeriesEdit" OnSave="SaveSeries" OnCancel="CloseSeriesEdit" />
 <CancelChoiceModal Group="_cancelGroup" OnChoice="ApplyCancelChoice" OnKeep="() => _cancelGroup = null" />
 <SeriesWizardModal IsOpen="_seriesWizardOpen" Draft="_seriesDraft" Step="_seriesStep" Conflicts="_seriesConflicts"
                     IsLoadingPreview="_isLoadingSeriesPreview" IsSaving="_isSavingSeries" SeasonWarning="@_seriesSeasonWarning"
@@ -182,7 +184,12 @@
     private ClubEvent? _clubEventDetail;
 
     private List<SheetBooking>? _detailGroup;
+    private SeriesDateRange? _detailSeriesRange;
+    private bool _isLoadingDetailSeriesRange;
+
     private List<SheetBooking>? _seriesEditGroup;
+    private SeriesDateRange? _seriesEditRange;
+    private bool _isLoadingSeriesEditRange;
     private List<SheetBooking> _seriesEditConflicts = [];
     private bool _isSavingSeriesEdit;
     private List<SheetBooking>? _cancelGroup;
@@ -358,7 +365,26 @@
     // See CalendarStyles.SiblingGroup for why this needs more than a bare BookingGroupId match
     // (a Guid.Empty default on an untouched series occurrence, and a multi-week series sharing one
     // group id across occurrences that can be loaded together in Month view).
-    private void OpenDetail(SheetBooking booking) => _detailGroup = CalendarStyles.SiblingGroup(_allBookings, booking);
+    //
+    // The dialog itself opens on the FIRST render below (everything it needs besides the series
+    // range is already in _allBookings) - StateHasChanged before the await is what makes that render
+    // happen instead of waiting for the whole method, including the fetch, to finish first. Only a
+    // recurring booking pays for that fetch at all; an ordinary one returns before ever touching
+    // Graph, matching this method's previous zero-Graph-call behavior exactly.
+    private async Task OpenDetail(SheetBooking booking)
+    {
+        _detailGroup = CalendarStyles.SiblingGroup(_allBookings, booking);
+        _detailSeriesRange = null;
+        _isLoadingDetailSeriesRange = _detailGroup.Any(g => g.SeriesMasterId is not null);
+        if (!_isLoadingDetailSeriesRange)
+        {
+            return;
+        }
+
+        StateHasChanged();
+        _detailSeriesRange = await BookingService.GetSeriesRangeAsync(_detailGroup[0]);
+        _isLoadingDetailSeriesRange = false;
+    }
 
     private void ToggleNewMenu() => _newMenuOpen = !_newMenuOpen;
 
@@ -420,16 +446,31 @@
         _cancelGroup = group;
     }
 
-    private void StartEditSeries(List<SheetBooking> group)
+    // Same instant-open-then-fill-in shape as OpenDetail above, and for the same reason - this is
+    // only ever reached from "Edit whole series…", so SeriesMasterId is always set here in practice,
+    // but the fetch is still gated on it rather than assumed.
+    private async Task StartEditSeries(List<SheetBooking> group)
     {
         _detailGroup = null;
         _seriesEditConflicts = [];
         _seriesEditGroup = group;
+        _seriesEditRange = null;
+        _isLoadingSeriesEditRange = group.Any(g => g.SeriesMasterId is not null);
+        if (!_isLoadingSeriesEditRange)
+        {
+            return;
+        }
+
+        StateHasChanged();
+        _seriesEditRange = await BookingService.GetSeriesRangeAsync(group[0]);
+        _isLoadingSeriesEditRange = false;
     }
 
     private void CloseSeriesEdit()
     {
         _seriesEditGroup = null;
+        _seriesEditRange = null;
+        _isLoadingSeriesEditRange = false;
         _seriesEditConflicts = [];
     }
 

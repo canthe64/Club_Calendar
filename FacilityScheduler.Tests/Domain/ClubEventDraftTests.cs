@@ -6,6 +6,20 @@ namespace FacilityScheduler.Tests.Domain;
 public class ClubEventDraftTests
 {
     [Fact]
+    public void Reset_DefaultsToTimed_NotAllDay()
+    {
+        // Staff feedback 2026-08-27: most off-ice events staff create (meetings, closures) have a
+        // real start/end time; defaulting to all-day meant unchecking a box just to reach the time
+        // pickers on every one of them. ClubEvent.IsAllDay (the persisted record) keeps its own
+        // separate default untouched - this is only the form's starting point.
+        var draft = new ClubEventDraft();
+
+        draft.Reset(new DateTime(2026, 8, 19));
+
+        Assert.False(draft.IsAllDay);
+    }
+
+    [Fact]
     public void LoadForEdit_MultiDayTimedEvent_RoundTripsThroughDraftFields()
     {
         // EndMinutes used to be computed relative to Start's date instead of End's, so a genuinely

@@ -130,8 +130,11 @@ public class EventDraft
     }
 
     // All-day: only the calendar date matters, and Start==End is a valid single-day event. Timed:
-    // an equal date with an end-time at or before the start-time must be rejected too, not just an
-    // out-of-order date.
+    // an out-of-order date/time (End before Start) must be rejected, but End == Start is allowed -
+    // staff feedback 2026-08-27: a zero-duration off-ice event (a point-in-time marker - a ribbon
+    // cutting, an announcement - with no real span) is legitimate and shouldn't need a fake minute
+    // of padding just to pass validation. On-ice bookings keep the stricter End > Start rule in
+    // ValidateOnIce above, unchanged - occupying a sheet for zero minutes isn't a real booking.
     private static (bool, string) ValidateOffIce(ClubEventDraft d)
     {
         if (!d.Category.HasValue) { return (false, "Choose a category."); }
@@ -140,9 +143,9 @@ public class EventDraft
         {
             return (false, "The end date must be on or after the start date.");
         }
-        if (!d.IsAllDay && d.End <= d.Start)
+        if (!d.IsAllDay && d.End < d.Start)
         {
-            return (false, "The end time must be after the start time.");
+            return (false, "The end time can't be before the start time.");
         }
         return (true, string.Empty);
     }

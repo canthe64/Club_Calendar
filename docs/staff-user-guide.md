@@ -141,7 +141,9 @@ adjust the sheets or time and try again.
 
 Click any booking chip to open its detail view, which offers **Edit event…** and **Cancel Booking**.
 If the booking is part of a recurring series, a second row appears below those with **Edit whole
-series…** and **Cancel entire series** (§4).
+series…** and **Cancel entire series** (§4), labeled with the series' own start and end date — read
+live from the series each time you open the dialog, so it briefly says "loading series dates…" before
+filling in.
 
 - **Edit event…** reopens the same form, pre-filled. If you deselect a sheet that was previously part of a
   multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
@@ -192,11 +194,12 @@ skipped or outside the season, **Create series** is disabled until you adjust th
 
 - **Edit event…** — the ordinary single-occurrence edit. Changes only the date you clicked,
   including its time.
-- **Edit whole series…** — applies to every date, past and future. You can change the title, notes,
-  category, and which sheets the series occupies, but **not the time** — a series can span months, so
-  a time change would mean re-checking every date against everything else on the calendar, which was
-  judged too easy to get wrong. To move a series, edit each occurrence you need to move individually,
-  or cancel and re-create it.
+- **Edit whole series…** — applies to every date, past and future; its header names the series' own
+  start and end date, so you can confirm you've got the right series before changing it. You can
+  change the title, notes, category, and which sheets the series occupies, but **not the time** — a
+  series can span months, so a time change would mean re-checking every date against everything else
+  on the calendar, which was judged too easy to get wrong. To move a series, edit each occurrence you
+  need to move individually, or cancel and re-create it.
   - Removing a sheet drops every date of the series from it — this can never conflict.
   - Adding a sheet is checked against every date first; if any date collides with something already
     on that sheet, the whole change is refused and nothing is saved. Fix or skip that date's conflict
@@ -222,8 +225,11 @@ are the ones that only appear on that side.
   Required, no default. "Out of Town Bonspiels" is members travelling to play elsewhere — not to be
   confused with the on-ice Bonspiel category, which is one held on this club's own ice.
 - **Event Title** — required.
-- **All day** — toggle on/off. When off, set **From**/**To** times (same hour + minutes dropdowns as
-  bookings).
+- **All day** — off by default (most off-ice events — meetings, closures — have a real start and end
+  time), so **From**/**To** times (same hour + minutes dropdowns as bookings) are visible immediately;
+  toggle it on for something that genuinely spans whole days instead. A timed event's End can equal
+  its Start — a zero-length marker for something that happens at a moment rather than over a span
+  (e.g. a ribbon cutting) — but not fall before it.
 - **Start date** / **End date** — moving Start date past the current End date pulls End date forward
   to match, so the range never goes invalid; it never pulls End date backward, so a span you've
   already set up is preserved unless the new start actually outruns it.

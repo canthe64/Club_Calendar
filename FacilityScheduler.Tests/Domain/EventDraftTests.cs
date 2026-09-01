@@ -116,11 +116,32 @@ public class EventDraftTests
     {
         var draft = new EventDraft();
         draft.ResetForCreate(EventMode.OnIce, Today);
-        Assert.True(draft.OffIce.IsAllDay); // the off-ice default
+        // Arranged explicitly rather than relied on as the off-ice default (that default is its own
+        // test, ResetForCreate_OffIce_DefaultsToTimed_NotAllDay, below) - this test's actual claim is
+        // that CarryOver always turns all-day off on the way into off-ice mode, even from a draft
+        // that had it on, not merely that it happens to start off.
+        draft.OffIce.IsAllDay = true;
 
         draft.SetMode(EventMode.OffIce);
 
         Assert.False(draft.OffIce.IsAllDay);
+    }
+
+    [Fact]
+    public void ResetForCreate_OffIce_DefaultsToTimed_NotAllDay()
+    {
+        // Staff feedback 2026-08-27: most off-ice events staff create (meetings, closures) have a
+        // real start/end time, and defaulting to all-day meant unchecking a box on every one just to
+        // reach the time pickers. Checked via both entry points - opening straight into off-ice mode,
+        // and the off-ice side of a draft opened on-ice (SetMode never visits Reset, only CarryOver,
+        // so this doesn't already follow from the test above).
+        var openedOffIce = new EventDraft();
+        openedOffIce.ResetForCreate(EventMode.OffIce, Today);
+        Assert.False(openedOffIce.OffIce.IsAllDay);
+
+        var openedOnIce = new EventDraft();
+        openedOnIce.ResetForCreate(EventMode.OnIce, Today);
+        Assert.False(openedOnIce.OffIce.IsAllDay);
     }
 
     [Fact]
@@ -313,6 +334,24 @@ public class EventDraftTests
     }
 
     [Fact]
+    public void Validate_OnIceTimedZeroDuration_IsStillBlocked()
+    {
+        // The two modes deliberately diverge here (Validate_OffIceTimedZeroDuration_IsAllowed,
+        // below): occupying a sheet for zero minutes isn't a real booking, so ValidateOnIce keeps
+        // the strict End > Start rule the 2026-08-27 off-ice change relaxed for ValidateOffIce only.
+        var draft = new EventDraft();
+        draft.ResetForCreate(EventMode.OnIce, Today, initialSheets: ["sheet1@test.onmicrosoft.com"]);
+        draft.OnIce.SetCategory(BookingCategory.League);
+        draft.OnIce.RenterName = "Tuesday Night League";
+        draft.OnIce.EndMinutes = draft.OnIce.StartMinutes;
+
+        var (canSave, message) = EventDraft.Validate(draft);
+
+        Assert.False(canSave);
+        Assert.Equal("The end time must be after the start time.", message);
+    }
+
+    [Fact]
     public void Validate_CompleteOnIceDraft_CanSave()
     {
         var draft = new EventDraft();
@@ -386,7 +425,26 @@ public class EventDraftTests
         var (canSave, message) = EventDraft.Validate(draft);
 
         Assert.False(canSave);
-        Assert.Equal("The end time must be after the start time.", message);
+        Assert.Equal("The end time can't be before the start time.", message);
+    }
+
+    [Fact]
+    public void Validate_OffIceTimedZeroDuration_IsAllowed()
+    {
+        // Staff feedback 2026-08-27: a point-in-time off-ice marker (a ribbon cutting, an
+        // announcement) is legitimate with no real span - unlike an on-ice booking, which still
+        // requires End strictly after Start (Validate_OnIceTimedZeroDuration_IsStillBlocked, above).
+        var draft = new EventDraft();
+        draft.ResetForCreate(EventMode.OffIce, Today);
+        draft.OffIce.Category = ClubEventCategory.Meetings;
+        draft.OffIce.Title = "Ribbon Cutting";
+        draft.OffIce.IsAllDay = false;
+        draft.OffIce.StartMinutes = 10 * 60;
+        draft.OffIce.EndMinutes = 10 * 60;
+
+        var (canSave, _) = EventDraft.Validate(draft);
+
+        Assert.True(canSave);
     }
 
     [Fact]

@@ -73,7 +73,7 @@
             @if (!ReadOnly && Group.Any(g => g.SeriesMasterId is not null))
             {
                 <div style="margin-top:10px;border-top:1px solid #e7ecef;padding-top:10px">
-                    <div style="font-size:12px;color:#90a0ab;margin-bottom:6px">Part of a recurring series</div>
+                    <div style="font-size:12px;color:#90a0ab;margin-bottom:6px">Part of a recurring series@(SeriesRangeText)</div>
                     <div style="display:flex;gap:8px;font-size:13.5px;font-weight:600">
                         <span @onclick="() => OnEditSeries.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #d7dfe5;color:#2d5f8a;border-radius:6px;padding:7px 0;cursor:pointer">Edit whole series…</span>
                         <span @onclick="() => OnCancelSeries.InvokeAsync(Group)" style="flex:1;text-align:center;border:1px solid #e8b4ae;color:#a02c21;border-radius:6px;padding:7px 0;cursor:pointer">Cancel entire series</span>
@@ -96,4 +96,19 @@
     // The search page is the only ReadOnly caller today.
     [Parameter] public bool ReadOnly { get; set; }
     [Parameter] public EventCallback<List<SheetBooking>> OnOpenOnCalendar { get; set; }
+
+    // Both default to their type's default (null/false), so a caller that never sets them - there
+    // are none yet, since the search page's ReadOnly usage hides this whole block regardless -
+    // renders exactly as before. The caller (Calendar.razor) fetches SeriesRange itself, on open,
+    // from SheetBookingService.GetSeriesRangeAsync - a live Graph read of the series master's
+    // recurrence, since neither this component's own Group nor anything already loaded for the
+    // calendar view carries the series' start/end date (staff feedback 2026-08-27).
+    [Parameter] public SeriesDateRange? SeriesRange { get; set; }
+    [Parameter] public bool IsLoadingSeriesRange { get; set; }
+
+    private string SeriesRangeText =>
+        IsLoadingSeriesRange ? " — loading series dates…" :
+        SeriesRange is { } range
+            ? $" — starting {range.FirstDate:MMM d, yyyy}{(range.LastDate is { } last ? $" and ending {last:MMM d, yyyy}" : "")}"
+            : "";
 }

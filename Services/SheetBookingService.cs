@@ -977,6 +977,48 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
     }
 
     /// <summary>
+    /// The series' own configured first/last date (staff feedback 2026-08-27: neither
+    /// BookingDetailModal's "Part of a recurring series" note nor SeriesEditModal's header showed
+    /// this at all). Deliberately reads only the master's <c>Recurrence.Range</c> - one Graph GET -
+    /// rather than enumerating every live occurrence the way <see cref="SeriesOccurrenceWindowsAsync"/>
+    /// does for conflict-checking; the coarser, cheaper answer is also the more honest one to show
+    /// here, since "the dates staff picked when creating the series" is what this note means, not
+    /// "every date still live" (an occurrence individually deleted mid-series wouldn't move either
+    /// endpoint of what's displayed, which is correct - staff removed a date, not shortened the
+    /// series). Returns null for anything that isn't part of a series, and swallows a Graph failure
+    /// (a stale reference to an already-deleted master, a transient error) into null rather than
+    /// letting a purely informational read break either dialog - the caller already has everything
+    /// else it needs to render without this.
+    /// </summary>
+    public async Task<SeriesDateRange?> GetSeriesRangeAsync(SheetBooking reference, CancellationToken ct = default)
+    {
+        if (reference.SeriesMasterId is not { } masterId)
+        {
+            return null;
+        }
+
+        Event? master;
+        try
+        {
+            master = await graph.GetEventAsync(reference.SheetMailbox, masterId, ct: ct);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+
+        var range = master?.Recurrence?.Range;
+        if (range is null)
+        {
+            return null;
+        }
+
+        var firstDate = range.StartDate is { } sd ? new DateTime(sd.Year, sd.Month, sd.Day) : reference.Start.Date;
+        var lastDate = range.EndDate is { } ed ? new DateTime(ed.Year, ed.Month, ed.Day) : (DateTime?)null;
+        return new SeriesDateRange(firstDate, lastDate);
+    }
+
+    /// <summary>
     /// Deletes the entire recurring series (all occurrences, past and future) for every sheet in
     /// the group. This is the "backdoor" for correcting a data-entry mistake at series creation -
     /// deliberately not a primary UX path. No-op for members that aren't part of a series.

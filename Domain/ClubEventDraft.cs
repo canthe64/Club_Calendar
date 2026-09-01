@@ -13,7 +13,12 @@ public class ClubEventDraft
     /// new club event.</summary>
     public ClubEventCategory? Category { get; set; }
 
-    public bool IsAllDay { get; set; } = true;
+    // Off, not on: staff feedback 2026-08-27 - most off-ice events staff create are meetings/closures
+    // with a real start and end time, and defaulting to all-day meant unchecking a box on every one
+    // of them just to reach the time pickers at all. ClubEvent.IsAllDay (the persisted record) keeps
+    // its own separate `= true` default untouched - this is only the form's starting point, not what
+    // an event becomes if nobody touches the toggle.
+    public bool IsAllDay { get; set; }
 
     // Placeholders only - always overwritten by Reset()/LoadForEdit() before display; see
     // BookingDraft.Date for why this doesn't default from DateTime.UtcNow.
@@ -40,7 +45,7 @@ public class ClubEventDraft
     {
         Title = null;
         Category = null;
-        IsAllDay = true;
+        IsAllDay = false;
         StartDate = today.AddDays(1);
         EndDate = today.AddDays(1);
         StartMinutes = 9 * 60;
