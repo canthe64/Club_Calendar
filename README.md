@@ -60,7 +60,7 @@ Any Staff member can approve or decline practice ice requests, but only uses in 
 
 ## Features
 
-**Staff interface** — Month, Week, and Day calendar views, per-sheet or consolidated. Bookings can span multiple sheets at once and recur. Bookings carry a category (Group Event, League, Bonspiel, Maintenance, Practice Ice, Other) and a state: **Hold** (soft, still blocks others) or **Confirmed**. A separate whole-club "Club Events" resource covers events that occupy the facility rather than individual sheets, checking sheet bookings for closure conflicts.
+**Staff interface** — Month, Week, and Day calendar views, per-sheet or consolidated. Bookings can span multiple sheets at once and recur. Bookings carry a category (Group Event, League, Bonspiel, Maintenance, Practice Ice, Learn To Curl, Other) and a state: **Hold** (soft, still blocks others) or **Confirmed**. A separate whole-club "Club Events" resource covers events that occupy the facility rather than individual sheets, checking sheet bookings for closure conflicts.
 
 **Public, no sign-in required**
 

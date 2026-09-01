@@ -5,13 +5,15 @@ namespace FacilityScheduler;
 /// <summary>
 /// The app's own color/border mapping for categories and hold-vs-confirmed state, independent
 /// of Exchange's category colors (architecture doc S4.1 design rule). Blue=group event, green=league,
-/// magenta-purple=event, orange=bonspiel, grey=maintenance, lavender=practice ice, red=other.
-/// Dashed border = hold (not yet confirmed), solid = confirmed.
+/// magenta-purple=event, orange=bonspiel, grey=maintenance, lavender=practice ice, pink=learn to
+/// curl, red=other. Dashed border = hold (not yet confirmed), solid = confirmed.
 ///
 /// Practice Ice's lavender is deliberately blue-leaning (hue ~250) rather than a true light lavender:
 /// it has to sit next to Event's magenta-leaning purple (hue ~294) on the same grid and stay
 /// distinguishable, and a confirmed booking uses this color as a chip background with white text, so
 /// it also has to stay dark enough to read - the whole palette sits around a 4:1 contrast ratio.
+/// Learn To Curl's pink (hue ~330, D106) sits the same distance on the other side of Event's purple,
+/// for the same reason, and lands at ~4.25:1 white-text contrast.
 /// `docs/provision-categories.ps1` mirrors these choices onto Exchange's own master category list so
 /// the Outlook read-only fallback view (D2) doesn't show a different color scheme than the web UI.
 /// </summary>
@@ -25,6 +27,7 @@ public static class CalendarStyles
         BookingCategory.Bonspiel => "#c2622f",
         BookingCategory.Maintenance => "#8a97a3",
         BookingCategory.PracticeIce => "#7a6acb",
+        BookingCategory.LearnToCurl => "#cc4b8a",
         BookingCategory.Other => "#c0392b",
         _ => "#c0392b"
     };
@@ -37,6 +40,7 @@ public static class CalendarStyles
         BookingCategory.Bonspiel => "#f7e8e0",
         BookingCategory.Maintenance => "#eef1f3",
         BookingCategory.PracticeIce => "#edeaf9",
+        BookingCategory.LearnToCurl => "#f9e6f0",
         BookingCategory.Other => "#fbeae8",
         _ => "#fbeae8"
     };
@@ -51,6 +55,7 @@ public static class CalendarStyles
     {
         BookingCategory.GroupEvent => "Group Event",
         BookingCategory.PracticeIce => "Practice Ice",
+        BookingCategory.LearnToCurl => "Learn To Curl",
         _ => category.ToString()
     };
 

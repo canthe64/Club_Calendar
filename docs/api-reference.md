@@ -97,7 +97,7 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
 | Field | Type | Description |
 |---|---|---|
 | `generatedAtUtc` | datetime | When this response was computed (UTC). |
-| `sheetSlots` | array | Open-for-group-event windows only - an existing Group Event-category booking still in **Hold** state. Confirmed group event bookings and every other category (League/Bonspiel/Maintenance/Practice Ice/Other) are never included here. |
+| `sheetSlots` | array | Open-for-group-event windows only - an existing Group Event-category booking still in **Hold** state. Confirmed group event bookings and every other category (League/Bonspiel/Maintenance/Practice Ice/Learn To Curl/Other) are never included here. |
 | `sheetSlots[].sheetLabel` | string | Public-safe display name (e.g. `"Sheet 1"`) - never the underlying resource mailbox address. |
 | `sheetSlots[].start` / `.end` | datetime | Local facility time (not UTC), ISO 8601, no offset. |
 | `clubEvents` | array | Every club-wide event in the window, regardless of category. |
@@ -454,7 +454,7 @@ lambdas were not, which is how a full staff lockout reached production (architec
 | `PracticeIceRequestSummary` | `BookingGroupId`, `Start`, `End`, `HostName`, `HostEmail?`, `Notes?`, `SheetCount` | One pending request as shown on the approvals queue - the group's sheet-events collapsed into a single row. |
 | `PracticeIceActionResult` | `Success`, `NotificationSent` | Result of `ApproveAsync`/`DeclineAsync` - same split as `PracticeIceSubmitResult`, for the same reason. |
 | `ClubEvent` | `EventId`, `ICalUId`, `Title`, `Category` (`ClubEventCategory`), `Start`, `End`, `IsAllDay`, `MarksSheetsUnavailable`, `Notes`, `BookedBy` | Not tied to any sheet. |
-| `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `Other` | Display labels ("Group Event", "Practice Ice") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
+| `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `LearnToCurl`, `Other` | Display labels ("Group Event", "Practice Ice", "Learn To Curl") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
 | `BookingState` | `Hold`, `Confirmed` | |
 | `ClubEventCategory` | `OutOfTownBonspiels`, `Competitions`, `Activities`, `Closure`, `Other`, `Meetings` | Member **names** are the public API wire value (D79) and the Graph category literal - renaming one is a breaking change on both fronts. Ordinals are unpublished, so declaration order is free; picker display order is `CalendarStyles.ClubEventCategories`. Display label differs from the member name only for `OutOfTownBonspiels` ("Out of Town Bonspiels") - see `CalendarStyles.ClubEventCategoryLabel`. |
 | `BookingResult` | `IsSuccess`, `Booking?`, `Conflicts: List<SheetBooking>` | Result of a single-sheet create. |

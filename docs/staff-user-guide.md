@@ -67,8 +67,8 @@ solid = Confirmed). Where they sit depends on the view:
 Below the toolbar, two rows of chips filter what's currently displayed — this only affects what you
 see, not the underlying data:
 
-- **ON ICE** (Group Event, League, Bonspiel, Maintenance, Practice Ice, Other) — click to toggle a
-  category on or off.
+- **ON ICE** (Group Event, League, Bonspiel, Maintenance, Practice Ice, Learn To Curl, Other) — click
+  to toggle a category on or off.
 - **OFF ICE** (Out of Town Bonspiels, Competitions, Activities, Meetings, Closure, Other) — the same,
   for off-ice events (§5).
 

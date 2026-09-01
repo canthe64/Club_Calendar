@@ -8,6 +8,63 @@ public class CalendarStylesTests
     private static readonly DateTime Start = new(2026, 8, 21);
     private static readonly DateTime End = new(2026, 8, 23);
 
+    // ---- BookingCategory colour/label completeness ------------------------------------------
+
+    // CategoryColor/CategoryLightBg are switch expressions with a `_ =>` fallback (Other's colour) -
+    // forgetting to add a new enum member's case is NOT a compile error, just a silent visual bug
+    // where the new category quietly renders as Other. A distinctness check catches that: a missing
+    // case collides with Other's colour, and a copy-pasted case collides with whichever category it
+    // was copied from. This is what would have caught it if D106 (Learn To Curl) had skipped a case.
+    [Fact]
+    public void CategoryColor_IsDistinctForEveryCategory()
+    {
+        var colors = Enum.GetValues<BookingCategory>().Select(CalendarStyles.CategoryColor).ToList();
+
+        Assert.Equal(colors.Count, colors.Distinct().Count());
+    }
+
+    [Fact]
+    public void CategoryLightBg_IsDistinctForEveryCategory()
+    {
+        var colors = Enum.GetValues<BookingCategory>().Select(CalendarStyles.CategoryLightBg).ToList();
+
+        Assert.Equal(colors.Count, colors.Distinct().Count());
+    }
+
+    [Fact]
+    public void LearnToCurl_HasATwoWordDisplayLabel()
+    {
+        // Multi-word categories need an explicit CategoryLabel entry - the enum member name alone
+        // ("LearnToCurl") would otherwise leak into the UI with no spaces.
+        Assert.Equal("Learn To Curl", CalendarStyles.CategoryLabel(BookingCategory.LearnToCurl));
+    }
+
+    [Fact]
+    public void LearnToCurl_IsPink_NotBlackHexError()
+    {
+        // Pinned to the operator's explicit request rather than just "is distinct from everything
+        // else" (already covered above) - a colour that's merely distinct could still not be pink.
+        Assert.Equal("#cc4b8a", CalendarStyles.CategoryColor(BookingCategory.LearnToCurl));
+    }
+
+    [Fact]
+    public void SheetCategories_IncludesLearnToCurl_UnlikeEventWhichIsDeliberatelyExcluded()
+    {
+        Assert.Contains(BookingCategory.LearnToCurl, CalendarStyles.SheetCategories);
+    }
+
+    [Fact]
+    public void SheetCategories_OrdersLearnToCurlBeforeOther()
+    {
+        // SheetCategories has no separate curated order the way ClubEventCategories does - it derives
+        // display order directly from enum declaration order, so this is really pinning the enum
+        // declaration itself: Other must stay the trailing catch-all in every picker/filter row that
+        // renders this list, not have a real category appended after it.
+        var order = CalendarStyles.SheetCategories.ToList();
+
+        Assert.True(order.IndexOf(BookingCategory.LearnToCurl) < order.IndexOf(BookingCategory.Other));
+    }
+
     [Theory]
     [InlineData(2026, 8, 20, false)] // day before
     [InlineData(2026, 8, 21, true)]  // first day

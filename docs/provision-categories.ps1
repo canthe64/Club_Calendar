@@ -33,13 +33,14 @@ $headers = @{ Authorization = "Bearer $($tokenResponse.access_token)" }
 # from the sheet list, and the club list still said "Tournament" - renamed to "Activities" during the
 # build (architecture doc §4.4) - so both were provisioning an incomplete/stale palette.
 $sheetCategories = @(
-    @{ displayName = "GroupEvent";  color = "preset7"  },  # Blue      - app #2d5f8a
-    @{ displayName = "League";      color = "preset4"  },  # Green     - app #4a8a5f
-    @{ displayName = "Event";       color = "preset9"  },  # Cranberry - app #a05fa8 (reserved for club events, kept in the palette so a stray value still renders)
-    @{ displayName = "Bonspiel";    color = "preset1"  },  # Orange    - app #c2622f
-    @{ displayName = "Maintenance"; color = "preset12" },  # Gray      - app #8a97a3
-    @{ displayName = "PracticeIce"; color = "preset8"  },  # Purple    - app #7a6acb (closest preset to the app's lavender)
-    @{ displayName = "Other";       color = "preset0"  }   # Red       - app #c0392b
+    @{ displayName = "GroupEvent";   color = "preset7"  },  # Blue      - app #2d5f8a
+    @{ displayName = "League";       color = "preset4"  },  # Green     - app #4a8a5f
+    @{ displayName = "Event";        color = "preset9"  },  # Cranberry - app #a05fa8 (reserved for club events, kept in the palette so a stray value still renders)
+    @{ displayName = "Bonspiel";     color = "preset1"  },  # Orange    - app #c2622f
+    @{ displayName = "Maintenance";  color = "preset12" },  # Gray      - app #8a97a3
+    @{ displayName = "PracticeIce";  color = "preset8"  },  # Purple    - app #7a6acb (closest preset to the app's lavender)
+    @{ displayName = "LearnToCurl";  color = "preset9"  },  # Cranberry - app #cc4b8a (D106; Outlook has no distinct pink preset, so this shares Cranberry with Event above - same limited-palette tradeoff Maintenance/Closure already make with Gray below)
+    @{ displayName = "Other";        color = "preset0"  }   # Red       - app #c0392b
 )
 $clubEventCategories = @(
     # displayName must be the enum MEMBER NAME, not the display label - ClubEventService writes and

@@ -96,6 +96,20 @@ public class SearchQueryParserTests
         Assert.Equal(new HashSet<BookingCategory> { BookingCategory.PracticeIce }, query.BookingCategories);
     }
 
+    [Theory]
+    [InlineData("category:learntocurl")]
+    [InlineData("category:\"learn to curl\"")]
+    [InlineData("category:LEARN-TO-CURL")]
+    public void Parse_LearnToCurlCategory_NormalizesRegardlessOfPunctuationOrCase(string raw)
+    {
+        // SearchCategoryVocabulary builds itself from Enum.GetValues<BookingCategory>() rather than a
+        // hardcoded list, so a new category is searchable with no change to that file - this pins
+        // that it actually worked out that way for D106, not just that it should have.
+        var query = SearchQueryParser.Parse(raw);
+
+        Assert.Equal(new HashSet<BookingCategory> { BookingCategory.LearnToCurl }, query.BookingCategories);
+    }
+
     [Fact]
     public void Parse_UnknownCategoryValue_MatchesNothingAndEmitsNotice()
     {
