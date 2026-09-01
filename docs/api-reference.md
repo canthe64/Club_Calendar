@@ -88,8 +88,7 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
       "start": "2026-08-15T00:00:00",
       "end": "2026-08-17T00:00:00",
       "isAllDay": true,
-      "marksSheetsUnavailable": true,
-      "notes": null
+      "marksSheetsUnavailable": true
     }
   ]
 }
@@ -104,7 +103,14 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
 | `clubEvents` | array | Every club-wide event in the window, regardless of category. |
 | `clubEvents[].category` | string | One of `OutOfTownBonspiels`, `Competitions`, `Activities`, `Meetings`, `Closure`, `Other` — the **enum member name**, not the display label (so "Out of Town Bonspiels" is `OutOfTownBonspiels` here). **Changed 2026-08-17** (D79): this previously serialized as the enum's integer ordinal, contradicting this document. `PublicJsonOptions` now registers a string-enum converter, so the name is the wire value. `Bonspiel` was renamed to `OutOfTownBonspiels` and `Competitions` added 2026-08-18 (D81). |
 | `clubEvents[].marksSheetsUnavailable` | boolean | `true` when this event closes every sheet for its duration - the widget shows "all sheets reserved" wording specifically for these. |
-| `clubEvents[].notes` | string \| null | **Added 2026-09-01 (D108).** The staff-written Notes field, when there is one - `null` otherwise, including for the one Club Event this app creates itself (the "⚠ Web booking needs review" triage marker, architecture doc §4.8), whose Notes always embeds a real customer name and is never published. Truncated to 300 characters. **A sheet booking's own Notes has no counterpart on this feed** - `sheetSlots` only ever describes open windows, never an occupied booking, so there's currently nowhere for one to go (architecture doc §8). |
+
+**Notes is never published on this feed (D108, 2026-09-01).** Unlike `/public/calendar` (below), which
+shows a staff-written Notes field in its click-to-detail popup, this JSON response has no field for it
+at all - `PublicClubEventLabel.Notes` is `[JsonIgnore]`d off the wire format entirely, and there is no
+booking-shaped entry on this feed to begin with (`sheetSlots` only ever describes open windows, never
+an occupied booking). Decided this way rather than adding a value-level gate here too: this feed backs
+a CMS embed widget with no per-item detail view, so there's no surface to show Notes on even if it
+were included.
 
 A slot that overlaps a `marksSheetsUnavailable` club event is excluded from `sheetSlots` even if a
 Group Event hold technically still exists on Graph, so the public feed never promises ice that's

@@ -49,8 +49,11 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
         var clubEvents = (await clubEventService.GetEventsAsync(start, end, ct))
             .Where(ce => !window.IsPastPublicCutoff(ce.Start));
+        // No PublicClubEventNotes(ce) here (unlike the calendar-page mapping below) - Notes is
+        // [JsonIgnore]d off PublicClubEventLabel's wire format (D108), so computing/truncating it for
+        // a response that will never carry it is pure waste.
         var eventLabels = clubEvents
-            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable, PublicClubEventNotes(ce)))
+            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
             .OrderBy(e => e.Start)
             .ToList();
 

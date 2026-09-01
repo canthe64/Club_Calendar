@@ -1,3 +1,5 @@
+using System.Text.Json.Serialization;
+
 namespace FacilityScheduler.Domain;
 
 /// <summary>
@@ -17,14 +19,20 @@ public record PublicSheetSlot(string SheetLabel, DateTime Start, DateTime End);
 /// <summary>A whole-club event's public label - distinct from sheet slots per the architecture
 /// doc's decision (§4.4), e.g. "Aug 15-17: Summer Bonspiel - all sheets closed".
 ///
-/// <see cref="Notes"/> is null except when a staff member wrote it (D108) - never for a Club Event
-/// this app itself created via the Breely webhook (<c>BookedBy == BreelyBookingProcessor.BookedByLabel</c>),
-/// most importantly the "⚠ Web booking needs review" triage marker, whose Notes embeds the real
-/// customer name Breely sent (<c>ClientFullName</c>) plus an internal admin URL - see
-/// <c>PublicAvailabilityService</c>'s mapping for where that gate is actually applied; this type has
-/// no way to enforce it itself. Trailing optional parameter (default null) so existing positional
-/// construction sites keep compiling.</summary>
-public record PublicClubEventLabel(string Title, ClubEventCategory Category, DateTime Start, DateTime End, bool IsAllDay, bool MarksSheetsUnavailable, string? Notes = null);
+/// This type backs two different surfaces (<see cref="PublicAvailabilityResponse"/>'s JSON feed and
+/// <see cref="PublicMonthView"/>'s HTML calendar), and <see cref="Notes"/> is deliberately not treated
+/// the same on both: <c>[JsonIgnore]</c> keeps it off the JSON feed's wire format entirely (D108,
+/// 2026-09-01 - the feed has no per-viewer detail popup the way the calendar page does, so there's no
+/// place to show it and no reason to publish it there), while the calendar page still reads it
+/// directly in C# (never through this type's JSON serialization) to populate its click-to-detail
+/// popup. When populated for the calendar page, it's null except when a staff member wrote it - never
+/// for a Club Event this app itself created via the Breely webhook
+/// (<c>BookedBy == BreelyBookingProcessor.BookedByLabel</c>), most importantly the "⚠ Web booking
+/// needs review" triage marker, whose Notes embeds the real customer name Breely sent
+/// (<c>ClientFullName</c>) plus an internal admin URL - see <c>PublicAvailabilityService</c>'s mapping
+/// for where that gate is actually applied; this type has no way to enforce it itself. Trailing
+/// optional parameter (default null) so existing positional construction sites keep compiling.</summary>
+public record PublicClubEventLabel(string Title, ClubEventCategory Category, DateTime Start, DateTime End, bool IsAllDay, bool MarksSheetsUnavailable, [property: JsonIgnore] string? Notes = null);
 
 /// <summary>
 /// One sheet booking as shown on the public calendar (Month/Week/Day). Unlike PublicSheetSlot

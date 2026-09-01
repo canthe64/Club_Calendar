@@ -416,6 +416,44 @@ public class PublicAvailabilityServiceTests
     }
 
     [Fact]
+    public async Task ClubEventNote_NeverAppearsOnTheJsonFeed_EvenWhenStaffWrote_It()
+    {
+        // GetDayViewAsync (above) proves Notes reaches the *calendar-page* DTO. This proves the
+        // separate, stricter rule for the JSON feed (D108, 2026-09-01 operator request): the feed
+        // never carries a booking/Club Event's Notes at all, staff-written or not - PublicClubEventLabel.Notes
+        // is [JsonIgnore]d off the wire format entirely rather than gated per-value like the calendar
+        // page's copy is. A property-level assertion on the C# object wouldn't catch a regression here
+        // (JsonIgnore doesn't touch the property, only its serialization), so this serializes for real
+        // with the app's own PublicJsonOptions and inspects the resulting JSON text.
+        var (publicService, _, clubEventService, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+
+        await clubEventService.CreateAsync(new ClubEvent
+        {
+            Title = "East Lot Closure",
+            Category = ClubEventCategory.Closure,
+            Start = day,
+            End = day,
+            IsAllDay = true,
+            Notes = "East parking lot closed for resurfacing - use the main lot entrance.",
+            BookedBy = "staff@example.com"
+        }, "staff@example.com");
+
+        var response = await publicService.GetAvailabilityAsync(requestedDays: 30);
+        // Mirrors Program.cs exactly: ConfigureHttpJsonOptions layers PublicJsonOptions.Configure onto
+        // ASP.NET Core's own JsonOptions (camelCase by default), not a bare JsonSerializerOptions - a
+        // bare one defaults to PascalCase property names, which would make this test's "notes"
+        // substring check pass for the wrong reason (case mismatch, not real absence).
+        var options = new Microsoft.AspNetCore.Http.Json.JsonOptions().SerializerOptions;
+        PublicJsonOptions.Configure(options);
+        var json = System.Text.Json.JsonSerializer.Serialize(response, options);
+
+        Assert.Single(response.ClubEvents);
+        Assert.DoesNotContain("notes", json, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("East parking lot", json);
+    }
+
+    [Fact]
     public async Task BreelyTriageMarkerNote_IsNeverExposedPublicly()
     {
         // The concrete leak this gate exists to close: FlagNeedsTriageAsync's "⚠ Web booking needs
