@@ -131,7 +131,10 @@ it again.
   booking**. No default; you must pick one. Every other category is always a confirmed (hard)
   booking — this toggle doesn't appear for them.
 - **Event Title** — required for every category.
-- **Phone / Email** (Group Event only, optional) and **Notes** (optional, any category).
+- **Phone / Email** (Group Event only, optional) and **Notes** (optional, any category). **Notes is
+  shown on the public calendar** (members see it in the popup when they click the booking) — write it
+  as something you'd want a member to read, not an internal reminder. Phone and email are never shown
+  publicly regardless.
 
 Click **Save**. If the requested sheets/time conflict with an existing booking, or with an off-ice event
 flagged as closing all sheets, nothing is saved — a red banner lists exactly what conflicts, and you
@@ -235,7 +238,8 @@ are the ones that only appear on that side.
   already set up is preserved unless the new start actually outruns it.
 - **Closes all sheets for this time** — off by default. Turn this on if the event actually closes the
   ice (not every off-ice event does — e.g. a promotional tournament listing might not).
-- **Notes** (optional).
+- **Notes** (optional). **Shown on the public calendar**, same as a booking's Notes — write it for a
+  member audience.
 
 When **Closes all sheets for this time** is on, that event is cross-checked against new sheet bookings
 and series: attempting to book a sheet during that window is blocked (for a single booking) or
@@ -249,7 +253,9 @@ booking notification from the Breely booking website doesn't match any open grou
 sheet — the booking is still made (onto a fallback sheet) so it's never lost, but it needs a human to
 check it landed on the right sheet and reassign it if not. Its notes include a link back to that
 booking's page in Breely. It doesn't close any ice itself ("Marks all sheets unavailable" is off) —
-delete it once you've verified or corrected the booking it refers to.
+delete it once you've verified or corrected the booking it refers to. Unlike a staff-written Note,
+**this one is never shown on the public calendar** — it names a real customer and links to an internal
+admin page, so it's automatically withheld from members regardless of the setting above.
 
 ---
 

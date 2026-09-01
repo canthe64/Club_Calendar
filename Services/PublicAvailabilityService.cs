@@ -50,7 +50,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var clubEvents = (await clubEventService.GetEventsAsync(start, end, ct))
             .Where(ce => !window.IsPastPublicCutoff(ce.Start));
         var eventLabels = clubEvents
-            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
+            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable, PublicClubEventNotes(ce)))
             .OrderBy(e => e.Start)
             .ToList();
 
@@ -392,12 +392,12 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
                 var b = g.First();
                 var sheetCount = g.Count();
                 var title = sheetCount > 1 ? $"{PublicTitle(b)} · {sheetCount} sheets" : PublicTitle(b);
-                return new PublicMonthBooking(title, b.Category.ToString(), b.Start, b.End, b.State == BookingState.Confirmed);
+                return new PublicMonthBooking(title, b.Category.ToString(), b.Start, b.End, b.State == BookingState.Confirmed, PublicBookingNotes(b));
             })
             .ToList();
 
         var eventLabels = clubEvents
-            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable))
+            .Select(ce => new PublicClubEventLabel(ce.Title, ce.Category, ce.Start, ce.End, ce.IsAllDay, ce.MarksSheetsUnavailable, PublicClubEventNotes(ce)))
             .ToList();
 
         var view = new PublicMonthView(bookingLabels, eventLabels);
@@ -449,6 +449,36 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
 
         return string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
     }
+
+    // A publishable cap, not a chip-width one - Notes only ever reaches the public calendar's
+    // click-to-detail overlay (a 340px modal that wraps text over multiple lines), never an inline
+    // cell, so this is sized for "a genuinely useful sentence or two" rather than TruncateForConflict-
+    // Display's 40-char default for a single dense line. Reuses that same helper (its own maxChars
+    // override) rather than a second ellipsis implementation.
+    private const int PublicNotesMaxChars = 300;
+
+    // Same reasoning and same signal as PublicTitle's Breely check above (D52), applied to Notes
+    // instead of the title (D108, staff feedback 2026-08-27): a Breely-originated booking's Notes is
+    // BuildNotes' own fixed template (BreelyBookingProcessor), never staff-reviewed, so it's withheld
+    // here exactly like the real customer name already is. A staff-typed Note is trusted the same way
+    // a staff-typed title already is.
+    private static string? PublicBookingNotes(SheetBooking b) =>
+        string.IsNullOrWhiteSpace(b.ExternalBookingId) && !string.IsNullOrWhiteSpace(b.Notes)
+            ? CalendarStyles.TruncateForConflictDisplay(b.Notes, PublicNotesMaxChars)
+            : null;
+
+    // The Club Event equivalent of PublicBookingNotes above. ClubEvent has no ExternalBookingId - the
+    // Breely webhook never creates a booking there, only the occasional "⚠ Web booking needs review"
+    // triage marker (FlagNeedsTriageAsync) when a claim matches no open hold. That marker's own Notes
+    // embeds the real customer name Breely sent (client_full_name) plus an internal admin URL -
+    // exactly the kind of unreviewed, PII-bearing text this gate exists to catch, just reached by a
+    // different door than the booking case. BookedBy is the reliable signal instead: never staff-
+    // settable through the UI (ClubEventDraft.ToClubEvent always writes the signed-in user's own
+    // name), and set to this one constant only by that webhook path.
+    private static string? PublicClubEventNotes(ClubEvent ce) =>
+        ce.BookedBy != BreelyBookingProcessor.BookedByLabel && !string.IsNullOrWhiteSpace(ce.Notes)
+            ? CalendarStyles.TruncateForConflictDisplay(ce.Notes, PublicNotesMaxChars)
+            : null;
 
     // The host volunteers to run this session on behalf of the whole club, so naming them publicly
     // is a deliberate, accepted use of PII (docs/practice-ice-hosting-design.md §3.6) - but the

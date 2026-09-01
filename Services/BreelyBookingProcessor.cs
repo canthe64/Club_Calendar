@@ -29,7 +29,14 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     // that on its own since there's no shared config between the two systems.
     private const string SheetResourceType = "Curling Sheet";
     private const string ExternalIdSourcePrefix = "breely";
-    private const string BookedByLabel = "Breely webhook";
+    // Internal, not private: PublicAvailabilityService's Notes-exposure gate needs to recognize a
+    // machine-authored ClubEvent (the NeedsTriage marker below, FlagNeedsTriageAsync) the same way it
+    // recognizes a machine-authored SheetBooking via ExternalBookingId - ClubEvent has no such field,
+    // so BookedBy is the only reliable "no staff reviewed this" signal available for that type. Never
+    // staff-settable through the UI (ClubEventDraft.ToClubEvent always writes the signed-in user's own
+    // name for a new event), so referencing this one constant rather than a second copy of the
+    // literal string is what keeps the two checks from silently drifting apart.
+    internal const string BookedByLabel = "Breely webhook";
 
     // Guards against two concurrent webhook deliveries for the same external id (Breely has been
     // observed re-sending the same creation notification twice within minutes) racing through

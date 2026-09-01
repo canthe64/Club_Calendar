@@ -180,6 +180,7 @@ What does change per facility is vocabulary and slot-granularity rules, which li
 - Scope the app registration with an Application Access Policy. This is not optional.
 - The Breely webhook authenticates with a static shared secret compared in constant time. Support for stronger authentication methods can be implemented for other 3rd party tools (contributions appreciated).
 - The public calendar shows booking titles by design. Staff-typed titles are shown as-is and staff are expected to keep renter PII out of them; externally-originated titles are replaced with their category label, since they are auto-populated from a customer's real name with no chance to redact. Any new booking source needs its own explicit decision here rather than inheriting one of these.
+- The public calendar (and the JSON feed, for Club Events) also shows a staff-typed Notes field by the same rule: shown as-is when staff wrote it, withheld whenever it's machine-authored (a Breely-originated booking, or the "⚠ Web booking needs review" marker the webhook creates), since that text is never staff-reviewed and can carry a real customer name.
 - The public calendar is iframe-embeddable and currently sets no `frame-ancestors` restriction. Deliberate, and documented as worth revisiting.
 
 ## License

@@ -474,7 +474,10 @@ public static class PublicCalendarEndpoint
         return sb.ToString();
     }
 
-    private static void AppendDayCell(StringBuilder sb, DateTime cell, DateTime anchorMonth, PublicMonthView view)
+    // internal, not private - reached directly by PublicCalendarNotesRenderingTests (D108) via
+    // InternalsVisibleTo (D60's precedent), so the Notes-rendering markup is testable without a full
+    // ASP.NET Core test host.
+    internal static void AppendDayCell(StringBuilder sb, DateTime cell, DateTime anchorMonth, PublicMonthView view)
     {
         var inMonth = cell.Month == anchorMonth.Month;
         // CalendarStyles.ClubEventExclusiveEnd, not raw ce.End - a timed event ending exactly at
@@ -502,7 +505,7 @@ public static class PublicCalendarEndpoint
             var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, cell.Date);
             var cellTitle = $"{(ceContBefore ? "← " : "")}{cellTitleText}{(ceContAfter ? " →" : "")}";
             sb.Append($"""
-                <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(note)}"
+                <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(note)}" data-notes="{H(ce.Notes ?? "")}"
                      style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:none;border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
                 """);
         }
@@ -527,7 +530,7 @@ public static class PublicCalendarEndpoint
             var cellTitleText = contBefore ? b.Title : $"{CalendarStyles.CellStartTimeLabel(b.Start)} - {b.Title}";
             var cellTitle = $"{(contBefore ? "← " : "")}{cellTitleText}{(contAfter ? " →" : "")}";
             sb.Append($"""
-                <div class="pub-cal-chip{extraClass}" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(time)}" data-note=""
+                <div class="pub-cal-chip{extraClass}" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(time)}" data-note="" data-notes="{H(b.Notes ?? "")}"
                      style="display:{display};background:{bg};color:{textColor};border:{border};border-radius:3px;padding:1.5px 4px;margin-top:2px;font-size:11px;font-weight:600;white-space:nowrap;overflow:hidden;cursor:pointer">{H(cellTitle)}</div>
                 """);
         }
@@ -623,7 +626,8 @@ public static class PublicCalendarEndpoint
         sb.Append("</div></div>");
     }
 
-    private static void AppendDayColumn(StringBuilder sb, DateTime day, PublicMonthView view, double allDayRowHeightPx, bool showHeader, bool isMultiDay)
+    // internal, not private - see AppendDayCell's own comment above.
+    internal static void AppendDayColumn(StringBuilder sb, DateTime day, PublicMonthView view, double allDayRowHeightPx, bool showHeader, bool isMultiDay)
     {
         var widthStyle = isMultiDay ? "flex:1;min-width:92px" : "flex:1;min-width:0";
         sb.Append($"""<div style="{widthStyle}">""");
@@ -648,7 +652,7 @@ public static class PublicCalendarEndpoint
                 var (ceContBefore, ceContAfter) = CalendarStyles.ContinuationMarks(ce.Start, ce.End, day);
                 var chipText = $"{(ceContBefore ? "← " : "")}{text}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
-                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}"
+                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}" data-notes="{H(ce.Notes ?? "")}"
                          style="background:{CalendarStyles.ClubEventCategoryColor(ce.Category)};color:#fff;border:none;box-sizing:border-box;border-radius:4px;padding:2px 6px;font-size:11px;font-weight:600;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">{H(chipText)}</div>
                     """);
             }
@@ -679,7 +683,7 @@ public static class PublicCalendarEndpoint
                 var titleText = day.Date == ce.Start.Date ? $"{CalendarStyles.CellStartTimeLabel(ce.Start)} - {ce.Title}" : ce.Title;
                 var title = $"{(ceContBefore ? "← " : "")}{titleText}{(ceContAfter ? " →" : "")}";
                 sb.Append($"""
-                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}"
+                    <div class="pub-cal-chip" data-title="{H(ce.Title)}" data-subtitle="{H(CalendarStyles.ClubEventCategoryLabel(ce.Category))}" data-time="{H(FormatClubEventRange(ce))}" data-note="{H(ce.MarksSheetsUnavailable ? "All sheets closed" : "")}" data-notes="{H(ce.Notes ?? "")}"
                          style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:2;border-radius:5px;background:{bg};border:none;color:#fff;padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
                     """);
             }
@@ -698,7 +702,7 @@ public static class PublicCalendarEndpoint
                 var titleText = contBefore ? b.Title : $"{CalendarStyles.CellStartTimeLabel(laid.Item.Start)} - {b.Title}";
                 var title = $"{(contBefore ? "← " : "")}{titleText}{(contAfter ? " →" : "")}";
                 sb.Append($"""
-                    <div class="pub-cal-chip" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(timeText)}" data-note=""
+                    <div class="pub-cal-chip" data-title="{H(b.Title)}" data-subtitle="{H(subtitle)}" data-time="{H(timeText)}" data-note="" data-notes="{H(b.Notes ?? "")}"
                          style="box-sizing:border-box;position:absolute;top:{top}px;left:{leftPct}%;width:calc({widthPct}% - 2px);height:{height}px;z-index:1;border-radius:5px;background:{bg};border:{border};color:{textColor};padding:2px 5px;overflow:hidden;cursor:pointer;font-size:11px;font-weight:600">{H(title)}</div>
                     """);
             }
@@ -747,6 +751,7 @@ public static class PublicCalendarEndpoint
                 <div id="pub-cal-overlay-subtitle" style="font-size:13px;color:#90a0ab;margin-bottom:10px"></div>
                 <div id="pub-cal-overlay-time" style="font-size:12px;color:#1e2a33"></div>
                 <div id="pub-cal-overlay-note" style="font-size:13px;color:#a02c21;font-weight:600;margin-top:6px"></div>
+                <div id="pub-cal-overlay-notes" style="font-size:12.5px;color:#5a7183;margin-top:6px;white-space:pre-wrap"></div>
                 <div style="text-align:center;margin-top:14px">
                     <span id="pub-cal-overlay-close" style="border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 20px;cursor:pointer;font-size:12px;font-weight:600">Close</span>
                 </div>
@@ -759,12 +764,18 @@ public static class PublicCalendarEndpoint
                 var subtitleEl = document.getElementById('pub-cal-overlay-subtitle');
                 var timeEl = document.getElementById('pub-cal-overlay-time');
                 var noteEl = document.getElementById('pub-cal-overlay-note');
+                var notesEl = document.getElementById('pub-cal-overlay-notes');
 
                 function openOverlay(chip) {
                     titleEl.textContent = chip.getAttribute('data-title') || '';
                     subtitleEl.textContent = chip.getAttribute('data-subtitle') || '';
                     timeEl.textContent = chip.getAttribute('data-time') || '';
                     noteEl.textContent = chip.getAttribute('data-note') || '';
+                    // Separate from data-note above (the red "All sheets closed" warning, unchanged) -
+                    // this is a staff-written note meant to be genuinely useful, not an alert, so it
+                    // gets its own neutrally-styled element rather than inheriting red/bold styling
+                    // that would misrepresent it as a warning.
+                    notesEl.textContent = chip.getAttribute('data-notes') || '';
                     overlay.style.display = 'flex';
                 }
 

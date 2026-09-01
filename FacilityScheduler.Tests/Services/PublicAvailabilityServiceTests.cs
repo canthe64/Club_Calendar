@@ -328,4 +328,163 @@ public class PublicAvailabilityServiceTests
 
         Assert.Single(response.SheetSlots);
     }
+
+    // ---- Public Notes exposure (D108, staff feedback 2026-08-27) ----------------------------
+
+    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, ClubEventService ClubEventService, FacilityConfiguration Facility) BuildWithClubEvents()
+    {
+        var facility = TestFacility.Create();
+        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
+        var cache = new MemoryCache(new MemoryCacheOptions());
+        var appLog = TestAppLog.Create(facility);
+        var viewCache = new ViewCacheRegistry(cache);
+        var window = new SchedulingWindowService(appLog, viewCache);
+        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
+        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
+        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
+        return (publicService, bookingService, clubEventService, facility);
+    }
+
+    [Fact]
+    public async Task StaffTypedBookingNote_IsIncludedPublicly()
+    {
+        var (publicService, bookingService, _, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0],
+            Start = day.AddHours(18),
+            End = day.AddHours(19),
+            Category = BookingCategory.League,
+            State = BookingState.Confirmed,
+            RenterName = "Tuesday League",
+            Notes = "Bring your own broom - house brooms unavailable tonight."
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        Assert.Equal("Bring your own broom - house brooms unavailable tonight.", Assert.Single(view.Bookings).Notes);
+    }
+
+    [Fact]
+    public async Task BreelyOriginatedBookingNote_IsNeverExposedPublicly()
+    {
+        // The exact case D108 was written to guard: BuildNotes' fixed template (never staff-reviewed)
+        // must never reach the public calendar, same reasoning and same signal (ExternalBookingId)
+        // already used to suppress the real customer name in the title (D52).
+        var (publicService, bookingService, _, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.ForceCreateConfirmedAsync(TestFacility.SheetMailboxes[0], new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0],
+            Start = day.AddHours(18),
+            End = day.AddHours(19),
+            Category = BookingCategory.GroupEvent,
+            State = BookingState.Confirmed,
+            RenterName = "Jane Customer",
+            Notes = "Booked via Breely (Try Curling Group Reservation). Admin: https://breely.example/admin/123",
+            ExternalBookingId = "breely:123"
+        });
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        Assert.Null(Assert.Single(view.Bookings).Notes);
+    }
+
+    [Fact]
+    public async Task StaffTypedClubEventNote_IsIncludedPublicly()
+    {
+        var (publicService, _, clubEventService, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+
+        await clubEventService.CreateAsync(new ClubEvent
+        {
+            Title = "East Lot Closure",
+            Category = ClubEventCategory.Closure,
+            Start = day,
+            End = day,
+            IsAllDay = true,
+            Notes = "East parking lot closed for resurfacing - use the main lot entrance.",
+            BookedBy = "staff@example.com"
+        }, "staff@example.com");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        Assert.Equal("East parking lot closed for resurfacing - use the main lot entrance.", Assert.Single(view.ClubEvents).Notes);
+    }
+
+    [Fact]
+    public async Task BreelyTriageMarkerNote_IsNeverExposedPublicly()
+    {
+        // The concrete leak this gate exists to close: FlagNeedsTriageAsync's "⚠ Web booking needs
+        // review" marker embeds the customer's real name (Breely's client_full_name) plus an internal
+        // admin URL directly in Notes - reached through a Club Event, not a booking, so it has no
+        // ExternalBookingId to key off; BookedBy is the only reliable "the webhook wrote this, no
+        // staff reviewed it" signal ClubEvent carries.
+        var (publicService, _, clubEventService, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+
+        await clubEventService.CreateAsync(new ClubEvent
+        {
+            Title = "⚠ Web booking needs review",
+            Category = ClubEventCategory.Other,
+            Start = day,
+            End = day,
+            IsAllDay = true,
+            Notes = "Breely booking abc123 (Jane Customer, 6:00PM-7:00PM) didn't match any open hold on any sheet - booked directly onto Sheet 1. Verify manually and reassign if needed. Admin: https://breely.example/admin/abc123",
+            BookedBy = BreelyBookingProcessor.BookedByLabel
+        }, BreelyBookingProcessor.BookedByLabel);
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        Assert.Null(Assert.Single(view.ClubEvents).Notes);
+    }
+
+    [Fact]
+    public async Task BlankNote_StaysNull_NotAnEmptyString()
+    {
+        var (publicService, bookingService, _, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0],
+            Start = day.AddHours(18),
+            End = day.AddHours(19),
+            Category = BookingCategory.League,
+            State = BookingState.Confirmed,
+            RenterName = "Tuesday League"
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        Assert.Null(Assert.Single(view.Bookings).Notes);
+    }
+
+    [Fact]
+    public async Task LongNote_IsTruncatedRatherThanShownInFull()
+    {
+        var (publicService, bookingService, _, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+        var longNote = new string('x', 400);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0],
+            Start = day.AddHours(18),
+            End = day.AddHours(19),
+            Category = BookingCategory.League,
+            State = BookingState.Confirmed,
+            RenterName = "Tuesday League",
+            Notes = longNote
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        var publicNote = Assert.Single(view.Bookings).Notes;
+        Assert.NotNull(publicNote);
+        Assert.True(publicNote!.Length < longNote.Length, "a 400-char note must be shortened, not shown in full");
+    }
 }

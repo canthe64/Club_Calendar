@@ -15,8 +15,16 @@ public record PublicAvailabilityResponse(
 public record PublicSheetSlot(string SheetLabel, DateTime Start, DateTime End);
 
 /// <summary>A whole-club event's public label - distinct from sheet slots per the architecture
-/// doc's decision (§4.4), e.g. "Aug 15-17: Summer Bonspiel - all sheets closed".</summary>
-public record PublicClubEventLabel(string Title, ClubEventCategory Category, DateTime Start, DateTime End, bool IsAllDay, bool MarksSheetsUnavailable);
+/// doc's decision (§4.4), e.g. "Aug 15-17: Summer Bonspiel - all sheets closed".
+///
+/// <see cref="Notes"/> is null except when a staff member wrote it (D108) - never for a Club Event
+/// this app itself created via the Breely webhook (<c>BookedBy == BreelyBookingProcessor.BookedByLabel</c>),
+/// most importantly the "⚠ Web booking needs review" triage marker, whose Notes embeds the real
+/// customer name Breely sent (<c>ClientFullName</c>) plus an internal admin URL - see
+/// <c>PublicAvailabilityService</c>'s mapping for where that gate is actually applied; this type has
+/// no way to enforce it itself. Trailing optional parameter (default null) so existing positional
+/// construction sites keep compiling.</summary>
+public record PublicClubEventLabel(string Title, ClubEventCategory Category, DateTime Start, DateTime End, bool IsAllDay, bool MarksSheetsUnavailable, string? Notes = null);
 
 /// <summary>
 /// One sheet booking as shown on the public calendar (Month/Week/Day). Unlike PublicSheetSlot
@@ -27,7 +35,14 @@ public record PublicClubEventLabel(string Title, ClubEventCategory Category, Dat
 /// exception is a confirmed group event's renter name, which is handled by staff practice rather
 /// than being stripped here, per an explicit decision (2026-07-15).
 /// </summary>
-public record PublicMonthBooking(string Title, string CategoryLabel, DateTime Start, DateTime End, bool IsConfirmed);
+/// <summary><see cref="Notes"/> is null except when a staff member wrote it (D108) - never for a
+/// Breely-originated booking (<c>ExternalBookingId is not null</c>), whose title is already
+/// suppressed for the identical reason (D52: a customer's real name, auto-populated with no staff
+/// opportunity to redact it). This DTO exists only for the calendar page's own view - unlike
+/// <see cref="PublicClubEventLabel"/>, there is currently no booking-shaped entry in the JSON feed
+/// (<c>/api/public/availability</c> only ever describes open slots and Club Events, never an
+/// occupied booking), so this Notes field has no JSON-feed counterpart to keep in sync with.</summary>
+public record PublicMonthBooking(string Title, string CategoryLabel, DateTime Start, DateTime End, bool IsConfirmed, string? Notes = null);
 
 /// <summary>The public calendar's data for a given date range - despite the name (kept from when
 /// the public calendar had only a Month view), this same shape now backs Week and Day too

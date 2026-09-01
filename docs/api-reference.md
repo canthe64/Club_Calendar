@@ -88,7 +88,8 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
       "start": "2026-08-15T00:00:00",
       "end": "2026-08-17T00:00:00",
       "isAllDay": true,
-      "marksSheetsUnavailable": true
+      "marksSheetsUnavailable": true,
+      "notes": null
     }
   ]
 }
@@ -103,6 +104,7 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
 | `clubEvents` | array | Every club-wide event in the window, regardless of category. |
 | `clubEvents[].category` | string | One of `OutOfTownBonspiels`, `Competitions`, `Activities`, `Meetings`, `Closure`, `Other` — the **enum member name**, not the display label (so "Out of Town Bonspiels" is `OutOfTownBonspiels` here). **Changed 2026-08-17** (D79): this previously serialized as the enum's integer ordinal, contradicting this document. `PublicJsonOptions` now registers a string-enum converter, so the name is the wire value. `Bonspiel` was renamed to `OutOfTownBonspiels` and `Competitions` added 2026-08-18 (D81). |
 | `clubEvents[].marksSheetsUnavailable` | boolean | `true` when this event closes every sheet for its duration - the widget shows "all sheets reserved" wording specifically for these. |
+| `clubEvents[].notes` | string \| null | **Added 2026-09-01 (D108).** The staff-written Notes field, when there is one - `null` otherwise, including for the one Club Event this app creates itself (the "⚠ Web booking needs review" triage marker, architecture doc §4.8), whose Notes always embeds a real customer name and is never published. Truncated to 300 characters. **A sheet booking's own Notes has no counterpart on this feed** - `sheetSlots` only ever describes open windows, never an occupied booking, so there's currently nowhere for one to go (architecture doc §8). |
 
 A slot that overlaps a `marksSheetsUnavailable` club event is excluded from `sheetSlots` even if a
 Group Event hold technically still exists on Graph, so the public feed never promises ice that's
@@ -166,8 +168,12 @@ keeps a renter's identity private rather than the page stripping it programmatic
 exception (fixed 2026-08-04):** a Breely-originated booking's title is always the category label,
 never the customer's real name - `RenterName` there is populated automatically from Breely's own
 data with no staff opportunity to redact it first, unlike a title staff type themselves. Clicking a
-chip reveals the full category + hold/confirmed state and exact date/time. No phone numbers, emails,
-notes, or resource mailbox addresses ever appear.
+chip reveals the full category + hold/confirmed state and exact date/time, plus a staff-written Note
+when there is one (added 2026-09-01, D108) - shown in its own line, separate from the "All sheets
+closed" warning a closure carries. No phone numbers, emails, or resource mailbox addresses ever
+appear, and a Note is withheld the same way a Breely-originated title already is: never shown for a
+Breely-originated booking or the "⚠ Web booking needs review" triage marker it can create, both of
+which carry unreviewed customer-supplied text. Truncated to 300 characters.
 
 Intended for direct browsing or `<iframe>` embedding on the club's own site. Note: this is the **one
 route in the whole app** that doesn't send `X-Frame-Options`/a `frame-ancestors` CSP (added
