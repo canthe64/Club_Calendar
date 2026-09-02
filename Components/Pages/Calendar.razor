@@ -408,14 +408,21 @@
         OpenCreateForm(EventMode.OffIce);
     }
 
-    /// <summary>Opens the unified dialog for a new event. Anchored on _anchorDate (what's currently in
-    /// view), not Facility.Today - and now for both modes, where the old separate club-event path
-    /// anchored a day later than the booking path for no stated reason. The standalone Off-Ice Events
-    /// page has no "currently in view" concept and anchors on today instead.</summary>
+    /// <summary>Opens the unified dialog for a new event. Deliberately NOT anchored on _anchorDate
+    /// (what's currently in view) when <paramref name="initialStart"/> is omitted - that was the
+    /// previous behavior, and it produced a real bug (live-found 2026-09-01): the "+ New Event"
+    /// dropdown seeded BOTH Start and End date on whatever far-future date the calendar happened to be
+    /// scrolled to, and a staff member who then corrected only Start (the date they actually meant)
+    /// left End stranded on the original anchor date, silently creating a multi-day/week span instead
+    /// of the single-day booking they intended. Only an unambiguous, explicit user gesture - clicking
+    /// an actual grid slot (<see cref="OpenSlotForm"/>/<see cref="OpenWeekSlotForm"/>) - should seed a
+    /// date the user didn't just type themselves; the dropdown menu is not that gesture, so it passes
+    /// no <paramref name="initialStart"/> and falls through to <c>BookingDraft.Reset</c>'s own
+    /// "tomorrow" default instead.</summary>
     private void OpenCreateForm(EventMode mode, IEnumerable<string>? initialSheets = null, DateTime? initialStart = null)
     {
         _eventDraft = new EventDraft();
-        _eventDraft.ResetForCreate(mode, Facility.Today, initialSheets, initialStart ?? _anchorDate.AddHours(18));
+        _eventDraft.ResetForCreate(mode, Facility.Today, initialSheets, initialStart);
         _formConflicts = [];
         _formOpen = true;
     }
