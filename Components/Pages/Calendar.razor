@@ -206,6 +206,30 @@
 
     private DateTime WeekStart => _anchorDate.Date.AddDays(-(int)_anchorDate.DayOfWeek);
 
+    /// <summary>The date a brand-new event should open on when no date was explicitly clicked (the
+    /// "+ New Event"/"New Off-Ice Event" dropdown path, D109/D110). D109 stopped defaulting straight
+    /// to <c>_anchorDate</c> (it produced multi-day/week spans after navigating to a genuinely future
+    /// period), but landing on a fixed "tomorrow" instead turned out to cost staff extra clicks of
+    /// their own - re-navigating forward whenever they'd already scrolled ahead to enter a future
+    /// event, exactly the "click forward multiple months" friction reported live 2026-09-01. This
+    /// restores a period-aware default without reintroducing D109's bug: if Today falls within
+    /// whatever period is currently in view (this month in Month view, this week in Week view - Day
+    /// view's period is just the one day shown), the default is Today, the common case and never
+    /// wrong. Otherwise - viewing a genuinely different (usually future, but the same logic applies
+    /// looking back) period - it lands on that period's FIRST day rather than Today or any other day
+    /// within it, since there's no more-correct single day to guess once Today is out of view. Time-
+    /// of-day is applied separately by the caller (<see cref="OpenCreateForm"/>).</summary>
+    private DateTime DefaultCreateDate => View switch
+    {
+        ViewMode.Month => _anchorDate.Year == Facility.Today.Year && _anchorDate.Month == Facility.Today.Month
+            ? Facility.Today
+            : new DateTime(_anchorDate.Year, _anchorDate.Month, 1),
+        ViewMode.Week => Facility.Today >= WeekStart && Facility.Today < WeekStart.AddDays(7)
+            ? Facility.Today
+            : WeekStart,
+        _ => _anchorDate.Date,
+    };
+
     private List<SheetBooking> FilteredBookings => _allBookings
         .Where(b => _onIceCategories.Contains(b.Category))
         .ToList();
@@ -408,21 +432,16 @@
         OpenCreateForm(EventMode.OffIce);
     }
 
-    /// <summary>Opens the unified dialog for a new event. Deliberately NOT anchored on _anchorDate
-    /// (what's currently in view) when <paramref name="initialStart"/> is omitted - that was the
-    /// previous behavior, and it produced a real bug (live-found 2026-09-01): the "+ New Event"
-    /// dropdown seeded BOTH Start and End date on whatever far-future date the calendar happened to be
-    /// scrolled to, and a staff member who then corrected only Start (the date they actually meant)
-    /// left End stranded on the original anchor date, silently creating a multi-day/week span instead
-    /// of the single-day booking they intended. Only an unambiguous, explicit user gesture - clicking
-    /// an actual grid slot (<see cref="OpenSlotForm"/>/<see cref="OpenWeekSlotForm"/>) - should seed a
-    /// date the user didn't just type themselves; the dropdown menu is not that gesture, so it passes
-    /// no <paramref name="initialStart"/> and falls through to <c>BookingDraft.Reset</c>'s own
-    /// "tomorrow" default instead.</summary>
+    /// <summary>Opens the unified dialog for a new event. When <paramref name="initialStart"/> is
+    /// omitted (the dropdown path, not a clicked grid slot), the date comes from
+    /// <see cref="DefaultCreateDate"/> - period-aware (Today when in view, else the period's first
+    /// day) rather than a blind <c>_anchorDate</c> copy (D109) or a fixed "tomorrow" (D110). Time-of-
+    /// day still defaults to 6 PM either way, snapped onto the quarter-hour grid by construction
+    /// (18*60 is already a multiple of 15) - unrelated to, and unaffected by, which date gets picked.</summary>
     private void OpenCreateForm(EventMode mode, IEnumerable<string>? initialSheets = null, DateTime? initialStart = null)
     {
         _eventDraft = new EventDraft();
-        _eventDraft.ResetForCreate(mode, Facility.Today, initialSheets, initialStart);
+        _eventDraft.ResetForCreate(mode, Facility.Today, initialSheets, initialStart ?? DefaultCreateDate.AddHours(18));
         _formConflicts = [];
         _formOpen = true;
     }

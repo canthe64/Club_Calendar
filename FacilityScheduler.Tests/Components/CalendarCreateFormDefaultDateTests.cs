@@ -1,5 +1,6 @@
 using Bunit;
 using FacilityScheduler.Components.Pages;
+using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
 using Microsoft.AspNetCore.Components;
 using Microsoft.Extensions.DependencyInjection;
@@ -7,34 +8,33 @@ using Microsoft.Extensions.DependencyInjection;
 namespace FacilityScheduler.Tests.Components;
 
 /// <summary>
-/// Live-found 2026-09-01: the "+ New Event"/"New Off-Ice Event" dropdown items seeded a brand-new
-/// event's Start AND End date from _anchorDate - whatever date happened to be in view, which can sit
-/// weeks ahead of today after Prev/Next navigation or a date-jump. A staff member who then corrected
-/// only Start (the date they actually meant to book) left End stranded on the far-future anchor date,
-/// silently turning what should have been a one-day booking into a multi-day/week span that blocked
-/// ice or saved wrong. An actual clicked grid slot (OpenSlotForm/OpenWeekSlotForm, covered elsewhere)
-/// is a genuine, unambiguous date choice and is unaffected by this fix - only the dropdown's "no date
-/// was ever clicked" path changes.
+/// The "+ New Event"/"New Off-Ice Event" dropdown's default date, through two live-found rounds.
+///
+/// Round 1 (2026-09-01, D109): both Start and End were seeded from _anchorDate - whatever date the
+/// calendar happened to be scrolled to. Navigate forward a few weeks, open the dropdown, correct only
+/// Start, and End was left stranded on the far-future anchor - a silent multi-day/week span. Fixed by
+/// dropping the anchor and falling back to a fixed "tomorrow" instead.
+///
+/// Round 2 (2026-09-01, D110): "tomorrow" solved the span bug but broke the common case it hadn't
+/// broken before - staff who deliberately navigate ahead to enter a future event now had to re-navigate
+/// forward again after the dialog opened, since "tomorrow" ignored where they'd already scrolled to.
+/// This is the fix that landed: period-aware - Today when Today is actually part of the period
+/// currently in view, otherwise that period's first day (never any other day in it, since there's no
+/// more-correct guess once Today is out of view).
 /// </summary>
 public class CalendarCreateFormDefaultDateTests : BunitContext
 {
-    private static IRenderedComponent<Calendar> RenderCalendarAnchoredFarInTheFuture(
-        BunitContext ctx, out FacilityScheduler.Services.FacilityConfiguration facility, out DateTime farAnchor)
+    private static (IRenderedComponent<Calendar> Cut, FacilityConfiguration Facility) RenderCalendar(
+        BunitContext ctx, DateTime anchor, string view)
     {
-        var registered = StaffPageServices.Register(ctx);
-        var resolvedFacility = registered.Facility;
-        // Three weeks out - well past both "today" and "tomorrow" (BookingDraft.Reset's own no-date
-        // default), so a leftover anchor-date bug and the correct fallback can never coincide by luck.
-        var resolvedFarAnchor = resolvedFacility.Today.AddDays(21);
-        // Calendar.razor's QueryDate is [SupplyParameterFromQuery] - bUnit refuses to set it as an
-        // ordinary component parameter and requires navigating the fake NavigationManager instead,
-        // exactly as it would be supplied by the real router from a Prev/Next click or a date jump.
+        var facility = StaffPageServices.Register(ctx).Facility;
+        // Calendar.razor's ?date=/?view= are [SupplyParameterFromQuery] - bUnit refuses to set them as
+        // ordinary component parameters and requires navigating the fake NavigationManager instead,
+        // exactly as the real router would supply them from a Prev/Next click or a date jump.
         var nav = ctx.Services.GetRequiredService<NavigationManager>();
-        nav.NavigateTo(nav.GetUriWithQueryParameter("date", resolvedFarAnchor.ToString("yyyy-MM-dd")));
-        var cut = ctx.Render<Calendar>();
-        facility = resolvedFacility;
-        farAnchor = resolvedFarAnchor;
-        return cut;
+        nav.NavigateTo(nav.GetUriWithQueryParameter("date", anchor.ToString("yyyy-MM-dd")));
+        nav.NavigateTo(nav.GetUriWithQueryParameter("view", view));
+        return (ctx.Render<Calendar>(), facility);
     }
 
     private static void OpenNewEventMenuItem(IRenderedComponent<Calendar> cut, string itemText)
@@ -43,55 +43,121 @@ public class CalendarCreateFormDefaultDateTests : BunitContext
         cut.FindAll("div").First(el => el.TextContent.Trim() == itemText).Click();
     }
 
-    // The page's own "Jump to date" input (line ~31 of Calendar.razor) is also input[type=date] and
+    // The page's own "Jump to date" input (Calendar.razor's header) is also input[type=date] and
     // renders before the modal in DOM order - a plain type-selector query would silently pick that up
     // instead of the modal's Start/End fields (it's bound to _anchorDate, so a mistaken match here
-    // would look exactly like the bug this test exists to catch). Excluded by its aria-label instead.
+    // would look exactly like the D109 bug this suite exists to catch). Excluded by its aria-label.
     private static List<AngleSharp.Dom.IElement> ModalDateInputs(IRenderedComponent<Calendar> cut) =>
         [.. cut.FindAll("input[type=date]").Where(el => el.GetAttribute("aria-label") != "Jump to date")];
 
-    private static DateTime StartDateInputValue(IRenderedComponent<Calendar> cut) =>
+    private static DateTime SeededStartDate(IRenderedComponent<Calendar> cut) =>
         DateTime.Parse(ModalDateInputs(cut)[0].GetAttribute("value")!);
 
-    [Fact]
-    public void NewEvent_FromDropdown_DoesNotSeedFromTheCalendarsCurrentlyViewedDate()
+    /// <summary>A date within the anchor's own week (Sunday-Saturday, matching Calendar's WeekStart)
+    /// but never Today itself - proves the "Today is in view" branch isn't just trivially echoing
+    /// whatever date was passed in.</summary>
+    private static DateTime DifferentDayInSameWeekAs(DateTime today)
     {
-        var cut = RenderCalendarAnchoredFarInTheFuture(this, out var facility, out var farAnchor);
+        var weekStart = today.Date.AddDays(-(int)today.DayOfWeek);
+        return weekStart == today ? weekStart.AddDays(1) : weekStart;
+    }
+
+    /// <summary>A date within the anchor's own month but never Today itself - same reasoning as
+    /// <see cref="DifferentDayInSameWeekAs"/>, for Month view.</summary>
+    private static DateTime DifferentDayInSameMonthAs(DateTime today) =>
+        new(today.Year, today.Month, today.Day == 1 ? 2 : 1);
+
+    [Fact]
+    public void MonthView_ViewingAFutureMonth_DefaultsToTheFirstOfThatMonth()
+    {
+        // Two months out (not one) and a few days into it, not the 1st - guards against both a
+        // month-rollover edge case and against the code merely echoing whatever day was passed.
+        var facilityProbe = TestFacility.Create();
+        var farMonthAnchor = new DateTime(facilityProbe.Today.Year, facilityProbe.Today.Month, 1).AddMonths(2).AddDays(4);
+        var (cut, facility) = RenderCalendar(this, farMonthAnchor, "month");
 
         OpenNewEventMenuItem(cut, "New Event");
 
-        var seededStart = StartDateInputValue(cut);
-        Assert.NotEqual(farAnchor.Date, seededStart);
+        var expected = new DateTime(farMonthAnchor.Year, farMonthAnchor.Month, 1);
+        Assert.Equal(expected, SeededStartDate(cut));
+        Assert.NotEqual(facility.Today, SeededStartDate(cut));
     }
 
     [Fact]
-    public void NewEvent_FromDropdown_DefaultsToTomorrow_MatchingBookingDraftsOwnNoDateFallback()
+    public void MonthView_ViewingTheCurrentMonth_DefaultsToToday_EvenViewingALaterDayInIt()
     {
-        var cut = RenderCalendarAnchoredFarInTheFuture(this, out var facility, out _);
+        var facilityProbe = TestFacility.Create();
+        var sameMonthAnchor = DifferentDayInSameMonthAs(facilityProbe.Today);
+        var (cut, facility) = RenderCalendar(this, sameMonthAnchor, "month");
 
         OpenNewEventMenuItem(cut, "New Event");
 
-        Assert.Equal(facility.Today.AddDays(1), StartDateInputValue(cut));
+        Assert.Equal(facility.Today, SeededStartDate(cut));
     }
 
     [Fact]
-    public void NewOffIceEvent_FromDropdown_DoesNotSeedFromTheCalendarsCurrentlyViewedDate()
+    public void WeekView_ViewingAFutureWeek_DefaultsToThatWeeksFirstDay()
     {
-        var cut = RenderCalendarAnchoredFarInTheFuture(this, out var facility, out var farAnchor);
+        var facilityProbe = TestFacility.Create();
+        // Exactly 3 weeks out - always a different week from Today's, regardless of which weekday
+        // Today happens to be.
+        var farWeekAnchor = facilityProbe.Today.AddDays(21);
+        var (cut, facility) = RenderCalendar(this, farWeekAnchor, "week");
+
+        OpenNewEventMenuItem(cut, "New Event");
+
+        var expectedWeekStart = farWeekAnchor.Date.AddDays(-(int)farWeekAnchor.DayOfWeek);
+        Assert.Equal(expectedWeekStart, SeededStartDate(cut));
+        Assert.NotEqual(facility.Today, SeededStartDate(cut));
+    }
+
+    [Fact]
+    public void WeekView_ViewingTheCurrentWeek_DefaultsToToday_EvenViewingALaterDayInIt()
+    {
+        var facilityProbe = TestFacility.Create();
+        var sameWeekAnchor = DifferentDayInSameWeekAs(facilityProbe.Today);
+        var (cut, facility) = RenderCalendar(this, sameWeekAnchor, "week");
+
+        OpenNewEventMenuItem(cut, "New Event");
+
+        Assert.Equal(facility.Today, SeededStartDate(cut));
+    }
+
+    [Fact]
+    public void DayView_AlwaysDefaultsToTheDayBeingViewed()
+    {
+        // Day view has no wider "period" to reason about separately from the one day shown - the
+        // anchor day and the viewed period are the same thing, so it always seeds that exact day,
+        // future or not.
+        var facilityProbe = TestFacility.Create();
+        var futureDay = facilityProbe.Today.AddDays(10);
+        var (cut, _) = RenderCalendar(this, futureDay, "day");
+
+        OpenNewEventMenuItem(cut, "New Event");
+
+        Assert.Equal(futureDay.Date, SeededStartDate(cut));
+    }
+
+    [Fact]
+    public void NewOffIceEvent_FromDropdown_UsesTheSamePeriodAwareDefaultAsNewEvent()
+    {
+        var facilityProbe = TestFacility.Create();
+        var farMonthAnchor = new DateTime(facilityProbe.Today.Year, facilityProbe.Today.Month, 1).AddMonths(2);
+        var (cut, _) = RenderCalendar(this, farMonthAnchor, "month");
 
         OpenNewEventMenuItem(cut, "New Off-Ice Event");
 
-        var seededStart = StartDateInputValue(cut);
-        Assert.NotEqual(farAnchor.Date, seededStart);
-        Assert.Equal(facility.Today.AddDays(1), seededStart);
+        Assert.Equal(farMonthAnchor, SeededStartDate(cut));
     }
 
     [Fact]
     public void NewEvent_FromDropdown_StartAndEndDateMatch_SoThereIsNoAccidentalMultiDaySpan()
     {
-        // The actual reported symptom: Start and End landing on different dates before staff typed
-        // anything at all. They must always agree on open.
-        var cut = RenderCalendarAnchoredFarInTheFuture(this, out _, out _);
+        // The original reported symptom (D109): Start and End landing on different dates before staff
+        // typed anything at all. They must always agree on open, in every scenario above.
+        var facilityProbe = TestFacility.Create();
+        var farMonthAnchor = new DateTime(facilityProbe.Today.Year, facilityProbe.Today.Month, 1).AddMonths(2).AddDays(4);
+        var (cut, _) = RenderCalendar(this, farMonthAnchor, "month");
 
         OpenNewEventMenuItem(cut, "New Event");
 
