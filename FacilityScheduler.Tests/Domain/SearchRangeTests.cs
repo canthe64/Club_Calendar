@@ -93,4 +93,67 @@ public class SearchRangeTests
         Assert.Equal(Today.AddYears(2), end);
         Assert.NotNull(warning);
     }
+
+    [Fact]
+    public void ResolveSeason_SpanWiderThanSixtyDays_IsUsedInFull_UnlikeResolve()
+    {
+        // The entire point of D111 - the one deliberate exception to the 60-day cap Resolve enforces
+        // on every other search.
+        var seasonStart = new DateTime(2026, 9, 1);
+        var seasonEnd = seasonStart.AddDays(200);
+
+        var (start, end, warning) = SearchRange.ResolveSeason(seasonStart, seasonEnd, Today);
+
+        Assert.Equal(seasonStart, start);
+        Assert.Equal(seasonEnd, end);
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void ResolveSeason_InBounds_NoWarning()
+    {
+        var seasonStart = new DateTime(2026, 10, 1);
+        var seasonEnd = new DateTime(2027, 3, 31);
+
+        var (start, end, warning) = SearchRange.ResolveSeason(seasonStart, seasonEnd, Today);
+
+        Assert.Equal(seasonStart, start);
+        Assert.Equal(seasonEnd, end);
+        Assert.Null(warning);
+    }
+
+    [Fact]
+    public void ResolveSeason_EndBeforeStart_WarnsWithoutSwappingOrExpandingTheRange()
+    {
+        // Same "never silently swap" rule Resolve enforces - a misconfigured season is a
+        // Settings-page problem to fix, not something to guess around here.
+        var seasonStart = new DateTime(2026, 10, 1);
+        var seasonEnd = new DateTime(2026, 9, 1);
+
+        var (start, end, warning) = SearchRange.ResolveSeason(seasonStart, seasonEnd, Today);
+
+        Assert.Equal(seasonStart, start);
+        Assert.Equal(seasonStart, end);
+        Assert.NotNull(warning);
+    }
+
+    [Fact]
+    public void ResolveSeason_StartBeforeOneYearBack_StillClampsWithWarning()
+    {
+        // The outer +/-1yr/+2yr bound still applies even though the 60-day span cap doesn't - a
+        // season is staff-configured, not typed on the spot, but nothing stops it from being stale.
+        var (start, _, warning) = SearchRange.ResolveSeason(new DateTime(2000, 1, 1), Today.AddDays(30), Today);
+
+        Assert.Equal(Today.AddYears(-1), start);
+        Assert.NotNull(warning);
+    }
+
+    [Fact]
+    public void ResolveSeason_EndAfterTwoYearsForward_StillClampsWithWarning()
+    {
+        var (_, end, warning) = SearchRange.ResolveSeason(Today.AddDays(-30), new DateTime(2099, 1, 1), Today);
+
+        Assert.Equal(Today.AddYears(2), end);
+        Assert.NotNull(warning);
+    }
 }

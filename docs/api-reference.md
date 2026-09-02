@@ -325,14 +325,18 @@ returned at least one result.
 - **Auth:** staff sign-in required, explicitly bound to `StaffAuthorizationPolicies.StaffOnly`.
 - **Query parameters:** `q` (the raw search text, same grammar as the page - architecture doc §4.12),
   `start`/`end` (`yyyy-MM-dd`, optional - same defaulting/clamping as the page's own date range via
-  `SearchRange.Resolve`).
+  `SearchRange.Resolve`), `season` (`1`/`true`, optional, added 2026-09-02 D111 - overrides `start`/`end`
+  entirely and exports the operator's currently configured Booking Season instead, via
+  `SearchRange.ResolveSeason`; re-read live from `SchedulingWindowService` at export time, not passed
+  through from whatever the page last resolved).
 - **Response `200 OK`** - `text/csv`, UTF-8 with a leading BOM (so Excel on Windows doesn't misread
   non-ASCII renter names). Filename: `event-search-yyyy-MM-dd.csv`. Columns: `Date, Start, End, Title,
   Type, Category, Sheets, Status, All day` - never `RenterPhone`/`RenterEmail` (operator decision).
   Contains **every** match, not a capped subset - the 300-row render cap on the live page is a
   render-cost concern, not a real result limit. A title beginning with `=`, `+`, `-`, `@`, tab, or CR
   is prefixed with a literal `'` (CSV-formula-injection guard) before it's written.
-- **Response `400 Bad Request`** - the query resolved to nothing at all (a blank/whitespace `q`).
+- **Response `400 Bad Request`** - the query resolved to nothing at all (a blank/whitespace `q`), or
+  `season=1` was passed with no Booking Season configured (or only a start or only an end date set).
 - **Stateless:** re-parses `q` and re-fetches from `SheetBookingService`/`ClubEventService` rather than
   reading anything held by a live circuit, which is what makes the URL shareable and lets it hit the
   30-second view cache (architecture doc §4.3) instead of always re-fanning-out to Graph.

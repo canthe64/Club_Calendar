@@ -10,6 +10,7 @@
 @inject SheetBookingService BookingService
 @inject ClubEventService ClubEventService
 @inject FacilityConfiguration Facility
+@inject SchedulingWindowService Window
 @inject NavigationManager Navigation
 
 <PageTitle>Search</PageTitle>
@@ -27,18 +28,18 @@
                    placeholder="category:bonspiel day:saturday junior..."
                    style="border:1px solid #d7dfe5;border-radius:6px;padding:7px 10px;font-size:13.5px;width:100%;box-sizing:border-box">
         </div>
-        <div>
+        <div style="opacity:@(_searchEntireSeason ? "0.5" : "1")">
             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px;font-size:13px">Start date</div>
-            <input type="date" value="@_rangeStart?.ToString("yyyy-MM-dd")" @onchange="OnRangeStartChanged"
+            <input type="date" value="@_rangeStart?.ToString("yyyy-MM-dd")" @onchange="OnRangeStartChanged" disabled="@_searchEntireSeason"
                    style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13.5px">
         </div>
-        <div>
+        <div style="opacity:@(_searchEntireSeason ? "0.5" : "1")">
             <div style="font-weight:600;color:#1e2a33;margin-bottom:3px;font-size:13px">End date</div>
-            <input type="date" value="@_rangeEnd?.ToString("yyyy-MM-dd")" @onchange="OnRangeEndChanged"
+            <input type="date" value="@_rangeEnd?.ToString("yyyy-MM-dd")" @onchange="OnRangeEndChanged" disabled="@_searchEntireSeason"
                    style="border:1px solid #d7dfe5;border-radius:6px;padding:6px 9px;font-size:13.5px">
         </div>
-        <span @onclick="RunSearch" title="@(RangeBlocksSearch ? RangeBlockMessage : null)"
-              style="background:@(_isSearching || RangeBlocksSearch ? "#e8b4ae" : "#c62f2f");color:#fff;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:@(_isSearching || RangeBlocksSearch ? "default" : "pointer");white-space:nowrap">
+        <span @onclick="RunSearch" title="@(SearchBlocked ? BlockMessage : null)"
+              style="background:@(_isSearching || SearchBlocked ? "#e8b4ae" : "#c62f2f");color:#fff;padding:8px 18px;border-radius:6px;font-weight:600;font-size:13.5px;cursor:@(_isSearching || SearchBlocked ? "default" : "pointer");white-space:nowrap">
             @(_isSearching ? "Searching…" : "Search")
         </span>
         @* A plain <a>, not an @onclick handler - a file download has to be a real HTTP response, and
@@ -54,12 +55,33 @@
             </a>
         }
     </div>
+    @* "Entire season" bypasses the 60-day cap entirely (SearchRange.ResolveSeason, D111) - added for
+       the report a 60-day-at-a-time search can't produce without stitching several searches/exports
+       together by hand: every instance of one event across a whole season. Start/End grey out above
+       while this is checked since they're not consulted at all - RunSearch reads the operator's
+       configured season instead (Window.SeasonStartDate/SeasonEndDate, Settings page). *@
+    <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:12.5px;color:#5a7183">
+        <input type="checkbox" id="search-entire-season" @bind="_searchEntireSeason" disabled="@SeasonNotConfigured" style="cursor:pointer;margin:0">
+        <label for="search-entire-season" style="font-weight:600;color:#1e2a33;cursor:pointer">Search entire season</label>
+        @if (SeasonNotConfigured)
+        {
+            <span>— no booking season is configured (set one on the Settings page to use this)</span>
+        }
+        else
+        {
+            <span>
+                — @Window.SeasonStartDate!.Value.ToString("MMM d, yyyy") to @Window.SeasonEndDate!.Value.ToString("MMM d, yyyy"),
+                bypassing the @SearchRange.MaxSpanDays-day window below. A full-season search reads far more
+                data than usual and <strong>may take a long time</strong> to complete.
+            </span>
+        }
+    </div>
     @* Always visible, not just on the help card - this used to only mention the day cap before the
        first search, which is exactly when it matters least. Switches to a specific, actionable
        message the moment the picked dates would be blocked, rather than letting a guaranteed-to-be-
        clamped search be attempted and explained after the fact. *@
-    <div style="font-size:12px;margin-bottom:4px;font-weight:@(RangeBlocksSearch ? "600" : "400");color:@(RangeBlocksSearch ? "#a02c21" : "#90a0ab")">
-        @(RangeBlocksSearch ? RangeBlockMessage : $"Searches up to {SearchRange.MaxSpanDays} days at a time.")
+    <div style="font-size:12px;margin-bottom:4px;font-weight:@(SearchBlocked ? "600" : "400");color:@(SearchBlocked ? "#a02c21" : "#90a0ab")">
+        @(SearchBlocked ? BlockMessage : _searchEntireSeason ? "Searching the entire configured season." : $"Searches up to {SearchRange.MaxSpanDays} days at a time.")
     </div>
     <div style="font-size:12px;color:#90a0ab;margin-bottom:14px">
         Searches titles and categories only - not phone numbers, email, or notes. Those still show once you open a result.
@@ -87,7 +109,8 @@
             </div>
             <div style="margin-top:8px;color:#90a0ab">
                 The date range covers at most @SearchRange.MaxSpanDays days at a time - move Start/End
-                forward to search further out.
+                forward to search further out, or check "Search entire season" above for a full-season
+                report in one pass.
             </div>
         </div>
     }
@@ -240,6 +263,7 @@
     private string _query = string.Empty;
     private DateTime? _rangeStart;
     private DateTime? _rangeEnd;
+    private bool _searchEntireSeason;
 
     /// <summary>Set by the query box's own handlers to mark a render that only exists because a
     /// character was typed; see <see cref="ShouldRender"/>.</summary>
@@ -353,11 +377,31 @@
     private bool RangeTooWide => RequestedSpanDays is { } days && days > SearchRange.MaxSpanDays;
     private bool RangeBlocksSearch => RangeEndBeforeStart || RangeTooWide;
 
-    // Built from the last RESOLVED search (_query/_lastResolvedStart/_lastResolvedEnd), not the live
-    // text in the box - so the link always points at exactly the results currently on screen, not
-    // whatever's been typed since without yet pressing Search/Enter.
-    private string ExportUrl =>
-        $"/search/export.csv?q={Uri.EscapeDataString(_query)}&start={_lastResolvedStart:yyyy-MM-dd}&end={_lastResolvedEnd:yyyy-MM-dd}";
+    // "Search entire season" (D111) reads Window.SeasonStartDate/SeasonEndDate instead of _rangeStart/
+    // _rangeEnd, so it needs both configured to mean anything - unlike the Settings page's own
+    // Booking Season toggle, where either half being blank is a legitimate "unrestricted on that
+    // side" state (§4.10), a search needs a real closed window to run against.
+    private bool SeasonNotConfigured => Window.SeasonStartDate is null || Window.SeasonEndDate is null;
+
+    // Reactive to which mode is active, evaluated on every render - same "visible and blocking before
+    // Search is even attempted" property RangeBlocksSearch already had, extended to cover the season
+    // checkbox's own precondition instead of just the typed-range one.
+    private bool SearchBlocked => _searchEntireSeason ? SeasonNotConfigured : RangeBlocksSearch;
+
+    private string? BlockMessage =>
+        _searchEntireSeason
+            ? (SeasonNotConfigured ? "No booking season is configured - set one on the Settings page to use this." : null)
+            : RangeBlockMessage;
+
+    // Built from the last RESOLVED search (_query/_lastResolvedStart/_lastResolvedEnd/_searchEntireSeason),
+    // not the live text/checkbox state - so the link always points at exactly the results currently on
+    // screen, not whatever's been changed since without yet pressing Search/Enter. season=1 (rather
+    // than encoding _lastResolvedStart/_lastResolvedEnd directly) tells the export endpoint to
+    // re-resolve the season live itself (StaffSearchExportEndpoint's own doc comment explains why:
+    // the season could have changed between this search and the export click).
+    private string ExportUrl => _searchEntireSeason
+        ? $"/search/export.csv?q={Uri.EscapeDataString(_query)}&season=1"
+        : $"/search/export.csv?q={Uri.EscapeDataString(_query)}&start={_lastResolvedStart:yyyy-MM-dd}&end={_lastResolvedEnd:yyyy-MM-dd}";
 
     private string? RangeBlockMessage =>
         RangeEndBeforeStart ? "End date is before start date - fix the dates to search." :
@@ -368,7 +412,7 @@
     // otherwise trigger a Graph fan-out if the range happened to change too.
     private async Task RunSearch()
     {
-        if (_isSearching || RangeBlocksSearch)
+        if (_isSearching || SearchBlocked)
         {
             return;
         }
@@ -383,7 +427,11 @@
             return;
         }
 
-        var (start, end, warning) = SearchRange.Resolve(_rangeStart, _rangeEnd, Facility.Today);
+        // SeasonNotConfigured already guarded this above (SearchBlocked), so Window.SeasonStartDate/
+        // SeasonEndDate are non-null whenever _searchEntireSeason reaches here.
+        var (start, end, warning) = _searchEntireSeason
+            ? SearchRange.ResolveSeason(Window.SeasonStartDate!.Value, Window.SeasonEndDate!.Value, Facility.Today)
+            : SearchRange.Resolve(_rangeStart, _rangeEnd, Facility.Today);
         _rangeWarning = warning;
         _lastResolvedStart = start;
         _lastResolvedEnd = end;

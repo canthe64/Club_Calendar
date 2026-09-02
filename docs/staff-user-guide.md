@@ -296,6 +296,15 @@ end date before the start date), **Search is disabled** and a specific message r
 explaining exactly what to fix — you won't be able to click Search and only find out afterward that it
 didn't cover what you asked for.
 
+**Search entire season** — a checkbox below Start/End for when you need every instance of one event
+across the whole season (every Tuesday League game all winter, say) rather than 60 days at a time.
+Checking it greys out Start/End — they're ignored entirely — and searches the Booking Season you've
+configured on the Settings page (§8) instead. **This can take a long time to run** — it's reading far
+more data than a normal search, so be patient once you click Search. The checkbox is disabled, with an
+explanation, if no season is configured (or only a start or only an end date has been set) — set both
+on the Settings page first. **Export CSV** works the same way while this is checked: it exports the
+whole season's results, not just what's on screen.
+
 Click a result to see its detail. From there, **Open on calendar** takes you to that day on the
 Calendar page, where you can edit or cancel it the normal way — Search itself is read-only, so you
 always jump to the same working edit screen you'd use from the calendar directly.

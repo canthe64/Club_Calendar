@@ -22,6 +22,13 @@ namespace FacilityScheduler.Endpoints;
 /// Deliberately exports every match, with no cap - <c>EventSearch.MaxRenderedRows</c> is a render-
 /// cost limit for the live page, not a real result limit, and a silently truncated export is worse
 /// than a silently truncated screen: nothing on paper says a document was cut short.
+///
+/// <c>season=1</c> (added 2026-09-02, D111) mirrors the search page's own "Search entire season"
+/// checkbox: it ignores <c>start</c>/<c>end</c> entirely and re-resolves the operator's currently
+/// configured season live via <see cref="SchedulingWindowService"/>, rather than trusting whatever
+/// dates the page happened to pass - the season could have changed (or been cleared) between the
+/// on-screen search and the export click, and re-reading it here is what keeps this endpoint's
+/// existing "stateless, re-derives everything itself" design honest for this path too.
 /// </summary>
 public static class StaffSearchExportEndpoint
 {
@@ -31,9 +38,11 @@ public static class StaffSearchExportEndpoint
             string? q,
             string? start,
             string? end,
+            bool? season,
             SheetBookingService bookingService,
             ClubEventService clubEventService,
             FacilityConfiguration facility,
+            SchedulingWindowService window,
             CancellationToken ct) =>
         {
             var query = SearchQueryParser.Parse(q);
@@ -43,14 +52,18 @@ public static class StaffSearchExportEndpoint
             }
 
             var today = facility.Today;
-            var (rangeStart, rangeEnd, _) = SearchRange.Resolve(ParseDate(start), ParseDate(end), today);
+            var resolved = ResolveExportRange(season ?? false, ParseDate(start), ParseDate(end), window.SeasonStartDate, window.SeasonEndDate, today);
+            if (resolved.Error is not null)
+            {
+                return Results.BadRequest(resolved.Error);
+            }
 
             // rangeEnd is the last INCLUDED day; the fetch needs the exclusive upper bound - identical
             // to EventSearch.razor's own RunSearch, so the two can never disagree about what "the last
             // day" means.
-            var fetchEnd = rangeEnd.AddDays(1);
-            var bookings = await bookingService.GetBookingsForAllSheetsAsync(rangeStart, fetchEnd, ct);
-            var clubEvents = await clubEventService.GetEventsAsync(rangeStart, fetchEnd, ct);
+            var fetchEnd = resolved.End.AddDays(1);
+            var bookings = await bookingService.GetBookingsForAllSheetsAsync(resolved.Start, fetchEnd, ct);
+            var clubEvents = await clubEventService.GetEventsAsync(resolved.Start, fetchEnd, ct);
 
             var result = SearchResultsBuilder.Build(bookings, clubEvents, query, today);
             var csvBytes = SearchResultsCsv.Build(result, bookings);
@@ -61,4 +74,27 @@ public static class StaffSearchExportEndpoint
     }
 
     internal static DateTime? ParseDate(string? value) => DateTime.TryParse(value, out var d) ? d : null;
+
+    /// <summary>Picks and runs the right <c>SearchRange</c> resolution for this request - factored out
+    /// as a pure function (D60 precedent, same as <see cref="ParseDate"/>) so the season-vs-explicit-
+    /// range branching is directly testable without a full ASP.NET Core host. <c>Error</c> non-null
+    /// means season export was requested but no season (or only half of one) is configured; the caller
+    /// returns it as a 400 rather than silently falling back to some other range.</summary>
+    internal static (DateTime Start, DateTime End, string? Warning, string? Error) ResolveExportRange(
+        bool season, DateTime? start, DateTime? end, DateTime? seasonStart, DateTime? seasonEnd, DateTime today)
+    {
+        if (season)
+        {
+            if (seasonStart is null || seasonEnd is null)
+            {
+                return (default, default, null, "No booking season is configured - set both a start and end date on the Settings page before exporting the entire season.");
+            }
+
+            var (seasonRangeStart, seasonRangeEnd, seasonWarning) = SearchRange.ResolveSeason(seasonStart.Value, seasonEnd.Value, today);
+            return (seasonRangeStart, seasonRangeEnd, seasonWarning, null);
+        }
+
+        var (rangeStart, rangeEnd, warning) = SearchRange.Resolve(start, end, today);
+        return (rangeStart, rangeEnd, warning, null);
+    }
 }
