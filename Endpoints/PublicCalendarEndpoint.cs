@@ -288,7 +288,24 @@ public static class PublicCalendarEndpoint
         }
     }
 
-    private static void AppendPageOpen(StringBuilder sb)
+    // internal, not private - reached directly by PublicCalendarHeaderLinksTests (D60's precedent),
+    // so the header's target="_top" fix (see the comment below) is testable without a full HTTP host.
+    //
+    // target="_top" on the two header links (added 2026-09-03, live-found via iframe embed) - without
+    // it, clicking either one navigates *inside* the iframe an embedding site created (the officially
+    // documented embed method, docs/public-embed-instructions.md), landing on /public/search or
+    // /public/practice-ice - both DENY-framed by the same security-headers middleware that exempts
+    // only /public/calendar itself (Program.cs), so the browser refuses to render either destination
+    // inside that existing frame. The practice-ice case is worse than a blank frame: its own "request"
+    // flow requires an Entra sign-in redirect, and Microsoft's own login page refuses to be framed
+    // regardless of anything this app sends - so even exempting /public/practice-ice here wouldn't
+    // have been enough, framed-vs-unframed had to stop being true for this link at all. target="_top"
+    // breaks both links out to the full top-level page/tab instead - a no-op when /public/calendar
+    // isn't embedded (direct visits keep working exactly as before), and what actually fixes it when
+    // it is. Neither destination page needs the same treatment for its own outbound links (a "Back to
+    // calendar" link, practice-ice's own slot links) - by the time a visitor is looking at either page,
+    // they're already in the top-level context this fix put them in, not still inside any iframe.
+    internal static void AppendPageOpen(StringBuilder sb)
     {
         sb.Append("""
             <!doctype html>
@@ -302,8 +319,8 @@ public static class PublicCalendarEndpoint
             <body style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;margin:0;color:#1e2a33">
             <header style="background:#1e2a33;color:#fff;padding:10px 24px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:16px">
                 <span>GCC Ice &amp; Event Calendar</span>
-                <a href="/public/practice-ice" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none;margin-left:auto">Host practice ice</a>
-                <a href="/public/search" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none">Search available ice &#8250;</a>
+                <a href="/public/practice-ice" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none;margin-left:auto">Host practice ice</a>
+                <a href="/public/search" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none">Search available ice &#8250;</a>
             </header>
             <div style="padding:16px 24px;max-width:1150px">
             """);

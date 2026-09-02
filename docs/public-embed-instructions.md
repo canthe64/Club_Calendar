@@ -69,6 +69,12 @@ renter name is not stripped out programmatically - keeping that private is handl
 switching views reloads the page (there's no client-side app here) - a brief "Loading…" overlay
 appears immediately so that reload isn't silent.
 
+The header's "Host practice ice" and "Search available ice" links open in the top-level page/tab
+(`target="_top"`), not inside your iframe - so clicking either one navigates the whole browser tab
+away from your page, the same as any other outbound link would. This is deliberate: both destinations
+send `X-Frame-Options: DENY` (this app's own security headers, applied to every route except this one),
+so without `target="_top"` the browser would silently refuse to load them inside your iframe at all.
+
 **Security note - possible future hardening:** this page currently has no restriction on who can
 embed it in an iframe (no `Content-Security-Policy: frame-ancestors` set). In practice this means
 any website, not just the club's own, could iframe it. This was a deliberate choice for now (simplicity
