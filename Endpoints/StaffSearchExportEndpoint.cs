@@ -29,6 +29,20 @@ namespace FacilityScheduler.Endpoints;
 /// dates the page happened to pass - the season could have changed (or been cleared) between the
 /// on-screen search and the export click, and re-reading it here is what keeps this endpoint's
 /// existing "stateless, re-derives everything itself" design honest for this path too.
+///
+/// <c>season</c> is bound as <c>string?</c>, not <c>bool?</c> - a live-found bug (2026-09-03): Minimal
+/// API's built-in binding for a genuinely <c>bool</c>-typed parameter parses via
+/// <see cref="bool.TryParse(string?, out bool)"/>, which accepts only "true"/"false", not "1" - so
+/// <c>?season=1</c> (what <c>EventSearch.razor</c>'s ExportUrl actually sends) failed to bind, and a
+/// binding failure on a value that WAS present returns <c>400 Bad Request</c> with an empty body
+/// regardless of the parameter's nullability. `UseStatusCodePagesWithReExecute` (Program.cs) then
+/// re-executes any empty-body 4xx/5xx response to `/not-found`, so what actually reached the browser
+/// was NotFound.razor's "the content you are looking for does not exist" - indistinguishable from a
+/// real 404 unless you're looking at the actual response status code. `string?` plus a presence check
+/// (<see cref="ParseSeason"/>) is this codebase's own established pattern for exactly this shape of
+/// query flag - see `PublicCalendarEndpoint.ParseFilter`'s `filtered`/`showClubEvents` parameters -
+/// specifically because it sidesteps framework `TryParse` conventions a hidden-form-field value like
+/// "1" was never guaranteed to satisfy.
 /// </summary>
 public static class StaffSearchExportEndpoint
 {
@@ -38,7 +52,7 @@ public static class StaffSearchExportEndpoint
             string? q,
             string? start,
             string? end,
-            bool? season,
+            string? season,
             SheetBookingService bookingService,
             ClubEventService clubEventService,
             FacilityConfiguration facility,
@@ -52,7 +66,7 @@ public static class StaffSearchExportEndpoint
             }
 
             var today = facility.Today;
-            var resolved = ResolveExportRange(season ?? false, ParseDate(start), ParseDate(end), window.SeasonStartDate, window.SeasonEndDate, today);
+            var resolved = ResolveExportRange(ParseSeason(season), ParseDate(start), ParseDate(end), window.SeasonStartDate, window.SeasonEndDate, today);
             if (resolved.Error is not null)
             {
                 return Results.BadRequest(resolved.Error);
@@ -74,6 +88,12 @@ public static class StaffSearchExportEndpoint
     }
 
     internal static DateTime? ParseDate(string? value) => DateTime.TryParse(value, out var d) ? d : null;
+
+    // Presence-based, not a "true"/"false"/"1" value comparison - matches ParseFilter's own
+    // filtered/showClubEvents convention (PublicCalendarEndpoint) and, more importantly, tolerates
+    // whatever literal string a caller sends ("1", "true", "yes") rather than silently requiring one
+    // specific spelling the way bool-typed binding did.
+    internal static bool ParseSeason(string? value) => !string.IsNullOrEmpty(value);
 
     /// <summary>Picks and runs the right <c>SearchRange</c> resolution for this request - factored out
     /// as a pure function (D60 precedent, same as <see cref="ParseDate"/>) so the season-vs-explicit-

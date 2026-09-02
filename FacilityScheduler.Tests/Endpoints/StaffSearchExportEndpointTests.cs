@@ -19,6 +19,24 @@ public class StaffSearchExportEndpointTests
         Assert.Null(StaffSearchExportEndpoint.ParseDate(value));
     }
 
+    // Live-found 2026-09-03: `season` used to be bound as `bool?`, whose framework TryParse-based
+    // binding accepts only "true"/"false" - not "1", the literal value EventSearch.razor's ExportUrl
+    // actually sends. A binding failure on a value that WAS present (not merely absent) returns 400
+    // with an empty body regardless of nullability, which UseStatusCodePagesWithReExecute then turns
+    // into NotFound.razor's "content cannot be found" page - indistinguishable from a real 404 to
+    // whoever clicked Export CSV. "1" is the one value this regression test exists to pin.
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("true", true)]
+    [InlineData(null, false)]
+    [InlineData("", false)]
+    [InlineData("0", true)] // presence-based, same convention as ParseFilter's filtered/showClubEvents -
+                             // any non-empty value means "on", not a true/false comparison.
+    public void ParseSeason_TreatsAnyNonEmptyValueAsRequested(string? value, bool expected)
+    {
+        Assert.Equal(expected, StaffSearchExportEndpoint.ParseSeason(value));
+    }
+
     private static readonly DateTime Today = new(2026, 9, 2);
 
     [Fact]
