@@ -111,6 +111,7 @@ public static class PublicSearchEndpoint
 
         sb.Append(RenderResults(start, end, minSheets, windows));
 
+        sb.Append(PublicPageFooter.Html);
         sb.Append("</div></body></html>");
         return sb.ToString();
     }

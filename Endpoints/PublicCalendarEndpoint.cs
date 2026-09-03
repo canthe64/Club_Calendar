@@ -326,8 +326,12 @@ public static class PublicCalendarEndpoint
             """);
     }
 
-    private static void AppendPageClose(StringBuilder sb)
+    // internal, not private - reached directly by PublicPageFooterTests (D60's precedent), so the
+    // shared footer's presence is testable without a full ASP.NET Core host or a live/fake
+    // PublicAvailabilityService (which every RenderXPageAsync method above needs).
+    internal static void AppendPageClose(StringBuilder sb)
     {
+        sb.Append(PublicPageFooter.Html);
         sb.Append("</div>");
         sb.Append(OverlayAndScript);
         sb.Append("</body></html>");

@@ -65,6 +65,7 @@ public static class PracticeIcePublicEndpoint
 
         sb.Append(RenderWindows(windows));
 
+        sb.Append(PublicPageFooter.Html);
         sb.Append("</div></body></html>");
         return sb.ToString();
     }
