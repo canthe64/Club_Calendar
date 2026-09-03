@@ -132,6 +132,17 @@ public static class CalendarStyles
         return text.Length <= maxChars ? text : text[..maxChars].TrimEnd() + "…";
     }
 
+    /// <summary>How many items a Month-view day cell should render inline before falling back to a
+    /// "+N more" link - shared by the staff (<c>MonthGrid.razor</c>) and public
+    /// (<c>PublicCalendarEndpoint.AppendDayCell</c>) Month views, both of which cap a busy day's chips.
+    /// Staff feedback, 2026-09-03: capping at exactly <paramref name="maxVisible"/> meant a day with
+    /// exactly one item over the cap showed the link instead of that one remaining item - and the link
+    /// costs exactly as much vertical space in the cell as the item itself would have, so revealing
+    /// only one thing behind it was strictly worse than just showing it. A "+N more" link earns its
+    /// place only once it's actually hiding more than a single item; below that, show everything.</summary>
+    public static int VisibleChipCount(int totalCount, int maxVisible) =>
+        totalCount <= maxVisible + 1 ? totalCount : maxVisible;
+
     public static string EmptySlotBg { get; } = "#f6f8f9";
 
     /// <summary>

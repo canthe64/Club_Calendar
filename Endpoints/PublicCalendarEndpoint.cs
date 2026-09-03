@@ -508,7 +508,11 @@ public static class PublicCalendarEndpoint
             .Distinct()
             .OrderBy(b => b.Start)
             .ToList();
-        var visibleBookingCount = Math.Max(0, 3 - dayClubEvents.Count);
+        // CalendarStyles.VisibleChipCount, not a bare cap - a day with exactly one booking past the
+        // budget used to show a "+1 more" link instead of that one booking, costing the same vertical
+        // space in the cell for less information and an extra click (staff feedback, 2026-09-03; fixed
+        // identically on the staff calendar's own Month view, MonthGrid.razor).
+        var visibleBookingCount = CalendarStyles.VisibleChipCount(dayBookings.Count, Math.Max(0, 3 - dayClubEvents.Count));
 
         sb.Append($"""<div class="pub-cal-day" style="border:1px solid #e7ecef;border-radius:6px;min-height:92px;padding:3px 4px;background:{(inMonth ? "#fff" : "#fafbfc")}">""");
         sb.Append($"""<div style="font-size:12px;color:{(inMonth ? "#90a0ab" : "#c1ccd4")};font-weight:600;padding:1px 2px">{cell.Day}</div>""");

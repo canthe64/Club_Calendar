@@ -363,6 +363,30 @@ public class CalendarStylesTests
         Assert.Equal("", CalendarStyles.TruncateForConflictDisplay(null));
     }
 
+    // Staff feedback, 2026-09-03: a Month-view day with exactly one item past the cap showed a
+    // "+1 more" link instead of that one item, even though the link took the same vertical space the
+    // item itself would have. The rule: only fall back to a link once it's actually hiding more than
+    // a single item.
+    [Theory]
+    [InlineData(0, 3, 0)] // nothing to show, nothing to hide
+    [InlineData(3, 3, 3)] // exactly at the cap - no link needed regardless
+    [InlineData(4, 3, 4)] // one over the cap - show it directly rather than a pointless link
+    [InlineData(5, 3, 3)] // two over the cap - the link is now hiding more than one item, so it applies
+    [InlineData(10, 3, 3)]
+    public void VisibleChipCount_OnlyTruncates_WhenTheLinkWouldHideMoreThanOneItem(int totalCount, int maxVisible, int expected)
+    {
+        Assert.Equal(expected, CalendarStyles.VisibleChipCount(totalCount, maxVisible));
+    }
+
+    [Fact]
+    public void VisibleChipCount_MaxVisibleZero_StillShowsASingleItemDirectly()
+    {
+        // The public calendar's own caller can pass maxVisible=0 (every visible slot already spent on
+        // club events) - the "don't hide just one" rule still has to hold at that boundary.
+        Assert.Equal(1, CalendarStyles.VisibleChipCount(totalCount: 1, maxVisible: 0));
+        Assert.Equal(0, CalendarStyles.VisibleChipCount(totalCount: 2, maxVisible: 0));
+    }
+
     // The toolbar date label's width floor stops the nav controls next to it shifting while you step
     // through dates. These pin the two properties that matter: each view gets enough room for the
     // widest string its own format can produce, and the three are ordered by how long those strings

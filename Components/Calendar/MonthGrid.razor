@@ -24,7 +24,8 @@
                     .ToList();
                 var dayItems = CombineForDay(dayClubEvents, dayBookings, cell.Date);
                 var isExpanded = _expandedDays.Contains(cell.Date);
-                var visibleItems = isExpanded ? dayItems : dayItems.Take(3).ToList();
+                var visibleCount = CalendarStyles.VisibleChipCount(dayItems.Count, MaxChipsBeforeMore);
+                var visibleItems = isExpanded ? dayItems : dayItems.Take(visibleCount).ToList();
             }
             @foreach (var item in visibleItems)
             {
@@ -45,10 +46,10 @@
                          style="background:@CalendarStyles.BackgroundStyle(b);color:@CalendarStyles.TextColorStyle(b);border:@CalendarStyles.BorderStyle(b);border-radius:3px;padding:2px 5px;margin-top:2px;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden">@(contBefore ? "← " : "")@(contBefore ? CalendarStyles.BookingDisplayTitle(b) : BookingTitle(b))@(contAfter ? " →" : "")</div>
                 }
             }
-            @if (!isExpanded && dayItems.Count > 3)
+            @if (!isExpanded && dayItems.Count > visibleCount)
             {
                 <div @onclick="() => ExpandDay(cell.Date)" @onclick:stopPropagation="true"
-                     style="color:#90a0ab;margin-top:2px;padding:0 2px;cursor:pointer;text-decoration:underline">+@(dayItems.Count - 3) more</div>
+                     style="color:#90a0ab;margin-top:2px;padding:0 2px;cursor:pointer;text-decoration:underline">+@(dayItems.Count - visibleCount) more</div>
             }
         </div>
     }
@@ -63,6 +64,11 @@
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
 
     private static readonly string[] DowNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+    // The cell has no hard height limit (min-height, not max-height) - this is purely how many items
+    // look tidy inline before a "+N more" link is worth its own line. See CalendarStyles.VisibleChipCount
+    // for why a day with exactly one item over this cap shows it directly instead of the link.
+    private const int MaxChipsBeforeMore = 3;
 
     // Which day cells have had their "+N more" expanded to show every item. Resets naturally when
     // this component is torn down (switching away from Month view, or navigating to a different

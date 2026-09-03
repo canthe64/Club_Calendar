@@ -154,7 +154,10 @@ silent while the server computes the next view.
 **Response `200 OK`** — `text/html; charset=utf-8`
 
 **Month view:** a 7-column month grid with color-coded entry chips (confirmed booking, hold, off-ice
-event). Every day shows up to 3 entries with a "+N more" expander for busier days.
+event). Every day shows up to 3 entries with a "+N more" expander for busier days - except a day with
+exactly 4, which shows all 4 directly rather than 3 plus a link that would only reveal one more
+(`CalendarStyles.VisibleChipCount`, D114): the link costs the same space in the cell the 4th entry
+itself would, so it only appears once it's actually hiding more than one.
 
 **Week view** (7-day) **and Day view** (single day): hourly grids sharing the same hour-axis math
 and lane-layout algorithm as the staff Week/Day grids (`CalendarStyles.LayoutLanes`) - genuinely
