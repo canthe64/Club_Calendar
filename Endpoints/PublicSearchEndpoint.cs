@@ -58,7 +58,9 @@ public static class PublicSearchEndpoint
 
     private static string H(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
 
-    private static string RenderPage(DateTime start, DateTime end, int minSheets, int maxSheets, List<PublicAvailabilityWindow> windows)
+    // internal, not private - reached directly by PublicSearchEndpointTests (D60's precedent), so
+    // this hand-built page's copy is testable without a full ASP.NET Core host.
+    internal static string RenderPage(DateTime start, DateTime end, int minSheets, int maxSheets, List<PublicAvailabilityWindow> windows)
     {
         var sb = new StringBuilder();
 
@@ -100,6 +102,11 @@ public static class PublicSearchEndpoint
                 </div>
                 <button type="submit" style="background:#c62f2f;color:#fff;border:none;padding:8px 18px;border-radius:6px;font-weight:600;font-size:12px;cursor:pointer">Search</button>
             </form>
+
+            <div style="font-size:12.5px;color:#5a7183;margin-bottom:16px">
+                To confirm availability and inquire about a group event, visit
+                <a href="https://curlingseattle.org/group-events" target="_blank" rel="noopener" style="color:#2d5f8a;font-weight:600">curlingseattle.org/group-events</a>.
+            </div>
             """);
 
         sb.Append(RenderResults(start, end, minSheets, windows));

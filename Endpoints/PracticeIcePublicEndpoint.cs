@@ -29,7 +29,9 @@ public static class PracticeIcePublicEndpoint
 
     private static string H(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
 
-    private static string RenderPage(FacilityConfiguration facility, List<PublicAvailabilityWindow> windows)
+    // internal, not private - reached directly by PracticeIcePublicEndpointTests (D60's precedent),
+    // so this hand-built page's copy is testable without a full ASP.NET Core host.
+    internal static string RenderPage(FacilityConfiguration facility, List<PublicAvailabilityWindow> windows)
     {
         var sb = new StringBuilder();
 
@@ -49,11 +51,15 @@ public static class PracticeIcePublicEndpoint
             </header>
             <div style="padding:16px 24px;max-width:800px">
                 <div style="font-size:16px;font-weight:600;color:#1e2a33;margin-bottom:4px">Host Practice Ice</div>
-                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     Any properly trained member can volunteer to host a practice ice session, open to all
                     members, at a time when no other activity is planned on any sheet. Sessions must be
                     requested at least {facility.PracticeIceMinLeadHours} hours in advance and are subject
-                    to staff approval. Pick a start time below to submit a request - you'll be asked to sign in.
+                    to staff approval.
+                </div>
+                <div style="font-size:13px;font-weight:700;color:#1e2a33;margin-bottom:16px">
+                    Pick a start time below to submit a request. You will be prompted to login with your
+                    GCC user or guest account credentials.
                 </div>
             """);
 

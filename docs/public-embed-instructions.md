@@ -69,7 +69,7 @@ renter name is not stripped out programmatically - keeping that private is handl
 switching views reloads the page (there's no client-side app here) - a brief "Loading…" overlay
 appears immediately so that reload isn't silent.
 
-The header's "Host practice ice" and "Search available ice" links open in the top-level page/tab
+The header's "Host practice ice" and "Find available times for a group event" links open in the top-level page/tab
 (`target="_top"`), not inside your iframe - so clicking either one navigates the whole browser tab
 away from your page, the same as any other outbound link would. This is deliberate: both destinations
 send `X-Frame-Options: DENY` (this app's own security headers, applied to every route except this one),
@@ -89,7 +89,9 @@ least N sheets open for a group event, instead of scanning the calendar by hand 
 (capped at 60 days) plus a minimum-sheets dropdown, returning a list of matching windows that each
 link to that day on the calendar. Linked from the calendar page's header, and vice versa. Same
 "never promise ice that isn't actually open" guarantee as the widget above - a window is only
-reported if nothing else is booked on that sheet during it.
+reported if nothing else is booked on that sheet during it. Between the search form and the results,
+the page points visitors at `curlingseattle.org/group-events` to actually confirm availability and
+inquire - this search only ever shows what *looks* open, not a confirmed booking.
 
 ## If something looks wrong
 
