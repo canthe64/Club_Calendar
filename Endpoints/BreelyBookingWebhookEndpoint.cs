@@ -104,7 +104,19 @@ public static class BreelyBookingWebhookEndpoint
         return CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
     }
 
-    private const int MaxRawPayloadLogLength = 8000;
+    // Live-found 2026-09-07: a genuine multi-sheet reservation's raw payload ran to 15,528 characters
+    // (each sibling in "submission.events[]" duplicates most of the submission-level fields, signed-
+    // PDF blob included) - well past the original 8,000-character cap, so the very diagnostic this
+    // log line exists for (seeing every sibling event Breely actually sent, architecture doc §4.8) cut
+    // off partway through the FIRST event, before a second or third sibling could even appear. Raised
+    // to 100,000 - comfortably past what even a large group's several-sheet reservation should
+    // produce, while still bounded rather than logging an unbounded payload verbatim. This only widens
+    // the DEBUG-tier diagnostic log line itself; JSON deserialization (`payload = JsonSerializer.
+    // Deserialize<BreelyWebhookPayload>(rawBody)` above) already always ran against the full,
+    // untruncated `rawBody` regardless of this cap - so this fix doesn't change what a webhook call
+    // actually processes, only how much of what it received can be seen afterward if something needs
+    // investigating.
+    internal const int MaxRawPayloadLogLength = 100_000;
 
     private static readonly (Regex Pattern, string Replacement)[] PiiRedactions =
     [
@@ -118,7 +130,10 @@ public static class BreelyBookingWebhookEndpoint
     // this caps it rather than logging megabytes. The AppLogService's own line-based format also
     // collapses embedded double quotes to single quotes when it writes the line - the JSON will look
     // slightly mangled in the viewer but field names/values are still readable.
-    private static string RedactAndTruncate(string rawBody)
+    //
+    // internal, not private - reached directly by BreelyBookingWebhookEndpointTests (D60's precedent),
+    // so the truncation/redaction behavior is testable without a full ASP.NET Core host.
+    internal static string RedactAndTruncate(string rawBody)
     {
         var redacted = rawBody;
         foreach (var (pattern, replacement) in PiiRedactions)
