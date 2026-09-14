@@ -279,16 +279,26 @@
         _loading = true;
         StateHasChanged();
 
-        var (start, end) = View switch
+        // try/finally, matching SaveOnIceEvent below (code review O4) - without it, a Graph failure
+        // here leaves _loading stuck true (the ErrorBoundary catches the exception itself, but the
+        // page state it leaves behind was inconsistent) rather than falling back to whatever was
+        // already on screen.
+        try
         {
-            ViewMode.Month => (MonthGridStart(_anchorDate), MonthGridEnd(_anchorDate).AddDays(1)),
-            ViewMode.Week => (WeekStart, WeekStart.AddDays(7)),
-            _ => (_anchorDate.Date, _anchorDate.Date.AddDays(1))
-        };
+            var (start, end) = View switch
+            {
+                ViewMode.Month => (MonthGridStart(_anchorDate), MonthGridEnd(_anchorDate).AddDays(1)),
+                ViewMode.Week => (WeekStart, WeekStart.AddDays(7)),
+                _ => (_anchorDate.Date, _anchorDate.Date.AddDays(1))
+            };
 
-        _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, end);
-        _activeClubEvents = await ClubEventService.GetEventsAsync(start, end);
-        _loading = false;
+            _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, end);
+            _activeClubEvents = await ClubEventService.GetEventsAsync(start, end);
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
 

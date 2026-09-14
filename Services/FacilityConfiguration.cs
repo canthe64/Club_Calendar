@@ -127,6 +127,21 @@ public class FacilityConfiguration
     // the Prefer header entirely - Graph's documented fallback for an omitted header is to return
     // Start/End in plain UTC - and this method does the UTC-to-facility-local conversion here,
     // ourselves, deterministically, the same way ToUtcQueryString already does the reverse.
+    //
+    // AdjustToUniversal|AssumeUniversal (not a bare Parse + SpecifyKind) - found in code review:
+    // a bare DateTime.Parse on a string that DID carry a "Z" or an explicit offset converts to the
+    // *process's own local time zone* and returns Kind=Local, and the old SpecifyKind(..., Utc)
+    // then relabeled those already-shifted digits as UTC without adjusting them - silently wrong by
+    // the server's own offset, masked today only by Graph actually sending bare digits and Azure App
+    // Service running UTC. AssumeUniversal treats a bare/offset-less string as UTC exactly like the
+    // old code did (the normal case); AdjustToUniversal correctly converts an offset-bearing string
+    // instead of mis-relabeling it, matching the same combination FakeGraphEventGateway already uses
+    // in tests for this exact reason.
     public DateTime FromUtcResponseString(string utcDateTimeString) =>
-        TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(DateTime.Parse(utcDateTimeString, System.Globalization.CultureInfo.InvariantCulture), DateTimeKind.Utc), ZoneInfo);
+        TimeZoneInfo.ConvertTimeFromUtc(
+            DateTime.Parse(
+                utcDateTimeString,
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal),
+            ZoneInfo);
 }

@@ -60,6 +60,12 @@ public class AppLogService
         _level = LoadPersistedLevel();
         _currentFileDate = DateOnly.FromDateTime(_facility.Today);
         _currentFilePath = BuildFilePath(_currentFileDate);
+
+        // Also run once at startup, not just from RotateIfNeeded (code review C9) - RotateIfNeeded
+        // only fires when the facility-local date changes within a single process's own lifetime, so
+        // an App Service instance that recycles at least once a day (routine, not exceptional) would
+        // otherwise never observe a rollover and RetentionDays would never actually apply.
+        CleanUpOldFiles();
     }
 
     public AppLogLevel CurrentLevel => _level;

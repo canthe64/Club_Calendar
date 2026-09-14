@@ -195,7 +195,20 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             }
             catch (Exception ex)
             {
+                // Standard tier, not just ILogger (code review C3) - the worst case here is a
+                // reschedule that throws between releasing the old slot and claiming the new one,
+                // which silently drops a real booking from the calendar. ILogger alone "isn't
+                // retained anywhere staff can see without portal access" (§4.9's own reasoning for
+                // why AppLogService exists at all); this is exactly the failure mode that reasoning
+                // was meant to cover. Reuses the existing "needs review" marker mechanism (below,
+                // same as the no-covering-hold case) so staff have somewhere to actually find this,
+                // not just a line in a log they'd have no reason to be reading.
                 logger.LogError(ex, "Breely webhook: failed to process event {Id}", evt.Id);
+                await appLog.LogActionAsync("BreelyProcessingFailed", BookedByLabel, evt.Id.ToString(CultureInfo.InvariantCulture),
+                    details: $"Unhandled exception processing Breely event {evt.Id} ({ex.GetType().Name}: {ex.Message}) - this booking may be lost or left in an inconsistent state. Verify manually.", ct: ct);
+                await FlagNeedsTriageAsync(facility.Today,
+                    $"Breely webhook event {evt.Id} threw while processing ({ex.GetType().Name}: {ex.Message}) - the booking may have been lost, or left half-updated (e.g. old slot released but a new one never claimed). Verify manually against Breely's own admin panel.",
+                    ct);
             }
             batchIndex++;
         }
@@ -380,7 +393,10 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
         {
             logger.LogWarning("Breely webhook for event {Id}: could not parse start_date/start_time/duration_in_minutes ({StartDate} {StartTime} {Duration}min) - skipped.",
                 evt.Id, evt.StartDate, evt.StartTime, evt.DurationInMinutes);
-            await appLog.LogDebugAsync("WebhookUnparseableWindow", BookedByLabel, breelyId,
+            // Standard tier, not Debug (code review C3) - this event is dropped entirely (no booking
+            // is ever attempted for it), and Debug-only visibility means that only shows up if
+            // someone happened to have troubleshooting logging switched on at the time.
+            await appLog.LogActionAsync("WebhookUnparseableWindow", BookedByLabel, breelyId,
                 details: $"start_date={evt.StartDate} start_time={evt.StartTime} duration_in_minutes={evt.DurationInMinutes}", ct: ct);
             return;
         }

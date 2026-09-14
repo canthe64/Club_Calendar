@@ -680,66 +680,66 @@ public class SheetBookingService(IGraphEventGateway graph, IMemoryCache cache, F
         // series blocks its slot every week until someone finds and cancels it.
         try
         {
-        foreach (var sheet in orderedSheets)
-        {
-            var booking = new SheetBooking
+            foreach (var sheet in orderedSheets)
             {
-                SheetMailbox = sheet,
-                Start = template.Start,
-                End = template.End,
-                Category = template.Category,
-                State = template.State,
-                RenterName = template.RenterName,
-                RenterPhone = template.RenterPhone,
-                RenterEmail = template.RenterEmail,
-                Notes = template.Notes,
-                BookedBy = template.BookedBy,
-                BookingGroupId = groupId
-            };
-
-            var graphEvent = ToGraphEvent(booking);
-            graphEvent.Recurrence = new PatternedRecurrence
-            {
-                Pattern = new RecurrencePattern
+                var booking = new SheetBooking
                 {
-                    Type = RecurrencePatternType.Weekly,
-                    Interval = 1,
-                    DaysOfWeek = [Enum.Parse<Microsoft.Graph.Models.DayOfWeekObject>(template.Start.DayOfWeek.ToString())]
-                },
-                Range = new RecurrenceRange
+                    SheetMailbox = sheet,
+                    Start = template.Start,
+                    End = template.End,
+                    Category = template.Category,
+                    State = template.State,
+                    RenterName = template.RenterName,
+                    RenterPhone = template.RenterPhone,
+                    RenterEmail = template.RenterEmail,
+                    Notes = template.Notes,
+                    BookedBy = template.BookedBy,
+                    BookingGroupId = groupId
+                };
+
+                var graphEvent = ToGraphEvent(booking);
+                graphEvent.Recurrence = new PatternedRecurrence
                 {
-                    Type = RecurrenceRangeType.EndDate,
-                    StartDate = new Microsoft.Kiota.Abstractions.Date(template.Start.Year, template.Start.Month, template.Start.Day),
-                    EndDate = new Microsoft.Kiota.Abstractions.Date(lastOccurrenceDate.Year, lastOccurrenceDate.Month, lastOccurrenceDate.Day),
-                    RecurrenceTimeZone = facility.TimeZone
-                }
-            };
-
-            var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
-            booking.EventId = result?.Id;
-            booking.ICalUId = result?.ICalUId;
-            created.Add(booking);
-
-            if (excluded.Count > 0 && result?.Id is not null)
-            {
-                var allInstances = await graph.GetInstancesAsync(sheet, result.Id,
-                    facility.ToUtcQueryString(template.Start), facility.ToUtcQueryString(lastOccurrenceDate.Date.AddDays(1)), ct);
-
-                foreach (var instance in allInstances)
-                {
-                    if (instance.Start?.DateTime is null || instance.Id is null)
+                    Pattern = new RecurrencePattern
                     {
-                        continue;
+                        Type = RecurrencePatternType.Weekly,
+                        Interval = 1,
+                        DaysOfWeek = [Enum.Parse<Microsoft.Graph.Models.DayOfWeekObject>(template.Start.DayOfWeek.ToString())]
+                    },
+                    Range = new RecurrenceRange
+                    {
+                        Type = RecurrenceRangeType.EndDate,
+                        StartDate = new Microsoft.Kiota.Abstractions.Date(template.Start.Year, template.Start.Month, template.Start.Day),
+                        EndDate = new Microsoft.Kiota.Abstractions.Date(lastOccurrenceDate.Year, lastOccurrenceDate.Month, lastOccurrenceDate.Day),
+                        RecurrenceTimeZone = facility.TimeZone
                     }
+                };
 
-                    var instanceDate = facility.FromUtcResponseString(instance.Start.DateTime).Date;
-                    if (excluded.Contains(instanceDate))
+                var result = await graph.CreateEventAsync(sheet, graphEvent, ct);
+                booking.EventId = result?.Id;
+                booking.ICalUId = result?.ICalUId;
+                created.Add(booking);
+
+                if (excluded.Count > 0 && result?.Id is not null)
+                {
+                    var allInstances = await graph.GetInstancesAsync(sheet, result.Id,
+                        facility.ToUtcQueryString(template.Start), facility.ToUtcQueryString(lastOccurrenceDate.Date.AddDays(1)), ct);
+
+                    foreach (var instance in allInstances)
                     {
-                        await graph.DeleteEventAsync(sheet, instance.Id, ct);
+                        if (instance.Start?.DateTime is null || instance.Id is null)
+                        {
+                            continue;
+                        }
+
+                        var instanceDate = facility.FromUtcResponseString(instance.Start.DateTime).Date;
+                        if (excluded.Contains(instanceDate))
+                        {
+                            await graph.DeleteEventAsync(sheet, instance.Id, ct);
+                        }
                     }
                 }
             }
-        }
         }
         catch (Exception ex)
         {

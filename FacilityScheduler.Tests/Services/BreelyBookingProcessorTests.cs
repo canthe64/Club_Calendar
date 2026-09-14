@@ -431,6 +431,57 @@ public class BreelyBookingProcessorTests
         Assert.Empty(TriageMarkers(gateway));
     }
 
+    // ---- Processing failures are surfaced to staff, not just ILogger (code review C3) --------------
+
+    [Fact]
+    public async Task ProcessingException_IsLoggedAtStandardTier_AndFlaggedForReview()
+    {
+        // Uses its own AppLogService (not the harness's private throwaway one) so this test can read
+        // back what actually got written - the whole point of C3 is that this line must land at
+        // Standard tier (always written), not Debug (only visible with troubleshooting logging on).
+        var appLog = TestAppLog.Create(out _);
+        var (processor, gateway, facility, _) = BreelyHarness.Build(appLog: appLog);
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(19);
+        BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+
+        // Simulates a Graph write throwing mid-claim (ClaimHoldAsync's own CreateEventAsync call,
+        // the first Graph create this flow makes) - the review's own worst case: a booking that's
+        // half-processed and would otherwise vanish with nothing but an ILogger line nobody but
+        // someone with Azure portal access could ever find. Exactly-once (not FailCreateAfter, which
+        // fails every call from its threshold on) so the triage marker's own, separate create right
+        // after it can still succeed - this is testing that C3's catch block runs, not simulating a
+        // total Graph outage.
+        gateway.FailCreateExactlyOnCall = 1;
+
+        await processor.ProcessAsync(new BreelyWebhookPayload { Event = BreelyTestData.MakeEvent(960, start, 60) });
+
+        var lines = await appLog.TailAsync(50);
+        Assert.Contains(lines, l => l.Contains("[INFO]") && l.Contains("BreelyProcessingFailed"));
+
+        var marker = Assert.Single(TriageMarkers(gateway));
+        var text = marker.Body?.Content ?? marker.BodyPreview ?? "";
+        Assert.Contains("960", text);
+        Assert.Contains("threw while processing", text);
+    }
+
+    [Fact]
+    public async Task UnparseableWindow_IsLoggedAtStandardTier_NotJustDebug()
+    {
+        var appLog = TestAppLog.Create(out _);
+        var (processor, gateway, facility, _) = BreelyHarness.Build(appLog: appLog);
+
+        // DurationInMinutes <= 0 makes TryParseWindow fail - the event is skipped entirely, no
+        // booking is ever attempted for it.
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(961, facility.Today.AddDays(1).AddHours(19), durationMinutes: 0)
+        });
+
+        var lines = await appLog.TailAsync(50);
+        Assert.Contains(lines, l => l.Contains("[INFO]") && l.Contains("WebhookUnparseableWindow"));
+    }
+
     // ---- Shrink reconciliation (D121) ---------------------------------------------------------------
 
     private static async Task<List<SheetBooking>> ClaimedForPrimary(SheetBookingService sheetBookings, DateTime windowStart, DateTime windowEnd, long primaryId)

@@ -99,9 +99,14 @@ public static class BreelyBookingWebhookEndpoint
 
     internal static bool SecretsMatch(string expected, string provided)
     {
-        var expectedBytes = Encoding.UTF8.GetBytes(expected);
-        var providedBytes = Encoding.UTF8.GetBytes(provided);
-        return CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
+        // Hash both sides first (code review S2) - FixedTimeEquals returns immediately when its two
+        // spans differ in length, so comparing the raw secrets directly is only constant-time across
+        // equal-length inputs; an attacker could otherwise binary-search the real secret's length one
+        // guess-length at a time. SHA256 output is always 32 bytes regardless of input length, so the
+        // length check that short-circuits FixedTimeEquals never has anything to key off of.
+        var expectedHash = SHA256.HashData(Encoding.UTF8.GetBytes(expected));
+        var providedHash = SHA256.HashData(Encoding.UTF8.GetBytes(provided));
+        return CryptographicOperations.FixedTimeEquals(expectedHash, providedHash);
     }
 
     // Live-found 2026-09-07: a genuine multi-sheet reservation's raw payload ran to 15,528 characters

@@ -6,6 +6,7 @@ using FacilityScheduler.Components;
 using FacilityScheduler.Endpoints;
 using Microsoft.AspNetCore.Authentication.OpenIdConnect;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.Extensions.Options;
 using Microsoft.Graph;
@@ -169,6 +170,22 @@ var app = builder.Build();
 app.Services.GetRequiredService<FacilityScheduler.Services.FacilityConfiguration>();
 
 // Configure the HTTP request pipeline.
+
+// Must run before anything that reads Request.Scheme or the remote IP - in particular
+// UseHttpsRedirection below and WebhookAuthFailed's client-IP log line, which otherwise records the
+// front-end's address, not the real caller's (code review S1). KnownNetworks/KnownProxies are
+// cleared because a reverse-proxy front end's address isn't fixed - this is the standard guidance
+// for any proxied or containerized host (Azure App Service included), not an Azure-specific trick,
+// so it also covers Appendix B's "hosting somewhere other than Azure" case. A no-op locally, where
+// no proxy sits in front and the headers are never present.
+var forwardedHeadersOptions = new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+};
+forwardedHeadersOptions.KnownIPNetworks.Clear();
+forwardedHeadersOptions.KnownProxies.Clear();
+app.UseForwardedHeaders(forwardedHeadersOptions);
+
 if (!app.Environment.IsDevelopment())
 {
     app.UseExceptionHandler("/Error", createScopeForErrors: true);

@@ -9,8 +9,10 @@ on:
 jobs:
   test:
     # windows-latest, not ubuntu - this app's TimeZoneInfo IDs are the Windows convention
-    # ("Pacific Standard Time", not the IANA "America/Los_Angeles"), matching the deployment
-    # target (Azure App Service on Windows) and appsettings.Development.json's own TimeZone value.
+    # ("Pacific Standard Time", not the IANA "America/Los_Angeles"), matching
+    # appsettings.Development.json's own TimeZone value. The deployment target is Azure App
+    # Service on Linux (deployment guide Step 9), which resolves the same Windows-form IDs fine
+    # via ICU - this runner just needs to exercise the same ID strings the app ships with.
     runs-on: windows-latest
 
     steps:

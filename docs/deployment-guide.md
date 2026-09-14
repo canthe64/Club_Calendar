@@ -391,7 +391,9 @@ registration once the app's URL exists.
    - **Resource Group:** create one, e.g. `facility-scheduler-rg`
    - **Name:** globally unique. This is *not* the whole hostname — see step 5 below.
    - **Publish:** Code · **Runtime stack:** .NET 10 (or latest offered)
-   - **Operating System:** Linux or Windows both work; Linux is cheaper at the same tier
+   - **Operating System: Linux** — the recommended and cheaper target, and what the README's cost
+     estimate and this guide's Step 10 (`AppLog__LogDirectory`) assume by default. Windows works too
+     (see the per-step notes below where it differs), but treat Linux as the primary path.
    - **Region:** nearest the facility
 3. **App Service Plan → Create new → Basic B1.** Do not use Free (F1): it sleeps on inactivity, which
    breaks Blazor Server's persistent SignalR circuit, has no custom domain support, and caps Linux
@@ -716,7 +718,7 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `Facility:TenantDomain` | `Facility__TenantDomain` | Mailbox domain, e.g. `yourclub.onmicrosoft.com` | **Load-bearing** |
 | `Facility:SheetMailboxLocalParts` | `Facility__SheetMailboxLocalParts__0`, `__1`, … | Explicit list of sheet mailbox local-parts, not a count. Indices contiguous from `0`. | **Load-bearing** |
 | `Facility:ClubEventsMailboxLocalPart` | `Facility__ClubEventsMailboxLocalPart` | Defaults to `clubevents` | No |
-| `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID, e.g. `Pacific Standard Time` | **Load-bearing** |
+| `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID, e.g. `Pacific Standard Time` — resolves fine on Linux too, since .NET maps Windows zone IDs through ICU there; no IANA-form (`America/Los_Angeles`) equivalent needed | **Load-bearing** |
 | `Facility:Name` | `Facility__Name` | Display name — accepted but not yet wired to any UI | No |
 | `Facility:LogoPath` | `Facility__LogoPath` | Path under `wwwroot` — accepted but not yet wired to any UI | No |
 | `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Staff group **object ID** (GUID). Not a secret. | **Load-bearing** |

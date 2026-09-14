@@ -12,12 +12,14 @@ namespace FacilityScheduler.Tests.TestSupport;
 public static class BreelyHarness
 {
     public static (BreelyBookingProcessor Processor, FakeGraphEventGateway Gateway, FacilityConfiguration Facility, SheetBookingService SheetBookings) Build(
-        Func<Task>? delayDuringFindEvents = null, string[]? sheetLocalParts = null)
+        Func<Task>? delayDuringFindEvents = null, string[]? sheetLocalParts = null, AppLogService? appLog = null)
     {
         var facility = TestFacility.Create(sheetLocalParts);
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo) { DelayDuringFindEvents = delayDuringFindEvents };
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create(facility);
+        // Callers that need to assert on what got written to the app log (code review C3) pass their
+        // own pre-built instance in; everyone else gets a private throwaway one, same as before.
+        appLog ??= TestAppLog.Create(facility);
         var viewCache = new ViewCacheRegistry(cache);
         var sheetBookings = new SheetBookingService(gateway, cache, facility, appLog, viewCache, new SchedulingWindowService(appLog, viewCache));
         var clubEvents = new ClubEventService(gateway, cache, facility, appLog, viewCache);

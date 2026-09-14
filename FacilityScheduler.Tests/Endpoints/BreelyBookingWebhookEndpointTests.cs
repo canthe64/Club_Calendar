@@ -15,9 +15,22 @@ public class BreelyBookingWebhookEndpointTests
     [InlineData("correct-secret", "")]
     [InlineData("correct-secret", "correct-secre")] // shorter prefix
     [InlineData("correct-secret", "correct-secretx")] // longer
+    [InlineData("correct-secret", "wrong-secrets")] // same length as "correct-secret", still wrong
     public void SecretsMatch_DifferingSecrets_ReturnsFalse(string expected, string provided)
     {
         Assert.False(BreelyBookingWebhookEndpoint.SecretsMatch(expected, provided));
+    }
+
+    [Fact]
+    public void SecretsMatch_ComparesHashesNotRawBytes()
+    {
+        // Code review S2: comparing the raw secrets directly means FixedTimeEquals' own length check
+        // leaks the real secret's length to a timing attacker (it returns immediately on a length
+        // mismatch, before ever comparing content). Hashing first means every comparison FixedTimeEquals
+        // actually performs is between two fixed 32-byte SHA256 outputs, regardless of how long either
+        // input secret is - this pins that a wildly different length still doesn't take an early exit
+        // distinguishable from a same-length wrong guess (both simply hash differently and return false).
+        Assert.False(BreelyBookingWebhookEndpoint.SecretsMatch("a", "a-much-much-much-much-longer-wrong-secret-guess"));
     }
 
     [Fact]

@@ -193,12 +193,26 @@ public class FakeGraphEventGateway(TimeZoneInfo zone) : IGraphEventGateway
     /// rollback path can be tested. Null disables it.</summary>
     public int? FailCreateAfter { get; set; }
 
+    /// <summary>When set, exactly the Nth CreateEventAsync call (1-based) throws and every other call
+    /// succeeds normally - unlike <see cref="FailCreateAfter"/> above (which fails every call from its
+    /// threshold onward), this simulates one transient Graph failure with normal calls both before and
+    /// after it, e.g. a booking claim's write failing while a later, unrelated write (a triage marker)
+    /// still succeeds. Tracked on its own counter, independent of <see cref="FailCreateAfter"/>'s, so
+    /// the two can't interfere with each other. Null disables it.</summary>
+    public int? FailCreateExactlyOnCall { get; set; }
+
     private int _createCount;
+    private int _createCallNumber;
 
     public Task<Event?> CreateEventAsync(string mailbox, Event graphEvent, CancellationToken ct = default)
     {
         lock (_gate)
         {
+            if (FailCreateExactlyOnCall == ++_createCallNumber)
+            {
+                throw new InvalidOperationException($"Simulated Graph create failure on call {_createCallNumber}.");
+            }
+
             if (FailCreateAfter is int limit && _createCount++ >= limit)
             {
                 throw new InvalidOperationException($"Simulated Graph create failure on call {_createCount}.");

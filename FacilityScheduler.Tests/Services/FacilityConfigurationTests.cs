@@ -75,6 +75,29 @@ public class FacilityConfigurationTests
         Assert.Equal(30, local.Minute);
     }
 
+    [Theory]
+    [InlineData("2026-08-04T01:30:00Z")]
+    [InlineData("2026-08-04T01:30:00+00:00")]
+    [InlineData("2026-08-03T21:30:00-04:00")] // same instant, non-UTC offset
+    public void FromUtcResponseString_OffsetBearingInput_ConvertsTheSameAsTheEquivalentBareUtcDigits(string offsetBearing)
+    {
+        var facility = TestFacility.Create();
+
+        // Graph isn't expected to send an offset here (the whole point of omitting the
+        // outlook.timezone Prefer header is that Graph replies with bare UTC digits, per the
+        // comment above FromUtcResponseString) - but a code-review finding is that a bare
+        // DateTime.Parse would silently mis-convert this shape if it ever showed up, by converting
+        // to the *test-running machine's own local time zone* first and only then mislabeling the
+        // result as UTC. This must resolve to the exact same facility-local instant as the bare-digit
+        // form (FromUtcResponseString_EveningPacificInstant_StaysOnTheCorrectLocalCalendarDay above),
+        // regardless of what time zone the process itself happens to be running under.
+        var local = facility.FromUtcResponseString(offsetBearing);
+
+        Assert.Equal(new DateTime(2026, 8, 3), local.Date);
+        Assert.Equal(18, local.Hour);
+        Assert.Equal(30, local.Minute);
+    }
+
     [Fact]
     public void PracticeIceMailConfigured_FalseWhenEitherAddressIsBlank()
     {
