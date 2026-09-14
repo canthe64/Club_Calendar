@@ -1,3 +1,4 @@
+using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
 using Microsoft.Graph.Models;
@@ -428,5 +429,130 @@ public class BreelyBookingProcessorTests
         });
 
         Assert.Empty(TriageMarkers(gateway));
+    }
+
+    // ---- Shrink reconciliation (D121) ---------------------------------------------------------------
+
+    private static async Task<List<SheetBooking>> ClaimedForPrimary(SheetBookingService sheetBookings, DateTime windowStart, DateTime windowEnd, long primaryId)
+    {
+        var all = await sheetBookings.GetBookingsForAllSheetsAsync(windowStart, windowEnd);
+        var primary = Assert.Single(all, b => b.ExternalBookingId == $"breely:{primaryId}");
+        return all.Where(b => b.BookingGroupId == primary.BookingGroupId).ToList();
+    }
+
+    [Fact]
+    public async Task Shrinking_ReleasesTheNoLongerNeededSheets_KeepingOnlyWhatTheNewLabelCallsFor()
+    {
+        var fiveSheets = new[] { "sheet1", "sheet2", "sheet3", "sheet4", "sheet5" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: fiveSheets);
+        var originalStart = facility.Today.AddDays(14).AddHours(9);
+        var newStart = facility.Today.AddDays(14).AddHours(14);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, facility.Today.AddDays(14).AddHours(8), facility.Today.AddDays(14).AddHours(20));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(1000, originalStart, 60, eventType: "25-32 Participants") // 4 sheets
+        });
+        var beforeShrink = await ClaimedForPrimary(sheetBookings, facility.Today.AddDays(13), facility.Today.AddDays(16), 1000);
+        Assert.Equal(4, beforeShrink.Count);
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(1000, newStart, 60, eventType: "9-16 participants") // shrunk to 2 sheets
+        });
+
+        var afterShrink = await ClaimedForPrimary(sheetBookings, facility.Today.AddDays(13), facility.Today.AddDays(16), 1000);
+        Assert.Equal(2, afterShrink.Count);
+        Assert.All(afterShrink, b => Assert.Equal(newStart, b.Start));
+
+        // The released sheets must be genuinely reopened (a Hold fragment remains), not just silently
+        // dropped - same release semantics an ordinary reschedule's old slot already gets. Scoped to
+        // the sheets THIS reservation originally used, not every configured sheet - the 5th sheet's own
+        // never-touched seeded hold would otherwise look like a false-positive match. No longer requires
+        // the reopened fragment's exact Start/End - CancelGroupAsync's own adjacent-hold-absorbing logic
+        // (architecture doc §4.8) can legitimately merge it into the pre-existing wider seeded hold
+        // rather than leaving a separately-timed fragment, and that's still a correct release either way.
+        var stillHeldSheets = afterShrink.Select(b => b.SheetMailbox).ToHashSet();
+        var releasedSheets = beforeShrink.Select(b => b.SheetMailbox).Where(s => !stillHeldSheets.Contains(s)).ToList();
+        Assert.Equal(2, releasedSheets.Count); // 4 originally claimed, 2 kept
+        Assert.All(releasedSheets, sheet => Assert.Contains(gateway.Events(sheet), e =>
+            e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Tentative &&
+            e.Categories != null && e.Categories.Contains(BookingCategory.GroupEvent.ToString())));
+        // And no longer confirmed/busy at the old time on those sheets - the actual claim is gone.
+        Assert.All(releasedSheets, sheet => Assert.DoesNotContain(gateway.Events(sheet), e =>
+            e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy));
+    }
+
+    [Fact]
+    public async Task RelabeledToUnrecognized_ReleasesEveryExtraSheet_KeepingOnlyThePrimarys()
+    {
+        var fiveSheets = new[] { "sheet1", "sheet2", "sheet3", "sheet4", "sheet5" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: fiveSheets);
+        var start = facility.Today.AddDays(15).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(1100, start, 60, eventType: "25-32 Participants") // 4 sheets
+        });
+
+        // Same time (no reschedule), but the label no longer means anything this app recognizes -
+        // still a duplicate-ish notification for the primary's own sheet, but the extras must go.
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(1100, start, 60, eventType: "Some brand new Breely type")
+        });
+
+        var claimed = await ClaimedForPrimary(sheetBookings, facility.Today.AddDays(14), facility.Today.AddDays(17), 1100);
+        Assert.Single(claimed);
+    }
+
+    [Fact]
+    public async Task Growing_ClaimsMoreSheets_WithoutReleasingAnyExistingOnes()
+    {
+        var fiveSheets = new[] { "sheet1", "sheet2", "sheet3", "sheet4", "sheet5" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: fiveSheets);
+        var start = facility.Today.AddDays(16).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(1200, start, 60, eventType: "9-16 participants") // 2 sheets
+        });
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(1200, start, 60, eventType: "25-32 Participants") // grew to 4 sheets
+        });
+
+        var claimed = await ClaimedForPrimary(sheetBookings, facility.Today.AddDays(15), facility.Today.AddDays(18), 1200);
+        Assert.Equal(4, claimed.Count);
+    }
+
+    [Fact]
+    public async Task UnchangedLabelResend_DoesNotReleaseAnySheets()
+    {
+        var fiveSheets = new[] { "sheet1", "sheet2", "sheet3", "sheet4", "sheet5" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: fiveSheets);
+        var start = facility.Today.AddDays(17).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        var evt = BreelyTestData.MakeEvent(1300, start, 60, eventType: "25-32 Participants"); // 4 sheets
+        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt });
+        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt }); // identical resend
+
+        var claimed = await ClaimedForPrimary(sheetBookings, facility.Today.AddDays(16), facility.Today.AddDays(19), 1300);
+        Assert.Equal(4, claimed.Count);
     }
 }

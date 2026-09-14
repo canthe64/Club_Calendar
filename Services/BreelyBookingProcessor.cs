@@ -56,6 +56,14 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     private const string ExtendedSession4HourPrefix = "Extended session - 4-Hours";
     private const int ExtendedSessionSheetCount = 5;
 
+    // The largest sheet count any known Group Reservation label can currently produce - the upper
+    // bound ReleaseShrunkGroupReservationSheetsAsync (D121) probes out to when looking for orphaned
+    // synthetic sheets a shrunk or relabeled reservation no longer needs. Declared after
+    // GroupReservationSheetCounts/ExtendedSessionSheetCount (static field initializers run in
+    // declaration order) so it always reflects the table's actual current contents, not a number that
+    // has to be remembered and kept in sync by hand whenever a sheet count changes.
+    private static readonly int MaxGroupReservationSheets = GroupReservationSheetCounts.Values.Append(ExtendedSessionSheetCount).Max();
+
     // Every synthetic sheet ExpandForGroupReservation derives gets Breely's real event id plus this
     // offset times its 1-based position among the *extra* sheets (2nd sheet = +1x, 3rd = +2x, etc. -
     // the 1st/primary sheet keeps its real, unmodified id). A billion is comfortably past any id Breely
@@ -101,14 +109,16 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     /// ordinary single-sheet event, or for a genuine `submission.events[]` sibling (the original
     /// multi-sheet flow already gives those their own real ids and needs no synthetic ones).
     ///
-    /// **Known gap, accepted rather than solved here:** if a reschedule notification's `event_type`
-    /// maps to *fewer* sheets than the original booking claimed (the group genuinely shrank), the
-    /// sheets no longer named simply stop being expanded - nothing releases them, since there's no
-    /// record anywhere of "this reservation previously needed N sheets" to compare against. They'd sit
-    /// claimed until a staff member notices and cancels them manually. Growing (more sheets than
-    /// before) is handled correctly - the newly-expanded ids are simply never-before-seen and get
-    /// claimed like any other. Accepted for now as a rare edge case (staff feedback, 2026-09-14) rather
-    /// than adding a second persisted "expected sheet count" concept to track and reconcile against.
+    /// **Shrinking (D121, operator request, 2026-09-14):** if a reschedule's `event_type` now maps to
+    /// *fewer* sheets than the reservation previously held (or no longer maps to a recognized label at
+    /// all), the sheets no longer named would simply stop being expanded and sit claimed forever with
+    /// nothing to release them - <see cref="ReleaseShrunkGroupReservationSheetsAsync"/>, called once
+    /// per request after the main loop below, is what closes that gap. It doesn't need a companion
+    /// database (architecture doc D7 still holds): every sheet this feature ever claims already carries
+    /// a deterministic synthetic id (D119), so "was this specific sheet claimed before, and is it still
+    /// wanted by this call" is answerable by directly probing those ids via the same
+    /// `FindByExternalIdAsync` this class already leans on everywhere else - no new query pattern, no
+    /// new persisted state.
     /// </summary>
     public async Task ProcessAsync(BreelyWebhookPayload payload, CancellationToken ct = default)
     {
@@ -188,6 +198,69 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 logger.LogError(ex, "Breely webhook: failed to process event {Id}", evt.Id);
             }
             batchIndex++;
+        }
+
+        if (payload.Event is { } primaryForReconciliation)
+        {
+            try
+            {
+                await ReleaseShrunkGroupReservationSheetsAsync(primaryForReconciliation, existingById[primaryForReconciliation.Id], eventsById, ct);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Breely webhook: failed to reconcile Group Reservation sheet count for event {Id}", primaryForReconciliation.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// D121: releases every previously-claimed synthetic sheet <paramref name="stillWanted"/> (this
+    /// call's own fresh expansion, keyed by id) no longer names - back to an open Group Event hold,
+    /// same release semantics a reschedule's own old slot already gets. A no-op unless
+    /// <paramref name="primaryExisting"/> is non-null - a first-time creation has no prior claim to
+    /// shrink away from, so there's nothing to probe for. Probes every synthetic position
+    /// <see cref="ExpandForGroupReservation"/> could ever have produced (up to
+    /// <see cref="MaxGroupReservationSheets"/>), not just however many today's `event_type` currently
+    /// calls for - that's what makes this correct for *both* a shrink (4 sheets -> 2) and a full
+    /// relabel to something unrecognized (4 sheets -> 1, the primary's own).
+    /// </summary>
+    private async Task ReleaseShrunkGroupReservationSheetsAsync(BreelyEvent primary, SheetBooking? primaryExisting, Dictionary<long, BreelyEvent> stillWanted, CancellationToken ct)
+    {
+        if (primaryExisting is null)
+        {
+            return;
+        }
+
+        for (var extraSheetNumber = 2; extraSheetNumber <= MaxGroupReservationSheets; extraSheetNumber++)
+        {
+            var candidateId = primary.Id + (extraSheetNumber - 1) * SyntheticSheetIdOffset;
+            if (stillWanted.ContainsKey(candidateId))
+            {
+                continue; // still named by this call's own expansion - not an orphan
+            }
+
+            var externalId = $"{ExternalIdSourcePrefix}:{candidateId}";
+            var sem = ExternalIdLocks.GetOrAdd(externalId, _ => new SemaphoreSlim(1, 1));
+            await sem.WaitAsync(ct);
+            try
+            {
+                var orphan = await bookingService.FindByExternalIdAsync(externalId, ct);
+                if (orphan is null)
+                {
+                    continue; // never claimed at this position, or already released - nothing to do
+                }
+
+                await bookingService.CancelGroupAsync([orphan], reopenAsGroupEventHold: true, BookedByLabel, ct);
+                logger.LogInformation(
+                    "Breely webhook: event {Id}'s Group Reservation no longer needs sheet {Sheet} (event_type is now \"{EventType}\") - released back to an open hold.",
+                    primary.Id, orphan.SheetMailbox, primary.EventType);
+                await appLog.LogActionAsync("BreelyGroupReservationShrank", BookedByLabel, orphan.EventId, orphan.SheetMailbox,
+                    $"Breely event {primary.Id}: no longer needs this sheet (event_type is now \"{primary.EventType}\") - released back to an open hold.", ct);
+            }
+            finally
+            {
+                sem.Release();
+            }
         }
     }
 
