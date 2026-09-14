@@ -248,13 +248,19 @@ flagged per-date (for a series preview) the same way a real sheet conflict is.
 To delete an off-ice event, open it for editing and use the **Delete Event** link at the bottom of
 the form.
 
-**An off-ice event titled "⚠ Web booking needs review"** is created automatically, not by staff, when a
-booking notification from the Breely booking website doesn't match any open group-event slot on any
-sheet — the booking is still made (onto a fallback sheet) so it's never lost, but it needs a human to
-check it landed on the right sheet and reassign it if not. Its notes include a link back to that
-booking's page in Breely. It doesn't close any ice itself ("Marks all sheets unavailable" is off) —
-delete it once you've verified or corrected the booking it refers to. Unlike a staff-written Note,
-**this one is never shown on the public calendar** — it names a real customer and links to an internal
+**An off-ice event titled "⚠ Web booking needs review"** is created automatically, not by staff, in two
+situations: when a booking notification from the Breely booking website doesn't match any open
+group-event slot on any sheet — the booking is still made (onto a fallback sheet) so it's never lost,
+but it needs a human to check it landed on the right sheet and reassign it if not — or when a Breely
+"Group Reservation" booking (a large group booked by participant count, e.g. "25-32 Participants")
+arrives with a label the app doesn't recognize. That second case still books exactly 1 sheet
+automatically, same as always, but flags itself so a human can check whether it actually needed more
+— if the label is a genuine new or renamed Breely event type, add it to
+`BreelyBookingProcessor.GroupReservationSheetCounts` in the code so future bookings of that type claim
+the right number of sheets on their own. Either way, its notes include a link back to that booking's
+page in Breely. It doesn't close any ice itself ("Marks all sheets unavailable" is off) — delete it
+once you've verified or corrected the booking it refers to. Unlike a staff-written Note,
+**this one is never shown on the public calendar** — it can name a real customer and links to an internal
 admin page, so it's automatically withheld from members regardless of the setting above.
 
 ---

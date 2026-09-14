@@ -322,4 +322,111 @@ public class BreelyBookingProcessorTests
 
         Assert.Equal(1, TestFacility.SheetMailboxes.Count(s => gateway.Events(s).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy)));
     }
+
+    // ---- Unrecognized event_type flagging (D120) --------------------------------------------------
+
+    private static IEnumerable<Microsoft.Graph.Models.Event> TriageMarkers(FakeGraphEventGateway gateway) =>
+        gateway.Events(TestFacility.ClubEventsMailbox).Where(e => e.Subject == "⚠ Web booking needs review");
+
+    [Fact]
+    public async Task UnrecognizedEventType_ClaimedNormally_AlsoFlagsForReview()
+    {
+        var (processor, gateway, facility, _) = BreelyHarness.Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(19);
+        BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(910, start, 60, eventType: "Some future Breely event type we've never seen")
+        });
+
+        var marker = Assert.Single(TriageMarkers(gateway));
+        Assert.Contains("Some future Breely event type we've never seen", marker.Body?.Content ?? marker.BodyPreview);
+        Assert.Contains("claimed", marker.Body?.Content ?? marker.BodyPreview);
+    }
+
+    [Fact]
+    public async Task UnrecognizedEventType_NoCoveringHold_CombinesBothReasonsInOneMarker()
+    {
+        // Not two separate markers for one booking - one marker naming both reasons.
+        var (processor, gateway, facility, _) = BreelyHarness.Build();
+        var start = facility.Today.AddDays(1).AddHours(19);
+        // No hold seeded anywhere - forces the fallback path.
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(920, start, 60, eventType: "Some future Breely event type we've never seen")
+        });
+
+        var marker = Assert.Single(TriageMarkers(gateway));
+        var text = marker.Body?.Content ?? marker.BodyPreview ?? "";
+        Assert.Contains("didn't match any open hold", text);
+        Assert.Contains("Some future Breely event type we've never seen", text);
+    }
+
+    [Fact]
+    public async Task BlankEventType_DoesNotFlagForReview()
+    {
+        // Most Breely bookings never carry event_type at all - flagging every one of those would
+        // drown out the signal this feature exists to provide.
+        var (processor, gateway, facility, _) = BreelyHarness.Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(19);
+        BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(930, start, 60) // no eventType - defaults to null
+        });
+
+        Assert.Empty(TriageMarkers(gateway));
+    }
+
+    [Fact]
+    public async Task RecognizedEventType_DoesNotFlagForReview()
+    {
+        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
+        var (processor, gateway, facility, _) = BreelyHarness.Build(sheetLocalParts: threeSheets);
+        var start = facility.Today.AddDays(1).AddHours(19);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(940, start, 60, eventType: "17-24 participants") // known label, 3 sheets
+        });
+
+        Assert.Empty(TriageMarkers(gateway));
+    }
+
+    [Fact]
+    public async Task UnrecognizedEventType_OnANonPrimarySibling_DoesNotFlag()
+    {
+        // Scoped to the primary event only (see UnrecognizedEventTypeReason's own doc comment) - a
+        // genuine submission.events[] sibling from the original multi-sheet flow isn't re-checked, so
+        // an already-working ordinary multi-sheet booking doesn't get flagged once per sheet for a
+        // label this feature was never meant to recognize in the first place. The primary's own
+        // event_type is a RECOGNIZED label here specifically so its own claim can't also produce a
+        // marker - isolating what's under test to the sibling's scoping alone.
+        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
+        var (processor, gateway, facility, _) = BreelyHarness.Build(sheetLocalParts: threeSheets);
+        var start = facility.Today.AddDays(5).AddHours(10);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        var primary = BreelyTestData.MakeEvent(950, start, 60, eventType: "Up to 8 participants"); // recognized, 1 sheet
+        var sibling = BreelyTestData.MakeEvent(951, start, 60, eventType: "Some type this app has never seen");
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = primary,
+            Submission = new BreelySubmission { Events = [primary, sibling] }
+        });
+
+        Assert.Empty(TriageMarkers(gateway));
+    }
 }

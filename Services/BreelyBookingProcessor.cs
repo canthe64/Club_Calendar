@@ -256,6 +256,23 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     }
 
     /// <summary>
+    /// Non-null only when <paramref name="isPrimary"/> and <paramref name="evt"/>'s `event_type` is a
+    /// non-blank label <see cref="SheetCountForEventType"/> didn't recognize (D120, operator request,
+    /// 2026-09-14) - the booking still claims exactly 1 sheet either way (unchanged from before D119),
+    /// but this also gets it flagged for a human to check whether the label should be added to
+    /// <see cref="GroupReservationSheetCounts"/>. A blank/missing `event_type` is left alone - most
+    /// Breely bookings never carry this field at all, and flagging every one of those would drown out
+    /// the signal this exists to catch. Scoped to <paramref name="isPrimary"/> only - a genuine
+    /// `submission.events[]` sibling's own `event_type` isn't re-checked here, so an already-working
+    /// ordinary multi-sheet booking doesn't get flagged once per sheet for a label this app was never
+    /// meant to recognize in the first place.
+    /// </summary>
+    private static string? UnrecognizedEventTypeReason(BreelyEvent evt, bool isPrimary) =>
+        isPrimary && !string.IsNullOrWhiteSpace(evt.EventType) && SheetCountForEventType(evt.EventType) is null
+            ? $"event_type \"{evt.EventType}\" isn't a recognized Group Reservation label - defaulted to 1 sheet. Verify whether this should have claimed more, and update GroupReservationSheetCounts if so."
+            : null;
+
+    /// <summary>
     /// <paramref name="existing"/> is resolved once by the caller, not looked up again here.
     /// <paramref name="isPrimary"/> is true for the top-level "event" this specific webhook call is
     /// actually about, and for every synthetic Group Reservation sheet derived from it (D119) - false
@@ -364,11 +381,20 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 BookingGroupId = groupId
             };
 
+            var unrecognizedEventTypeReason = UnrecognizedEventTypeReason(evt, isPrimary);
+
             var claimed = await bookingService.ClaimHoldAsync(start, end, template, groupId, ct);
             if (claimed is not null)
             {
                 logger.LogInformation("Breely webhook: event {Id} claimed hold on {Sheet} for {Start}-{End}.", evt.Id, claimed.SheetMailbox, start, end);
                 await appLog.LogActionAsync("BreelyBookingClaimed", BookedByLabel, claimed.EventId, claimed.SheetMailbox, $"Breely event {breelyId}, {start:g}-{end:g}.", ct);
+
+                if (unrecognizedEventTypeReason is not null)
+                {
+                    await FlagNeedsTriageAsync(start,
+                        $"Breely booking {evt.Id} ({template.RenterName}, {start:h:mmtt}-{end:h:mmtt}) claimed {DisplaySheetLabel(claimed.SheetMailbox)} normally, but its {unrecognizedEventTypeReason} Admin: {evt.AdminUrl}",
+                        ct);
+                }
                 return;
             }
 
@@ -385,8 +411,15 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             await appLog.LogActionAsync("BreelyBookingForceBooked", BookedByLabel, forceBooked.EventId, fallbackSheet,
                 $"Breely event {breelyId} matched no open hold - force-booked, flagged for review.", ct);
 
+            // One combined marker, not two, when both conditions apply - a single booking getting two
+            // separate "needs review" markers for what's really one investigation is worse than one
+            // marker naming both reasons.
+            var noHoldReason = $"didn't match any open hold on any sheet - booked directly onto {DisplaySheetLabel(fallbackSheet)}. Verify manually and reassign if needed.";
+            var combinedReason = unrecognizedEventTypeReason is null
+                ? noHoldReason
+                : $"{noHoldReason} Also, its {unrecognizedEventTypeReason}";
             await FlagNeedsTriageAsync(start,
-                $"Breely booking {evt.Id} ({template.RenterName}, {start:h:mmtt}-{end:h:mmtt}) didn't match any open hold on any sheet - booked directly onto {DisplaySheetLabel(fallbackSheet)}. Verify manually and reassign if needed. Admin: {evt.AdminUrl}",
+                $"Breely booking {evt.Id} ({template.RenterName}, {start:h:mmtt}-{end:h:mmtt}) {combinedReason} Admin: {evt.AdminUrl}",
                 ct);
         }
         finally
