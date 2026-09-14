@@ -173,4 +173,153 @@ public class BreelyBookingProcessorTests
 
         Assert.All(TestFacility.SheetMailboxes, sheet => Assert.Empty(gateway.Events(sheet)));
     }
+
+    // ---- Group Reservation sheet-count expansion (D119) ------------------------------------------
+
+    [Fact]
+    public async Task GroupReservation_KnownLabel_ClaimsThatManySheets_OnOneRealEventId()
+    {
+        // Breely only ever sends ONE event for these - no submission.events[] siblings at all - so
+        // this exercises the actual reported shape: a top-level "event" alone, event_type carrying
+        // the sheet count instead of a sibling array.
+        var fiveSheets = new[] { "sheet1", "sheet2", "sheet3", "sheet4", "sheet5" };
+        var (processor, gateway, facility, _) = BreelyHarness.Build(sheetLocalParts: fiveSheets);
+        var start = facility.Today.AddDays(10).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(482792, start, 120, eventType: "25-32 Participants")
+        });
+
+        var claimedSheets = facility.SheetMailboxes
+            .Where(sheet => gateway.Events(sheet).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy))
+            .ToList();
+        Assert.Equal(4, claimedSheets.Count);
+    }
+
+    [Fact]
+    public async Task GroupReservation_ClaimedSheets_ShareOneBookingGroupId()
+    {
+        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: threeSheets);
+        var start = facility.Today.AddDays(10).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(500, start, 60, eventType: "17-24 participants") // 3 sheets
+        });
+
+        var allBookings = await sheetBookings.GetBookingsForAllSheetsAsync(start.AddDays(-1), start.AddDays(1));
+        // Synthetic sheets 2/3 get their own distinct ExternalBookingId (D119's SyntheticSheetIdOffset,
+        // not a shared-prefix scheme), so BookingGroupId - not ExternalBookingId - is the one field
+        // every sheet of this reservation actually shares. Find the primary's own group id, then
+        // confirm every claimed booking for this window is in it.
+        var primary = Assert.Single(allBookings, b => b.ExternalBookingId == "breely:500");
+        var claimed = allBookings.Where(b => b.BookingGroupId == primary.BookingGroupId).ToList();
+        Assert.Equal(3, claimed.Count);
+        Assert.NotEqual(Guid.Empty, primary.BookingGroupId);
+    }
+
+    [Fact]
+    public async Task GroupReservation_Reschedule_MovesEverySheet_NotJustTheFirst()
+    {
+        // The actual behavior D119 had to get right: Breely will only ever re-notify this app about
+        // the one real event id it knows - that reschedule has to propagate to every sheet this app
+        // itself inferred from it, not just the first (authoritativeIds, not the old primaryId check).
+        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: threeSheets);
+        var originalStart = facility.Today.AddDays(11).AddHours(9);
+        var newStart = facility.Today.AddDays(11).AddHours(14);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, facility.Today.AddDays(11).AddHours(8), facility.Today.AddDays(11).AddHours(20));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(600, originalStart, 60, eventType: "9-16 participants") // 2 sheets
+        });
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(600, newStart, 60, eventType: "9-16 participants")
+        });
+
+        var allBookings = await sheetBookings.GetBookingsForAllSheetsAsync(facility.Today.AddDays(10), facility.Today.AddDays(13));
+        var primary = Assert.Single(allBookings, b => b.ExternalBookingId == "breely:600");
+        var claimed = allBookings.Where(b => b.BookingGroupId == primary.BookingGroupId).ToList();
+        Assert.Equal(2, claimed.Count);
+        Assert.All(claimed, b => Assert.Equal(newStart, b.Start));
+    }
+
+    [Fact]
+    public async Task GroupReservation_Cancel_ReleasesEverySheet()
+    {
+        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
+        var (processor, gateway, facility, _) = BreelyHarness.Build(sheetLocalParts: threeSheets);
+        var start = facility.Today.AddDays(12).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(700, start, 60, eventType: "17-24 participants") // 3 sheets
+        });
+        Assert.Equal(3, facility.SheetMailboxes.Count(sheet => gateway.Events(sheet).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy)));
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(700, start, 60, eventType: "17-24 participants", canceled: true)
+        });
+
+        Assert.All(facility.SheetMailboxes, sheet => Assert.DoesNotContain(gateway.Events(sheet), e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy));
+    }
+
+    [Fact]
+    public async Task GroupReservation_DuplicateDelivery_DoesNotClaimExtraSheets()
+    {
+        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
+        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: threeSheets);
+        var start = facility.Today.AddDays(13).AddHours(9);
+        foreach (var sheet in facility.SheetMailboxes)
+        {
+            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+        }
+
+        var evt = BreelyTestData.MakeEvent(800, start, 60, eventType: "9-16 participants"); // 2 sheets
+        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt });
+        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt }); // resend, identical
+
+        var allBookings = await sheetBookings.GetBookingsForAllSheetsAsync(start.AddDays(-1), start.AddDays(1));
+        var primary = Assert.Single(allBookings, b => b.ExternalBookingId == "breely:800");
+        var claimed = allBookings.Where(b => b.BookingGroupId == primary.BookingGroupId).ToList();
+        Assert.Equal(2, claimed.Count);
+    }
+
+    [Fact]
+    public async Task UnrecognizedEventType_StillClaimsExactlyOneSheet()
+    {
+        // Regression guard: an ordinary (or unrecognized) event_type must keep behaving exactly as it
+        // did before D119 - no expansion, no change to the original single-sheet flow.
+        var (processor, gateway, facility, _) = BreelyHarness.Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var start = facility.Today.AddDays(1).AddHours(19);
+        BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
+
+        await processor.ProcessAsync(new BreelyWebhookPayload
+        {
+            Event = BreelyTestData.MakeEvent(900, start, 60, eventType: "Some future Breely event type we've never seen")
+        });
+
+        Assert.Equal(1, TestFacility.SheetMailboxes.Count(s => gateway.Events(s).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy)));
+    }
 }

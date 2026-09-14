@@ -13,7 +13,8 @@ public static class BreelyTestData
         facilityLocalStart.ToString("h:mmtt", CultureInfo.InvariantCulture).ToLowerInvariant());
 
     public static BreelyEvent MakeEvent(long id, DateTime facilityLocalStart, int durationMinutes,
-        string bookedWith = "Curling Sheet", string? clientName = "Test Renter", bool canceled = false, string? adminUrl = "https://breely.example/admin/1")
+        string bookedWith = "Curling Sheet", string? clientName = "Test Renter", bool canceled = false,
+        string? adminUrl = "https://breely.example/admin/1", string? eventType = null)
     {
         var (date, time) = SplitForBreely(facilityLocalStart);
         return new BreelyEvent
@@ -25,7 +26,8 @@ public static class BreelyTestData
             BookedWith = bookedWith,
             ClientFullName = clientName,
             Canceled = canceled,
-            AdminUrl = adminUrl
+            AdminUrl = adminUrl,
+            EventType = eventType
         };
     }
 }

@@ -29,6 +29,40 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     // that on its own since there's no shared config between the two systems.
     private const string SheetResourceType = "Curling Sheet";
     private const string ExternalIdSourcePrefix = "breely";
+
+    /// <summary>
+    /// D119 (operator-supplied, 2026-09-14): how many physical sheets a "Group Reservation" event type
+    /// actually needs, keyed by its `event_type` label. Staff-maintained, not derived - `event_type` is
+    /// an operator-controlled value defined and named in Breely's own admin panel (unlike everything
+    /// else in the payload, which Breely itself generates), so this table only drifts out of sync when
+    /// the club adds, renames, or retires an event type there; update it then. Case-insensitive
+    /// (`GroupReservationSheetCounts`'s own comparer) since nothing guarantees the club will retype a
+    /// label with exactly the same casing every time it's edited in Breely.
+    /// </summary>
+    private static readonly Dictionary<string, int> GroupReservationSheetCounts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Up to 8 participants"] = 1,
+        ["9-16 participants"] = 2,
+        ["17-24 participants"] = 3,
+        ["25-32 participants"] = 4,
+        ["33-40 participants"] = 5,
+    };
+
+    // The two "Extended session" labels carry extra free text after the hour count (unspecified by the
+    // operator, presumably a date/time-specific suffix) - matched by prefix rather than the exact-
+    // equality the fixed participant-count labels above use, since those are short, closed-vocabulary
+    // strings with no reason to vary sentence-to-sentence the way a suffixed label might.
+    private const string ExtendedSession3HourPrefix = "Extended session - 3-Hours";
+    private const string ExtendedSession4HourPrefix = "Extended session - 4-Hours";
+    private const int ExtendedSessionSheetCount = 5;
+
+    // Every synthetic sheet ExpandForGroupReservation derives gets Breely's real event id plus this
+    // offset times its 1-based position among the *extra* sheets (2nd sheet = +1x, 3rd = +2x, etc. -
+    // the 1st/primary sheet keeps its real, unmodified id). A billion is comfortably past any id Breely
+    // itself is ever likely to assign (observed ids are low six digits), so a synthetic id can never
+    // collide with a genuine future Breely event id, and the real id stays legible at the low end of
+    // the synthetic one for anyone reading a log line.
+    private const long SyntheticSheetIdOffset = 1_000_000_000L;
     // Internal, not private: PublicAvailabilityService's Notes-exposure gate needs to recognize a
     // machine-authored ClubEvent (the NeedsTriage marker below, FlagNeedsTriageAsync) the same way it
     // recognizes a machine-authored SheetBooking via ExternalBookingId - ClubEvent has no such field,
@@ -57,21 +91,55 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     /// submission, not a fresh batch - so every id it names is still resolved and reconciled here
     /// (in case a sibling was never individually claimed), but the top-level "event" object's own
     /// data always wins for its own id, since that's the one actually being updated by this call.
+    ///
+    /// **Group Reservation expansion (D119, live-found 2026-09-07)**: some event types book against a
+    /// single Breely-side resource regardless of how many physical sheets the reservation actually
+    /// needs - "Try Curling Weekday Group Reservation" and similar, where `event_type` is a
+    /// participant-count label ("25-32 Participants") rather than a per-sheet event. Breely never
+    /// sends sibling ids for these, so every resolved event (from either source above) is expanded via
+    /// <see cref="ExpandForGroupReservation"/> before being added to <c>eventsById</c> - a no-op for an
+    /// ordinary single-sheet event, or for a genuine `submission.events[]` sibling (the original
+    /// multi-sheet flow already gives those their own real ids and needs no synthetic ones).
+    ///
+    /// **Known gap, accepted rather than solved here:** if a reschedule notification's `event_type`
+    /// maps to *fewer* sheets than the original booking claimed (the group genuinely shrank), the
+    /// sheets no longer named simply stop being expanded - nothing releases them, since there's no
+    /// record anywhere of "this reservation previously needed N sheets" to compare against. They'd sit
+    /// claimed until a staff member notices and cancels them manually. Growing (more sheets than
+    /// before) is handled correctly - the newly-expanded ids are simply never-before-seen and get
+    /// claimed like any other. Accepted for now as a rare edge case (staff feedback, 2026-09-14) rather
+    /// than adding a second persisted "expected sheet count" concept to track and reconcile against.
     /// </summary>
     public async Task ProcessAsync(BreelyWebhookPayload payload, CancellationToken ct = default)
     {
-        var primaryId = payload.Event?.Id;
         var eventsById = new Dictionary<long, BreelyEvent>();
+        // Every id this call resolves as authoritative for its own external id - i.e. allowed to
+        // cancel/reschedule an existing booking, not just claim a never-before-seen one (see
+        // ProcessEventAsync's isPrimary doc). The top-level "event" always qualifies, same as before
+        // D119; so now does every synthetic sheet ExpandForGroupReservation derives FROM it, since
+        // Breely will only ever notify this app about the one real id it actually knows - a cancel or
+        // reschedule of that id has to propagate to every sheet this app itself inferred from it, not
+        // just the first one. A genuine submission.events[] sibling that ISN'T the primary keeps the
+        // original, stricter behavior (never mutates an existing booking from possibly-stale data).
+        var authoritativeIds = new HashSet<long>();
+
         if (payload.Submission?.Events is { Count: > 0 } siblings)
         {
             foreach (var sibling in siblings)
             {
-                eventsById[sibling.Id] = sibling;
+                foreach (var expanded in ExpandForGroupReservation(sibling))
+                {
+                    eventsById[expanded.Id] = expanded;
+                }
             }
         }
         if (payload.Event is { } primary)
         {
-            eventsById[primary.Id] = primary; // freshest data for its own id - overrides any stale copy from the array above
+            foreach (var expanded in ExpandForGroupReservation(primary))
+            {
+                eventsById[expanded.Id] = expanded; // freshest data for its own id - overrides any stale copy from the array above
+                authoritativeIds.Add(expanded.Id);
+            }
         }
 
         if (eventsById.Count == 0)
@@ -113,7 +181,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 // batchIndex offsets which sheet a force-book fallback lands on (see
                 // ProcessEventAsync) - so siblings that all fail to match a hold in the same batch
                 // spread across sheets instead of stacking three overlapping bookings on sheet 1.
-                await ProcessEventAsync(evt, existingById[id], isPrimary: id == primaryId, sharedGroupId, batchIndex, ct);
+                await ProcessEventAsync(evt, existingById[id], isPrimary: authoritativeIds.Contains(id), sharedGroupId, batchIndex, ct);
             }
             catch (Exception ex)
             {
@@ -124,13 +192,79 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     }
 
     /// <summary>
+    /// Yields <paramref name="evt"/> itself first, unchanged - the sheet Breely actually told this app
+    /// about, same id and same external-id scheme as always - then, only if its `event_type` maps to
+    /// more than one sheet (<see cref="SheetCountForEventType"/>), one synthetic clone per additional
+    /// sheet (D119). Every other event type (including a genuine `submission.events[]` sibling from the
+    /// original multi-sheet flow, which already has its own real id) yields just the one unchanged
+    /// event - this is a no-op for the vast majority of calls.
+    /// </summary>
+    private static IEnumerable<BreelyEvent> ExpandForGroupReservation(BreelyEvent evt)
+    {
+        yield return evt;
+
+        var sheetCount = SheetCountForEventType(evt.EventType);
+        if (sheetCount is not > 1)
+        {
+            yield break;
+        }
+
+        for (var extraSheetNumber = 2; extraSheetNumber <= sheetCount; extraSheetNumber++)
+        {
+            yield return new BreelyEvent
+            {
+                Id = evt.Id + (extraSheetNumber - 1) * SyntheticSheetIdOffset,
+                StartDate = evt.StartDate,
+                StartTime = evt.StartTime,
+                DurationInMinutes = evt.DurationInMinutes,
+                BookedWith = evt.BookedWith,
+                Canceled = evt.Canceled,
+                ClientFullName = evt.ClientFullName,
+                ClientEmail = evt.ClientEmail,
+                ClientPhone = evt.ClientPhone,
+                EventType = evt.EventType,
+                AdminUrl = evt.AdminUrl
+            };
+        }
+    }
+
+    /// <summary>Looks up how many sheets a Group Reservation event type needs from
+    /// <see cref="GroupReservationSheetCounts"/> (exact match) or the "Extended session" prefixes
+    /// (D119) - null for anything else, including a blank/missing label, which
+    /// <see cref="ExpandForGroupReservation"/> then treats as an ordinary single-sheet event exactly
+    /// as before this feature existed.</summary>
+    internal static int? SheetCountForEventType(string? eventType)
+    {
+        if (string.IsNullOrWhiteSpace(eventType))
+        {
+            return null;
+        }
+
+        var trimmed = eventType.Trim();
+        if (GroupReservationSheetCounts.TryGetValue(trimmed, out var count))
+        {
+            return count;
+        }
+
+        if (trimmed.StartsWith(ExtendedSession3HourPrefix, StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith(ExtendedSession4HourPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            return ExtendedSessionSheetCount;
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// <paramref name="existing"/> is resolved once by the caller, not looked up again here.
-    /// <paramref name="isPrimary"/> is true only for the top-level "event" this specific webhook
-    /// call is actually about - false for a sibling resolved purely from "submission.events[]",
-    /// which (per ProcessAsync's doc comment) can be a stale snapshot from the original creation
-    /// call. An already-claimed sibling is never mutated (cancelled or re-timed) from that
-    /// possibly-stale data; only a never-before-seen sibling is claimed from it, and only the
-    /// primary event can change an existing booking's state.
+    /// <paramref name="isPrimary"/> is true for the top-level "event" this specific webhook call is
+    /// actually about, and for every synthetic Group Reservation sheet derived from it (D119) - false
+    /// only for a genuine sibling resolved purely from "submission.events[]", which (per ProcessAsync's
+    /// doc comment) can be a stale snapshot from the original creation call. An already-claimed
+    /// non-authoritative sibling is never mutated (cancelled or re-timed) from that possibly-stale
+    /// data; only a never-before-seen one is claimed from it. A Group Reservation's synthetic sheets
+    /// are always authoritative because Breely will never separately notify this app about them - the
+    /// one real id's own cancel/reschedule is the only signal they'll ever get.
     /// </summary>
     private async Task ProcessEventAsync(BreelyEvent evt, SheetBooking? existing, bool isPrimary, Guid groupId, int batchIndex, CancellationToken ct)
     {

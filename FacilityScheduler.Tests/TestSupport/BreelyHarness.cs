@@ -12,9 +12,9 @@ namespace FacilityScheduler.Tests.TestSupport;
 public static class BreelyHarness
 {
     public static (BreelyBookingProcessor Processor, FakeGraphEventGateway Gateway, FacilityConfiguration Facility, SheetBookingService SheetBookings) Build(
-        Func<Task>? delayDuringFindEvents = null)
+        Func<Task>? delayDuringFindEvents = null, string[]? sheetLocalParts = null)
     {
-        var facility = TestFacility.Create();
+        var facility = TestFacility.Create(sheetLocalParts);
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo) { DelayDuringFindEvents = delayDuringFindEvents };
         var cache = new MemoryCache(new MemoryCacheOptions());
         var appLog = TestAppLog.Create(facility);
