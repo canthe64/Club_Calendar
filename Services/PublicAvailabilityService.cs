@@ -45,6 +45,11 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         // both). Season filtering already ran by the time openSlots gets here.
         var openSlots = (await GetOpenSlotsAsync(start, end, ct))
             .Where(s => !window.IsPastPublicCutoff(s.Start))
+            // Projected to the public wire DTO here, at the point it actually leaves this service -
+            // everything upstream of this line (including GetConcurrentAvailabilityAsync's own use of
+            // GetOpenSlotsAsync below) works with the mailbox-carrying SheetSlot instead (code review
+            // C2), so grouping/counting logic never has to trust the label as if it were unique.
+            .Select(s => new PublicSheetSlot(s.SheetLabel, s.Start, s.End))
             .ToList();
 
         var clubEvents = (await clubEventService.GetEventsAsync(start, end, ct))
@@ -60,11 +65,20 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         return new PublicAvailabilityResponse(DateTime.UtcNow, openSlots, eventLabels);
     }
 
+    /// <summary>Internal-only counterpart to <see cref="PublicSheetSlot"/> - carries the real sheet
+    /// mailbox alongside the display label (code review C2). <see cref="PublicSheetSlot"/> itself
+    /// stays label-only because it's also the public JSON wire shape (D11's minimization stance -
+    /// never expose a raw mailbox address publicly); this type exists so grouping/counting logic can
+    /// key on the mailbox - which is always unique - rather than the label, which two differently-
+    /// named mailboxes could collapse to the same value under (e.g. "north1@..."/"south1@..." both
+    /// reducing to "Sheet 1"). Never serialized; only <see cref="PublicSheetSlot"/> crosses the wire.</summary>
+    private readonly record struct SheetSlot(string SheetMailbox, string SheetLabel, DateTime Start, DateTime End);
+
     /// <summary>Every genuinely open (GroupEvent+Hold) slot in a window, across every sheet - the
     /// same minimization/closure-exclusion rule GetAvailabilityAsync already applies, factored out
     /// so GetConcurrentAvailabilityAsync can reuse it for an arbitrary staff-facing search range
     /// instead of only "the next N days from today".</summary>
-    private async Task<List<PublicSheetSlot>> GetOpenSlotsAsync(DateTime start, DateTime end, CancellationToken ct)
+    private async Task<List<SheetSlot>> GetOpenSlotsAsync(DateTime start, DateTime end, CancellationToken ct)
     {
         var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
         var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
@@ -75,7 +89,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         var closures = clubEvents.Where(ce => ce.MarksSheetsUnavailable).ToList();
 
         var holds = bookings.Where(b => b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold).ToList();
-        var result = new List<PublicSheetSlot>();
+        var result = new List<SheetSlot>();
 
         foreach (var hold in holds)
         {
@@ -117,7 +131,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
                     continue;
                 }
 
-                result.Add(new PublicSheetSlot(SheetLabel(hold.SheetMailbox), segStart, segEnd));
+                result.Add(new SheetSlot(hold.SheetMailbox, SheetLabel(hold.SheetMailbox), segStart, segEnd));
             }
         }
 
@@ -155,10 +169,14 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     // blocks were already merged), that count is exactly the number of distinct sheets simultaneously
     // available - consecutive micro-intervals meeting the threshold are then merged into the reported
     // windows.
-    private static List<PublicAvailabilityWindow> FindConcurrentAvailability(List<PublicSheetSlot> slots, int minSheets)
+    private static List<PublicAvailabilityWindow> FindConcurrentAvailability(List<SheetSlot> slots, int minSheets)
     {
+        // Grouped by mailbox, not label (code review C2) - the label is display-only and two
+        // differently-named mailboxes can reduce to the same one (see SheetSlot's own doc comment),
+        // which would previously collapse two genuinely distinct sheets into one for counting
+        // purposes, under-reporting concurrent availability.
         var perSheetBlocks = slots
-            .GroupBy(s => s.SheetLabel)
+            .GroupBy(s => s.SheetMailbox)
             .SelectMany(g => MergeIntervals(g.Select(s => (s.Start, s.End)).OrderBy(i => i.Start).ToList()))
             .ToList();
 
@@ -290,7 +308,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     /// complement of GetOpenSlotsAsync's "already-advertised rental inventory": here, ANY booking
     /// (every category, every state) and any ice-blocking club event removes time from what's
     /// offered, since practice ice is only allowed when nothing else is planned, confirmed or not.</summary>
-    private async Task<List<PublicSheetSlot>> GetFreeSlotsAsync(DateTime start, DateTime end, CancellationToken ct)
+    private async Task<List<SheetSlot>> GetFreeSlotsAsync(DateTime start, DateTime end, CancellationToken ct)
     {
         var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
         var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
@@ -299,7 +317,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             .Select(ce => (ce.Start, End: ce.ExclusiveEnd))
             .ToList();
 
-        var result = new List<PublicSheetSlot>();
+        var result = new List<SheetSlot>();
         foreach (var sheet in facility.SheetMailboxes)
         {
             var sheetBookings = bookings.Where(b => b.SheetMailbox == sheet).ToList();
@@ -319,7 +337,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
                 {
                     if (segEnd > segStart)
                     {
-                        result.Add(new PublicSheetSlot(SheetLabel(sheet), segStart, segEnd));
+                        result.Add(new SheetSlot(sheet, SheetLabel(sheet), segStart, segEnd));
                     }
                 }
             }
@@ -504,10 +522,11 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     private static string DedupeKey(SheetBooking b) =>
         b.BookingGroupId != Guid.Empty ? b.BookingGroupId.ToString() : $"{b.SheetMailbox}|{b.EventId}";
 
-    private static string SheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
-    }
+    // Delegates to the shared helper (code review O10) - this copy used to be left deliberately
+    // separate (architecture doc §4.12) on the reasoning that it was display-only and "genuinely
+    // different" from CalendarStyles' own use. C2 above shows that reasoning no longer holds: this
+    // label was doubling as an identity key for a real correctness property (concurrent-availability
+    // counting), not just display - now that grouping/counting is keyed on the mailbox instead
+    // (SheetSlot), there's nothing left distinguishing this copy from the canonical one.
+    private static string SheetLabel(string sheetMailbox) => CalendarStyles.SheetLabel(sheetMailbox);
 }

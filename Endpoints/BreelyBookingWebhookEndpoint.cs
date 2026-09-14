@@ -24,7 +24,8 @@ public static class BreelyBookingWebhookEndpoint
 {
     public static void MapBreelyBookingWebhookEndpoint(this WebApplication app)
     {
-        app.MapPost("/api/webhooks/breely", async (HttpContext context, IConfiguration config, BreelyBookingProcessor processor, AppLogService appLog, ILogger<BreelyBookingProcessor> logger, CancellationToken ct) =>
+        app.MapPost("/api/webhooks/breely", async (HttpContext context, IConfiguration config, BreelyBookingProcessor processor, AppLogService appLog,
+            BreelyWebhookOutstandingWork outstandingWork, ILogger<BreelyBookingProcessor> logger, CancellationToken ct) =>
         {
             var expectedSecret = config["Webhook:BreelySharedSecret"];
             var providedSecret = context.Request.Headers["X-Webhook-Secret"].FirstOrDefault();
@@ -72,12 +73,15 @@ public static class BreelyBookingWebhookEndpoint
             // mid-write (e.g. between releasing an old slot and claiming the new one on a reschedule),
             // leaving a booking missing from this calendar while it still exists in Breely. Processing
             // now runs detached, on CancellationToken.None, so once started it always runs to
-            // completion; every service `processor` depends on is a singleton (Program.cs), so nothing
-            // here is tied to this request's (about-to-end) DI scope. Resolves the top-level "event"
-            // plus any siblings in "submission.events" itself - see BreelyBookingProcessor's class doc
-            // for why this app can't just look at "event" alone. Per-event failures inside are already
-            // individually caught there.
-            _ = ProcessInBackgroundAsync(processor, payload, logger);
+            // completion under normal operation; every service `processor` depends on is a singleton
+            // (Program.cs), so nothing here is tied to this request's (about-to-end) DI scope.
+            // Resolves the top-level "event" plus any siblings in "submission.events" itself - see
+            // BreelyBookingProcessor's class doc for why this app can't just look at "event" alone.
+            // Per-event failures inside are already individually caught there. Tracked (code review
+            // C4) so ApplicationStopping (Program.cs) can wait for it during a graceful shutdown's
+            // grace period, rather than the app process itself ending mid-batch the same way an HTTP
+            // timeout used to.
+            outstandingWork.Track(ProcessInBackgroundAsync(processor, payload, logger));
 
             return Results.Ok();
         })

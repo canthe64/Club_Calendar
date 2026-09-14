@@ -7,9 +7,9 @@ namespace FacilityScheduler.Tests.Services;
 
 public class PublicAvailabilityServiceTests
 {
-    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, FacilityConfiguration Facility, SchedulingWindowService Window) Build()
+    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, FacilityConfiguration Facility, SchedulingWindowService Window) Build(string[]? sheetLocalParts = null)
     {
-        var facility = TestFacility.Create();
+        var facility = TestFacility.Create(sheetLocalParts);
         var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
         var appLog = TestAppLog.Create(facility);
@@ -207,6 +207,37 @@ public class PublicAvailabilityServiceTests
         var response = await publicService.GetAvailabilityAsync(requestedDays: 30);
 
         Assert.Empty(response.SheetSlots);
+    }
+
+    [Fact]
+    public async Task ConcurrentAvailability_TwoMailboxesReducingToTheSameLabel_AreCountedAsDistinctSheets()
+    {
+        // Code review C2: two mailboxes whose local parts reduce to the same display label
+        // ("north1@..."/"south1@..." both scrape to "Sheet 1") must still count as two distinct
+        // sheets for "at least N simultaneously open" - grouping by label instead of the (always
+        // unique) mailbox would previously collapse them into one, under-reporting availability and
+        // making an N=2 search here impossible to ever satisfy no matter how many sheets are free.
+        var (publicService, bookingService, facility, _) = Build(sheetLocalParts: ["north1", "south1"]);
+        var day = facility.Today.AddDays(1);
+        var start = day.AddHours(18);
+        var end = day.AddHours(20);
+
+        await bookingService.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = facility.SheetMailboxes[0], Start = start, End = end,
+            Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester");
+        await bookingService.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = facility.SheetMailboxes[1], Start = start, End = end,
+            Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester");
+
+        var windows = await publicService.GetConcurrentAvailabilityAsync(day, day.AddDays(1), minSheets: 2);
+
+        var window = Assert.Single(windows);
+        Assert.Equal(start, window.Start);
+        Assert.Equal(end, window.End);
     }
 
     [Fact]

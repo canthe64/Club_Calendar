@@ -84,7 +84,8 @@ public static class StaffSearchExportEndpoint
 
             return Results.File(csvBytes, SearchResultsCsv.ContentType, SearchResultsCsv.FileNameFor(today));
         })
-        .RequireAuthorization(StaffAuthorizationPolicies.StaffOnly);
+        .RequireAuthorization(StaffAuthorizationPolicies.StaffOnly)
+        .RequireRateLimiting("staff-export"); // code review S3 - a full Graph fan-out per call, season=1 wider still
     }
 
     internal static DateTime? ParseDate(string? value) => DateTime.TryParse(value, out var d) ? d : null;

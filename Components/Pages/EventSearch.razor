@@ -1,4 +1,5 @@
 @page "/search"
+@implements IDisposable
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Domain.Search
 @* Alias so every existing ResultRow reference in this file (fields, OpenResult's parameter) keeps
@@ -261,6 +262,17 @@
         !hasSearched ? SearchViewState.Idle :
         SearchViewState.Results;
 
+    // Cancelled in Dispose (code review O3) - without this, navigating away mid-search left the
+    // fetch (a fan-out across every sheet over a potentially season-wide range) running to
+    // completion against a circuit nobody's watching anymore.
+    private readonly CancellationTokenSource _cts = new();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
     private string _query = string.Empty;
     private DateTime? _rangeStart;
     private DateTime? _rangeEnd;
@@ -273,8 +285,8 @@
     private bool _hasSearched;
     private bool _isSearching;
     private (DateTime Start, DateTime End)? _fetchedRange;
-    private List<SheetBooking> _allBookings = [];
-    private List<ClubEvent> _allClubEvents = [];
+    private IReadOnlyList<SheetBooking> _allBookings = [];
+    private IReadOnlyList<ClubEvent> _allClubEvents = [];
 
     private IReadOnlyList<SearchNotice> _notices = [];
     private string? _rangeWarning;
@@ -448,8 +460,8 @@
             try
             {
                 var fetchEnd = end.AddDays(1); // end is the last INCLUDED day; services take an exclusive upper bound.
-                _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, fetchEnd);
-                _allClubEvents = await ClubEventService.GetEventsAsync(start, fetchEnd);
+                _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, fetchEnd, _cts.Token);
+                _allClubEvents = await ClubEventService.GetEventsAsync(start, fetchEnd, _cts.Token);
                 _fetchedRange = (start, end);
             }
             finally

@@ -1,5 +1,6 @@
 @page "/calendar"
 @page "/"
+@implements IDisposable
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services
 @using FacilityScheduler.Components.Calendar
@@ -162,11 +163,23 @@
     [SupplyParameterFromQuery(Name = "view")]
     public string? QueryView { get; set; }
 
+    // Cancelled in Dispose (code review O3) - without this, navigating away mid-load (Calendar's own
+    // Graph fan-out across every sheet, per view) left the fetch running to completion against a
+    // circuit nobody's watching anymore. Not threaded into every service call in this app, only the
+    // page-level ones actually worth it (Calendar, EventSearch) - see the O3 decision record.
+    private readonly CancellationTokenSource _cts = new();
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+
     // Placeholder only, overwritten in OnInitializedAsync - a field initializer runs before Blazor
     // sets @inject properties, so Facility.Today isn't available here yet.
     private DateTime _anchorDate = DateTime.MinValue;
-    private List<SheetBooking> _allBookings = [];
-    private List<ClubEvent> _activeClubEvents = [];
+    private IReadOnlyList<SheetBooking> _allBookings = [];
+    private IReadOnlyList<ClubEvent> _activeClubEvents = [];
     private bool _newMenuOpen;
     private bool _loading = true;
 
@@ -292,8 +305,8 @@
                 _ => (_anchorDate.Date, _anchorDate.Date.AddDays(1))
             };
 
-            _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, end);
-            _activeClubEvents = await ClubEventService.GetEventsAsync(start, end);
+            _allBookings = await BookingService.GetBookingsForAllSheetsAsync(start, end, _cts.Token);
+            _activeClubEvents = await ClubEventService.GetEventsAsync(start, end, _cts.Token);
         }
         finally
         {

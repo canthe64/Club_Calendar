@@ -727,6 +727,7 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `PracticeIce:EligibleStartHour` / `EligibleEndHour` | `PracticeIce__EligibleStartHour` / `__EligibleEndHour` | Bookable hours, 0–24, Start < End. Default `6`/`22` | No |
 | `PracticeIce:MinLeadHours` | `PracticeIce__MinLeadHours` | Minimum notice. Default `48` | No |
 | `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How far out slots appear. Default `30` | No |
+| `PracticeIce:MaxPendingRequestsPerMember` | `PracticeIce__MaxPendingRequestsPerMember` | Cap on pending (not yet approved/declined) requests one member can hold at once (D138). Default `3` | No |
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Breely's `X-Webhook-Secret` value — **secret** | Breely only |
 | `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path, **outside** the deployed app folder | Strongly recommended |
 | `AppLog:RetentionDays` | `AppLog__RetentionDays` | Rotated files kept. Default `30` | No |

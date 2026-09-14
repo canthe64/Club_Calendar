@@ -68,6 +68,58 @@ public class PracticeIceRequestServiceTests
         Assert.False(result.IsSuccess);
     }
 
+    // ---- Per-member pending-request cap (code review S6) ---------------------------------------
+
+    private static PracticeIceOptions MailConfiguredOptions(int maxPendingRequestsPerMember) => new()
+    {
+        ApproverDistributionEmail = "approvers@test.onmicrosoft.com",
+        MailerMailbox = "mailer@test.onmicrosoft.com",
+        MaxPendingRequestsPerMember = maxPendingRequestsPerMember
+    };
+
+    [Fact]
+    public async Task Submit_AtTheCap_IsRejectedWithAnExplicitMessage_AndWritesNothing()
+    {
+        // Every successful submission writes a hold across every sheet with no auto-expiration
+        // (§2.2) - without a cap, one member could accumulate an unbounded number of them.
+        var (requestService, _, _, facility, _, _) = Build(practiceIce: MailConfiguredOptions(1));
+        var day = facility.Today.AddDays(5);
+        var first = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
+        Assert.True(first.IsSuccess);
+
+        var second = await requestService.SubmitAsync(day.AddHours(14), 60, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.False(second.IsSuccess);
+        Assert.False(second.IsConflict);
+        Assert.Contains("pending request", second.Message);
+        var pending = await requestService.GetPendingAsync();
+        Assert.Single(pending); // the rejected submission didn't write a second hold
+    }
+
+    [Fact]
+    public async Task Submit_AtTheCap_DoesNotBlockADifferentHost()
+    {
+        var (requestService, _, _, facility, _, _) = Build(practiceIce: MailConfiguredOptions(1));
+        var day = facility.Today.AddDays(5);
+        await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
+
+        var otherHost = await requestService.SubmitAsync(day.AddHours(14), 60, "Other Host", "other@example.com", certified: true, notes: null);
+
+        Assert.True(otherHost.IsSuccess);
+    }
+
+    [Fact]
+    public async Task Submit_BelowTheCap_Succeeds()
+    {
+        var (requestService, _, _, facility, _, _) = Build(practiceIce: MailConfiguredOptions(2));
+        var day = facility.Today.AddDays(5);
+        await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
+
+        var second = await requestService.SubmitAsync(day.AddHours(14), 60, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.True(second.IsSuccess);
+    }
+
     [Fact]
     public async Task Submit_StartOutsideEligibleHours_IsRejected()
     {

@@ -183,11 +183,11 @@
         }
     }
 
-    private string SheetLabel(string mailbox)
-    {
-        var index = Array.IndexOf(Facility.SheetMailboxes, mailbox);
-        return index >= 0 ? $"Sheet {index + 1}" : mailbox;
-    }
+    // Delegates to the shared helper (code review O10) - this copy previously numbered sheets by
+    // their position in Facility.SheetMailboxes rather than scraping digits out of the mailbox name.
+    // For this facility's actual sheet1..sheetN naming the two agree exactly; CalendarStyles.SheetLabel
+    // is the one every other surface (grids, modals, search, CSV export) already renders with.
+    private string SheetLabel(string mailbox) => CalendarStyles.SheetLabel(mailbox);
 
     private Task HandleSaveClick() =>
         IsSaving || !CanSave

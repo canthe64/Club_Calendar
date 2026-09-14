@@ -30,7 +30,8 @@ public static class SettingsLogsEndpoint
 
             return Results.File(BuildZip(files), "application/zip", $"facility-scheduler-logs-{DateTime.UtcNow:yyyy-MM-dd}.zip");
         })
-        .RequireAuthorization(StaffAuthorizationPolicies.StaffOnly);
+        .RequireAuthorization(StaffAuthorizationPolicies.StaffOnly)
+        .RequireRateLimiting("staff-export"); // code review S3 - builds the entire log archive in memory
     }
 
     // internal, not private - InternalsVisibleTo (D60 precedent), so this is testable with a plain

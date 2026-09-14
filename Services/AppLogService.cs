@@ -224,13 +224,22 @@ public class AppLogService
 
         if (!string.IsNullOrEmpty(eventId)) parts.Add($"eventId={Escape(eventId)}");
         if (!string.IsNullOrEmpty(sheet)) parts.Add($"sheet={Escape(sheet)}");
-        if (!string.IsNullOrEmpty(details)) parts.Add($"details=\"{Escape(details)}\"");
+        // Not the quote-collapsing Escape() below, and not quote-wrapped either (code review O7) -
+        // details is always the last field on the line, so it never needs a closing delimiter the
+        // way actor/eventId/sheet's own quote-collapsing exists to protect. The one line this
+        // mattered most for is WebhookRawPayloadReceived's raw Breely JSON (D117 raised its cap to
+        // preserve exactly this diagnostic) - collapsing every " to ' made the preserved text
+        // unparseable by any JSON tool. Newlines are still stripped: one physical log line per
+        // entry is a hard rule regardless of what's in this field.
+        if (!string.IsNullOrEmpty(details)) parts.Add($"details={details.Replace('\n', ' ').Replace('\r', ' ')}");
 
         return string.Join(' ', parts);
     }
 
     // One entry per line, by convention - strip characters that would let a value (a staff-entered
-    // note, a Breely field) inject a fake extra line or unbalanced quote into the file.
+    // note, a Breely field) inject a fake extra line or unbalanced quote into the file. Used for
+    // actor/eventId/sheet, which aren't the line's last field; details (above) has its own,
+    // quote-preserving handling.
     private static string Escape(string value) => value.Replace('\n', ' ').Replace('\r', ' ').Replace('"', '\'');
 
     /// <summary>Returns up to <paramref name="count"/> of the most recent lines, oldest-to-newest

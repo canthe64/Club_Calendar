@@ -34,7 +34,16 @@ builder.Services.AddSingleton(sp =>
 {
     var options = sp.GetRequiredService<IOptions<GraphOptions>>().Value;
     var credential = new ClientSecretCredential(options.TenantId, options.ClientId, options.ClientSecret);
-    return new GraphServiceClient(credential, ["https://graph.microsoft.com/.default"]);
+
+    // An explicit timeout (code review O2) - the convenience TokenCredential constructor below
+    // builds its own HttpClient internally with no timeout override, so a hung Graph call would
+    // otherwise block a Blazor circuit indefinitely (spinner up, no way out but a page reload).
+    // GraphClientFactory.Create() gives the same default handler pipeline (retry, redirect,
+    // compression) that constructor would have built anyway - only Timeout is actually different.
+    var httpClient = GraphClientFactory.Create();
+    httpClient.Timeout = TimeSpan.FromSeconds(30);
+    var authProvider = new Microsoft.Kiota.Authentication.Azure.AzureIdentityAuthenticationProvider(credential, scopes: ["https://graph.microsoft.com/.default"]);
+    return new GraphServiceClient(httpClient, authProvider);
 });
 builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphEventGateway, FacilityScheduler.Services.Graph.GraphEventGateway>();
 builder.Services.AddSingleton<FacilityScheduler.Services.Graph.IGraphMailGateway, FacilityScheduler.Services.Graph.GraphMailGateway>();
@@ -52,6 +61,7 @@ builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityServi
 builder.Services.AddSingleton<FacilityScheduler.Services.PracticeIceRequestService>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>();
+builder.Services.AddSingleton<FacilityScheduler.Services.BreelyWebhookOutstandingWork>();
 
 // The public availability endpoint is the app's only internet-anonymous surface (architecture
 // doc §6.4) - rate-limited and CORS-scoped to just that one route, not applied globally.
@@ -76,6 +86,19 @@ builder.Services.AddRateLimiter(options =>
     options.AddFixedWindowLimiter("booking-webhook", limiterOptions =>
     {
         limiterOptions.PermitLimit = 30;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueLimit = 0;
+    });
+
+    // Staff-only, but both trigger a full Graph fan-out across every mailbox (a whole season's
+    // worth for the CSV export with season=1) or build the entire log archive in memory - accident
+    // protection, not attack protection (code review S3): a held-down refresh key or a link
+    // prefetcher is the realistic trigger, not a hostile actor, since both sit behind the staff-only
+    // fallback policy already. Separate from public-api/booking-webhook so a burst here can't starve
+    // either of those.
+    options.AddFixedWindowLimiter("staff-export", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 10;
         limiterOptions.Window = TimeSpan.FromMinutes(1);
         limiterOptions.QueueLimit = 0;
     });
@@ -249,5 +272,12 @@ var lifetime = app.Services.GetRequiredService<IHostApplicationLifetime>();
 var lifetimeAppLog = app.Services.GetRequiredService<FacilityScheduler.Services.AppLogService>();
 lifetime.ApplicationStarted.Register(() => lifetimeAppLog.LogDebugAsync("AppStarted", "system").GetAwaiter().GetResult());
 lifetime.ApplicationStopping.Register(() => lifetimeAppLog.LogDebugAsync("AppStopping", "system").GetAwaiter().GetResult());
+
+// Interim fix for detached Breely webhook processing being abandoned on an ungraceful app restart
+// (code review C4) - waits for whatever's currently mid-flight, bounded so a genuinely stuck task
+// can't hang shutdown itself. 25s leaves headroom under the grace period a platform-initiated
+// recycle/deploy-swap typically allows before forcing termination.
+var outstandingWebhookWork = app.Services.GetRequiredService<FacilityScheduler.Services.BreelyWebhookOutstandingWork>();
+lifetime.ApplicationStopping.Register(() => outstandingWebhookWork.WaitForAllAsync(TimeSpan.FromSeconds(25)).GetAwaiter().GetResult());
 
 app.Run();

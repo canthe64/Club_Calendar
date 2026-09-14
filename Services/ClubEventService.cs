@@ -76,7 +76,10 @@ public class ClubEventService(IGraphEventGateway graph, IMemoryCache cache, Faci
     /// window here is acceptable even for the closure check: invalidation fires the instant a closure
     /// is created through this app, so staleness only applies to a closure added directly in Outlook -
     /// the same caveat that already applies to every other cached read.</summary>
-    public async Task<List<ClubEvent>> GetEventsAsync(DateTime start, DateTime end, CancellationToken ct = default)
+    // IReadOnlyList<ClubEvent>, not List<ClubEvent> (code review C5) - same reasoning as
+    // SheetBookingService.GetBookingsForAllSheetsAsync: the returned instance is the shared cached
+    // one, and this type makes a future accidental in-place mutation structurally impossible.
+    public async Task<IReadOnlyList<ClubEvent>> GetEventsAsync(DateTime start, DateTime end, CancellationToken ct = default)
     {
         var cacheKey = $"clubevents:{start:O}:{end:O}";
         if (cache.TryGetValue(cacheKey, out List<ClubEvent>? cached) && cached is not null)

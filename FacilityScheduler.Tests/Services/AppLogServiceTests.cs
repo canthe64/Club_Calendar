@@ -34,4 +34,35 @@ public class AppLogServiceTests
         Assert.False(File.Exists(expiredFile));
         Assert.True(File.Exists(freshFile));
     }
+
+    [Fact]
+    public async Task LogActionAsync_DetailsContainingDoubleQuotes_SurvivesVerbatim()
+    {
+        // Code review O7: details used to have every " collapsed to ' (and be wrapped in its own
+        // quotes), which mangled the one thing WebhookRawPayloadReceived exists to preserve - raw
+        // Breely JSON - into something no JSON tool could parse back out. details is always the
+        // line's last field, so it never needed the quote-collapsing that protects actor/eventId/sheet.
+        var appLog = TestAppLog.Create(out _);
+        const string rawJson = "{\"event_type\":\"25-32 Participants\",\"admin_url\":\"https://example.com\"}";
+
+        await appLog.LogActionAsync("WebhookRawPayloadReceived", "Breely webhook", details: rawJson);
+
+        var lines = await appLog.TailAsync(10);
+        Assert.Contains(lines, l => l.EndsWith($"details={rawJson}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task LogActionAsync_ActorContainingDoubleQuotes_StillHasThemCollapsed()
+    {
+        // actor isn't the line's last field (details, when present, always comes after it) - it
+        // still needs its quotes collapsed so an embedded " can't unbalance the line's own
+        // details="..." delimiter for a caller that supplies both. Regression guard for O7's fix
+        // staying scoped to details only.
+        var appLog = TestAppLog.Create(out _);
+
+        await appLog.LogActionAsync("Test", "actor with \"quotes\"", details: "some details");
+
+        var lines = await appLog.TailAsync(10);
+        Assert.Contains(lines, l => l.Contains("actor=actor with 'quotes'"));
+    }
 }

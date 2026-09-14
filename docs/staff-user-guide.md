@@ -441,3 +441,9 @@ app.
 
 You can also get to the approval queue from an individual booking: opening any Practice Ice booking
 on the Calendar page that's still awaiting approval shows a link straight to this page.
+
+**A member can hold at most 3 pending requests at once** (configurable, `PracticeIce:MaxPendingRequestsPerMember`) -
+past that, submission is blocked with a message telling them how many they already have outstanding.
+Approving or declining one of their existing requests frees up their next slot. If a member genuinely
+needs more room than that (a volunteer coordinating several sessions at once, say), the cap is a
+deployment setting - see the deployment guide.

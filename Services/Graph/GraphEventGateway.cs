@@ -67,13 +67,30 @@ public class GraphEventGateway(GraphServiceClient graphClient) : IGraphEventGate
 
     public async Task<List<Event>> FindEventsAsync(string mailbox, string filter, string[] expand, CancellationToken ct = default)
     {
+        var allEvents = new List<Event>();
         var response = await graphClient.Users[mailbox].Events.GetAsync(config =>
         {
             config.QueryParameters.Filter = filter;
             config.QueryParameters.Expand = expand;
         }, ct);
 
-        return response?.Value ?? [];
+        // Same pagination gotcha as GetCalendarViewAsync/GetInstancesAsync above (code review C11) -
+        // harmless in practice today, since every caller filters on an exact external id and expects
+        // at most one match, but this keeps the invariant "every read path here follows
+        // @odata.nextLink until exhausted" actually true rather than one silent exception to it.
+        while (response is not null)
+        {
+            if (response.Value is not null)
+            {
+                allEvents.AddRange(response.Value);
+            }
+
+            response = response.OdataNextLink is not null
+                ? await graphClient.Users[mailbox].Events.WithUrl(response.OdataNextLink).GetAsync(cancellationToken: ct)
+                : null;
+        }
+
+        return allEvents;
     }
 
     public Task<Event?> CreateEventAsync(string mailbox, Event graphEvent, CancellationToken ct = default) =>

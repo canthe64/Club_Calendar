@@ -379,4 +379,36 @@ public class SheetBookingServiceTests
         Assert.Contains(seasonStart.ToString("MMM d, yyyy"), conflict.RenterName);
         Assert.Contains(seasonEnd.ToString("MMM d, yyyy"), conflict.RenterName);
     }
+
+    // ---- Minimum group event booking interval bounds (code review C8) -------------------------------
+
+    [Fact]
+    public async Task SetMinimumGroupEventBookingIntervalAsync_NegativeValue_Throws()
+    {
+        var (service, _, _, _) = Build();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.SetMinimumGroupEventBookingIntervalAsync(-1, "tester"));
+    }
+
+    [Fact]
+    public async Task SetMinimumGroupEventBookingIntervalAsync_AbsurdlyLargeValue_Throws()
+    {
+        // Settings.razor's dropdown never offers more than 120 (D55) - this is the service-layer
+        // backstop for any other caller, same reasoning as the pre-existing negative-value guard.
+        var (service, _, _, _) = Build();
+
+        await Assert.ThrowsAsync<ArgumentOutOfRangeException>(() =>
+            service.SetMinimumGroupEventBookingIntervalAsync(1441, "tester"));
+    }
+
+    [Fact]
+    public async Task SetMinimumGroupEventBookingIntervalAsync_AtTheUpperBound_DoesNotThrow()
+    {
+        var (service, _, _, _) = Build();
+
+        await service.SetMinimumGroupEventBookingIntervalAsync(1440, "tester");
+
+        Assert.Equal(1440, service.MinimumGroupEventBookingIntervalMinutes);
+    }
 }

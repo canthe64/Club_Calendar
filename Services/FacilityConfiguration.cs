@@ -22,6 +22,7 @@ public class FacilityConfiguration
     public int PracticeIceEligibleEndHour { get; }
     public int PracticeIceMinLeadHours { get; }
     public int PracticeIceMaxHorizonDays { get; }
+    public int PracticeIceMaxPendingRequestsPerMember { get; }
     public string PracticeIceApproverEmail { get; }
     public string PracticeIceMailerMailbox { get; }
 
@@ -93,11 +94,16 @@ public class FacilityConfiguration
         {
             throw new InvalidOperationException("PracticeIce:MaxHorizonDays must be at least 1.");
         }
+        if (pi.MaxPendingRequestsPerMember < 1)
+        {
+            throw new InvalidOperationException("PracticeIce:MaxPendingRequestsPerMember must be at least 1.");
+        }
 
         PracticeIceEligibleStartHour = pi.EligibleStartHour;
         PracticeIceEligibleEndHour = pi.EligibleEndHour;
         PracticeIceMinLeadHours = pi.MinLeadHours;
         PracticeIceMaxHorizonDays = pi.MaxHorizonDays;
+        PracticeIceMaxPendingRequestsPerMember = pi.MaxPendingRequestsPerMember;
         PracticeIceApproverEmail = pi.ApproverDistributionEmail;
         PracticeIceMailerMailbox = pi.MailerMailbox;
     }

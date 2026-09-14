@@ -75,6 +75,46 @@ public class SchedulingWindowServiceTests
     }
 
     [Fact]
+    public async Task SetSeasonWindowAsync_StartAfterEnd_Throws()
+    {
+        // Code review C8: an inverted pair previously persisted as-is, making IsOutsideSeason true
+        // for every date - silently blocking every new booking with a conflict message pointing at a
+        // season nobody would read as wrong. Settings.razor's own SeasonIsValid already keeps this
+        // out of the UI's reach; this is the service-layer backstop for any other caller.
+        var (window, _, _, _) = Build();
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            window.SetSeasonWindowAsync(new DateTime(2027, 3, 15), new DateTime(2026, 10, 15), "tester"));
+    }
+
+    [Fact]
+    public async Task SetSeasonWindowAsync_StartEqualsEnd_DoesNotThrow()
+    {
+        // A one-day season is unusual but not backwards - the boundary this guard must not overreach
+        // into.
+        var (window, _, _, _) = Build();
+        var day = new DateTime(2026, 10, 15);
+
+        await window.SetSeasonWindowAsync(day, day, "tester");
+
+        Assert.Equal(day, window.SeasonStartDate);
+        Assert.Equal(day, window.SeasonEndDate);
+    }
+
+    [Fact]
+    public async Task SetSeasonWindowAsync_OnlyOneBoundSet_DoesNotThrow()
+    {
+        // The guard only fires when BOTH bounds are present and backwards relative to each other -
+        // setting just one end is a normal, valid, half-open restriction.
+        var (window, _, _, _) = Build();
+
+        await window.SetSeasonWindowAsync(new DateTime(2026, 10, 15), null, "tester");
+
+        Assert.Equal(new DateTime(2026, 10, 15), window.SeasonStartDate);
+        Assert.Null(window.SeasonEndDate);
+    }
+
+    [Fact]
     public async Task SetSeasonWindowAsync_NullBoth_ClearsTheRestriction()
     {
         var (window, _, _, _) = Build();

@@ -272,12 +272,8 @@
 
     private void OnEndMinutesChanged(int m) => Draft.EndMinutes = m;
 
-    private static string DayGridSheetLabel(string sheetMailbox)
-    {
-        var localPart = sheetMailbox.Split('@')[0];
-        var digits = new string(localPart.Where(char.IsDigit).ToArray());
-        return digits.Length > 0 ? $"Sheet {digits}" : localPart;
-    }
+    // Delegates to the shared helper (code review O10) - was an identical duplicate already.
+    private static string DayGridSheetLabel(string sheetMailbox) => CalendarStyles.SheetLabel(sheetMailbox);
 
     // Staff feedback: this row only said "conflicts with N booking(s)" with nothing to tell which
     // ones - same complaint as EventFormModal/SeriesEditModal's conflict lists, so it gets the same

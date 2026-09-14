@@ -51,6 +51,19 @@ public class PracticeIceRequestService(
             return PracticeIceSubmitResult.Invalid($"Notes are limited to {PracticeIceRules.MaxNotesLength} characters.");
         }
 
+        // Code review S6: every successful submission writes a hold across every sheet, holds never
+        // auto-expire (§2.2, deliberate), and nothing previously limited how many pending requests
+        // one member could accumulate - a single account could otherwise blanket the entire booking
+        // horizon. Counted by distinct pending request (BookingGroupId), not by sheet - one 5-sheet
+        // request is one request, matching how GetPendingAsync already presents the queue to staff.
+        var pendingForThisHost = (await GetPendingAsync(ct))
+            .Count(r => string.Equals(r.HostEmail, hostEmail, StringComparison.OrdinalIgnoreCase));
+        if (pendingForThisHost >= facility.PracticeIceMaxPendingRequestsPerMember)
+        {
+            return PracticeIceSubmitResult.Invalid(
+                $"You already have {pendingForThisHost} pending request(s) awaiting approval. Please wait for a decision before submitting another.");
+        }
+
         var window = await availability.FindPracticeIceWindowContainingAsync(start, ct);
         if (window is null)
         {
@@ -208,7 +221,7 @@ public class PracticeIceRequestService(
         }
     }
 
-    private Task<List<SheetBooking>> GetHorizonBookingsAsync(CancellationToken ct) =>
+    private Task<IReadOnlyList<SheetBooking>> GetHorizonBookingsAsync(CancellationToken ct) =>
         bookingService.GetBookingsForAllSheetsAsync(facility.Today, facility.Today.AddDays(facility.PracticeIceMaxHorizonDays + 1), ct);
 
     private async Task<List<SheetBooking>> GetGroupMembersAsync(Guid bookingGroupId, CancellationToken ct)

@@ -57,6 +57,17 @@ public class SchedulingWindowService(AppLogService log, ViewCacheRegistry viewCa
 
     public async Task SetSeasonWindowAsync(DateTime? start, DateTime? end, string actor, CancellationToken ct = default)
     {
+        // Rejected, not silently swapped (code review C8) - matches this app's established
+        // philosophy of making an invalid value structurally impossible rather than guessing what
+        // staff meant (D55's minimum-interval dropdown is the same reasoning). Settings.razor's own
+        // SeasonIsValid already keeps the Save button disabled for this case; this is the service-
+        // layer backstop for any other caller. An inverted pair, if it ever did land, would make
+        // IsOutsideSeason true for every date - silently blocking every new booking.
+        if (start is { } s && end is { } e && s.Date > e.Date)
+        {
+            throw new InvalidOperationException($"Season start ({s:d}) cannot be after season end ({e:d}).");
+        }
+
         var previous = _current;
         await PersistAsync(previous with { SeasonStartDate = start?.Date, SeasonEndDate = end?.Date }, ct);
 

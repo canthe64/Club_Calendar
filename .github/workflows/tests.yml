@@ -30,4 +30,14 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test FacilityScheduler.Tests/FacilityScheduler.Tests.csproj --no-build --configuration Release --logger "console;verbosity=normal"
+        run: dotnet test FacilityScheduler.Tests/FacilityScheduler.Tests.csproj --no-build --configuration Release --logger "console;verbosity=normal" --collect:"XPlat Code Coverage" --results-directory TestResults
+
+      # coverlet.collector (referenced by the test project, per the --collect flag above) previously
+      # had nothing consuming its output (code review O6) - published here so a coverage number is
+      # visible without anyone needing to run the collector locally themselves.
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: TestResults/**/coverage.cobertura.xml

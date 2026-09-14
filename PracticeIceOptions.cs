@@ -9,6 +9,14 @@ public class PracticeIceOptions
     public int MinLeadHours { get; set; } = 48;
     public int MaxHorizonDays { get; set; } = 30;
 
+    /// <summary>Cap on how many pending (not yet approved/declined) requests one member can hold at
+    /// once (code review S6) - each successful submission writes a hold across every sheet with no
+    /// auto-expiration (§2.2, deliberate), so with no cap a single account could otherwise blanket
+    /// the entire booking horizon. The population is B2B-invited members, so likelihood is low, but
+    /// the cost of getting this wrong (an early "you already have N pending requests" message vs. a
+    /// legitimate host blocked) is asymmetric enough to keep the default generous.</summary>
+    public int MaxPendingRequestsPerMember { get; set; } = 3;
+
     /// <summary>Mail-enabled distribution group notified when a member submits a practice ice
     /// request. Empty until configured at deployment - submission is blocked with an explicit
     /// message rather than silently proceeding with nobody notified.</summary>

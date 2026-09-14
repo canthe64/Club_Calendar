@@ -183,8 +183,13 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 details: $"{eventsById.Count} sibling event(s) resolved for this submission: {string.Join(",", eventsById.Keys)}.", ct: ct);
         }
 
+        // Materialized to an explicitly ordered list (code review C7) - Dictionary enumeration order
+        // is an implementation detail, not a contract, and batchIndex below (which D50 relies on to
+        // spread force-booked siblings across different sheets rather than stacking them on sheet 1)
+        // depends on a stable order across this one loop.
+        var orderedEvents = eventsById.ToList();
         var batchIndex = 0;
-        foreach (var (id, evt) in eventsById)
+        foreach (var (id, evt) in orderedEvents)
         {
             try
             {
