@@ -54,8 +54,8 @@ public static class PracticeIcePublicEndpoint
                 <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     Any properly trained member can volunteer to host a practice ice session, open to all
                     members, at a time when no other activity is planned on any sheet. Sessions must be
-                    requested at least {facility.PracticeIceMinLeadHours} hours in advance and are subject
-                    to staff approval.
+                    requested at least {facility.PracticeIceMinLeadHours} hours in advance and will be
+                    reviewed by the Calendar team to avoid conflicts.
                 </div>
                 <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     If you are not familiar with the responsibilities of being a practice ice host, email
@@ -65,9 +65,6 @@ public static class PracticeIcePublicEndpoint
                 <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     Once you're familiar with the expectations of hosting, you can volunteer to host
                     practice ice by following these steps:
-                </div>
-                <div style="font-size:13px;font-weight:700;color:#1e2a33;margin-bottom:8px">
-                    To volunteer to host practice ice, follow these steps:
                 </div>
                 <ol style="font-size:13px;color:#90a0ab;margin:0 0 8px;padding-left:20px">
                     <li>Select an available time slot from the list below
@@ -83,14 +80,10 @@ public static class PracticeIcePublicEndpoint
                         is 1 hour) and click the checkbox certifying you're qualified to host</li>
                     <li style="margin-top:6px">Click "Submit Request"</li>
                 </ol>
-                <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">
                     Your practice ice time will be automatically added to the calendar on a tentative
                     basis. Once someone from the calendar team approves your request (making sure it
                     doesn't conflict with anything), your practice ice session will be confirmed.
-                </div>
-                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">
-                    If you have any questions or problems, please contact Charlie at
-                    <a href="mailto:charlie@curlingseattle.org" style="color:#2d5f8a">charlie@curlingseattle.org</a>.
                 </div>
             """);
 

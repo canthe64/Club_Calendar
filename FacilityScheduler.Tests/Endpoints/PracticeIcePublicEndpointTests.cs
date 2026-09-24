@@ -53,19 +53,16 @@ public class PracticeIcePublicEndpointTests
         var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
 
         Assert.Contains("if you have a \"guest\" account", html);
-        // Two distinct mailto links to Charlie - the guest-account sub-step and the closing
-        // contact line both name him, not a single shared reference.
-        var occurrences = html.Split("""<a href="mailto:charlie@curlingseattle.org" """).Length - 1;
-        Assert.Equal(2, occurrences);
+        Assert.Contains("""<a href="mailto:charlie@curlingseattle.org" """, html);
     }
 
     [Fact]
-    public void RenderPage_EndsWithTheContactLine()
+    public void RenderPage_DescribesCalendarTeamReview()
     {
         var facility = TestFacility.Create();
 
         var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
 
-        Assert.Contains("If you have any questions or problems, please contact Charlie at", html);
+        Assert.Contains("reviewed by the Calendar team to avoid conflicts.", html);
     }
 }
