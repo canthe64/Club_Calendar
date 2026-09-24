@@ -57,9 +57,40 @@ public static class PracticeIcePublicEndpoint
                     requested at least {facility.PracticeIceMinLeadHours} hours in advance and are subject
                     to staff approval.
                 </div>
-                <div style="font-size:13px;font-weight:700;color:#1e2a33;margin-bottom:16px">
-                    Pick a start time below to submit a request. You will be prompted to login with your
-                    GCC user or guest account credentials.
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
+                    If you are not familiar with the responsibilities of being a practice ice host, email
+                    <a href="mailto:practice@curlingseattle.org" style="color:#2d5f8a">practice@curlingseattle.org</a>
+                    to learn the responsibilities.
+                </div>
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
+                    Once you're familiar with the expectations of hosting, you can volunteer to host
+                    practice ice by following these steps:
+                </div>
+                <div style="font-size:13px;font-weight:700;color:#1e2a33;margin-bottom:8px">
+                    To volunteer to host practice ice, follow these steps:
+                </div>
+                <ol style="font-size:13px;color:#90a0ab;margin:0 0 8px;padding-left:20px">
+                    <li>Select an available time slot from the list below
+                        <ol type="a" style="margin:4px 0 0;padding-left:20px">
+                            <li>You will be prompted to login to continue &ndash; you can use either your GCC
+                                email or your personal email if you have a "guest" account.</li>
+                            <li>Contact Charlie at
+                                <a href="mailto:charlie@curlingseattle.org" style="color:#2d5f8a">charlie@curlingseattle.org</a>
+                                if you need a guest account</li>
+                        </ol>
+                    </li>
+                    <li style="margin-top:6px">Select the length of time you'll host practice ice (minimum
+                        is 1 hour) and click the checkbox certifying you're qualified to host</li>
+                    <li style="margin-top:6px">Click "Submit Request"</li>
+                </ol>
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
+                    Your practice ice time will be automatically added to the calendar on a tentative
+                    basis. Once someone from the calendar team approves your request (making sure it
+                    doesn't conflict with anything), your practice ice session will be confirmed.
+                </div>
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">
+                    If you have any questions or problems, please contact Charlie at
+                    <a href="mailto:charlie@curlingseattle.org" style="color:#2d5f8a">charlie@curlingseattle.org</a>.
                 </div>
             """);
 

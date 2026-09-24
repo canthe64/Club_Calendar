@@ -5,39 +5,67 @@ using FacilityScheduler.Tests.TestSupport;
 namespace FacilityScheduler.Tests.Endpoints;
 
 /// <summary>
-/// The intro copy on /public/practice-ice - operator request, 2026-09-03: the "pick a start time"
-/// call-to-action was buried mid-paragraph and easy to miss; it's now its own bold line, with wording
-/// that also sets expectations about the sign-in prompt on the next page.
+/// The intro copy on /public/practice-ice - operator-supplied rewrite, 2026-09-24: replaced the
+/// short two-paragraph intro with a fuller walkthrough (a responsibilities-info email, a numbered
+/// step list with a lettered sub-list for the login/guest-account detail, and a closing contact
+/// line), superseding the earlier D115 call-to-action wording this test file used to pin.
 /// </summary>
 public class PracticeIcePublicEndpointTests
 {
     [Fact]
-    public void RenderPage_CallToAction_IsItsOwnBoldLine_WithTheUpdatedWording()
+    public void RenderPage_MentionsTheLeadTimeRequirement()
     {
         var facility = TestFacility.Create();
 
         var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
 
-        Assert.Contains(
-            """<div style="font-size:13px;font-weight:700;color:#1e2a33;margin-bottom:16px">""",
-            html);
-        Assert.Contains(
-            "Pick a start time below to submit a request. You will be prompted to login with your",
-            html);
-        Assert.Contains("GCC user or guest account credentials.", html);
+        Assert.Contains($"requested at least {facility.PracticeIceMinLeadHours} hours in advance", html);
     }
 
     [Fact]
-    public void RenderPage_CallToAction_IsSeparateFromTheExplanatoryParagraphAbove()
+    public void RenderPage_LinksToTheResponsibilitiesEmail()
     {
-        // Two distinct blocks, not one run-on paragraph - the explanatory sentence about who can host
-        // and the lead-time requirement stays in its own (non-bold) line above the call to action.
         var facility = TestFacility.Create();
 
         var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
 
-        Assert.Contains("subject", html);
-        Assert.Contains("to staff approval.", html);
-        Assert.DoesNotContain("to staff approval. Pick a start time", html);
+        Assert.Contains("""<a href="mailto:practice@curlingseattle.org" """, html);
+        Assert.Contains("learn the responsibilities", html);
+    }
+
+    [Fact]
+    public void RenderPage_ListsTheThreeVolunteerSteps()
+    {
+        var facility = TestFacility.Create();
+
+        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
+
+        Assert.Contains("Select an available time slot from the list below", html);
+        Assert.Contains("Select the length of time you'll host practice ice (minimum", html);
+        Assert.Contains("""Click "Submit Request"</li>""", html);
+    }
+
+    [Fact]
+    public void RenderPage_GuestAccountSubStep_LinksToCharlieForAGuestAccount()
+    {
+        var facility = TestFacility.Create();
+
+        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
+
+        Assert.Contains("if you have a \"guest\" account", html);
+        // Two distinct mailto links to Charlie - the guest-account sub-step and the closing
+        // contact line both name him, not a single shared reference.
+        var occurrences = html.Split("""<a href="mailto:charlie@curlingseattle.org" """).Length - 1;
+        Assert.Equal(2, occurrences);
+    }
+
+    [Fact]
+    public void RenderPage_EndsWithTheContactLine()
+    {
+        var facility = TestFacility.Create();
+
+        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
+
+        Assert.Contains("If you have any questions or problems, please contact Charlie at", html);
     }
 }
