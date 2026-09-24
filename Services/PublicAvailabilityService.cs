@@ -463,9 +463,25 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             return CalendarStyles.CategoryLabel(b.Category);
         }
 
+        // Only a booking that came through the member request flow (PracticeIceRequestService.
+        // SubmitAsync) has RenterName = the host's own name - and only that flow ever sets
+        // RenterEmail on a PracticeIce booking (the staff form hides the email field for every
+        // category but Rental). A staff-created PracticeIce booking's RenterName is a free-text
+        // *title* (e.g. "Practice Ice Hosted by Jeff Pearson"), which PracticeIceTitle's own
+        // "Hosted by" wrapper would double up into "Practice Ice - Hosted by Practice Ice Hosted by
+        // Jeff Pearson" - live-found 2026-09-24. Staff titles show as typed, same as every other
+        // category (§2.3).
         if (b.Category == BookingCategory.PracticeIce)
         {
-            return PracticeIceTitle(b.RenterName);
+            if (!string.IsNullOrWhiteSpace(b.RenterEmail))
+            {
+                return PracticeIceTitle(b.RenterName);
+            }
+
+            // Staff-typed title: as typed, except still never a bare address, and never blank.
+            return !string.IsNullOrWhiteSpace(b.RenterName) && !b.RenterName.Contains('@')
+                ? b.RenterName
+                : CalendarStyles.CategoryLabel(BookingCategory.PracticeIce);
         }
 
         return string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;

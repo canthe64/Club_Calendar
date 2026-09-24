@@ -114,6 +114,28 @@ public class PublicAvailabilityServiceTests
     }
 
     [Fact]
+    public async Task PracticeIceBooking_StaffCreatedWithATypedTitle_ShowsTheTitleAsTyped_NotWrappedAgain()
+    {
+        // Live-found 2026-09-24: a staff-created PracticeIce booking's RenterName is a free-text
+        // title ("Practice Ice Hosted by Jeff Pearson"), not a host name - wrapping it in
+        // "Practice Ice - Hosted by ..." doubled the phrase on the public calendar only. Only the
+        // member request flow sets RenterEmail, which is what distinguishes the two.
+        var (publicService, bookingService, facility, _) = Build();
+        var day = facility.Today.AddDays(1);
+
+        await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
+            Category = BookingCategory.PracticeIce, State = BookingState.Confirmed, RenterName = "Practice Ice Hosted by Jeff Pearson"
+        }, "tester");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        var booking = Assert.Single(view.Bookings);
+        Assert.Equal("Practice Ice Hosted by Jeff Pearson", booking.Title);
+    }
+
+    [Fact]
     public async Task PracticeIceBooking_NoRenterName_TitleIsJustPracticeIce()
     {
         var (publicService, bookingService, facility, _) = Build();
