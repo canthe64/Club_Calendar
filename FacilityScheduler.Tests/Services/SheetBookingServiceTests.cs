@@ -215,6 +215,88 @@ public class SheetBookingServiceTests
         Assert.Equal(holdEnd, facility.FromUtcResponseString(remainder.End!.DateTime!));
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)] // the hold is a recurring occurrence - deleted and recreated rather than patched
+    public async Task ClaimHoldAsync_MultiSheetClaimInTheMiddle_LeftoverFragmentsShareOneGroupPerSide(bool holdIsSeriesOccurrence)
+    {
+        // Live-found 2026-09-28 (screenshot): a 5-sheet Breely booking claimed 5-7PM out of a
+        // 12-10PM hold on every sheet, and the 12-5 and 7-10 leftovers showed as a separate chip per
+        // sheet - each sheet's leftover got its own fresh group id.
+        var (service, gateway, facility, _) = Build();
+        var sheets = TestFacility.SheetMailboxes.Take(3).ToList();
+        var day = facility.Today.AddDays(2);
+        foreach (var sheet in sheets)
+        {
+            gateway.Seed(sheet, new Event
+            {
+                Subject = "Group Events Availability", ShowAs = FreeBusyStatus.Tentative,
+                Categories = [BookingCategory.GroupEvent.ToString()],
+                Start = TestFacility.Dtz(day.AddHours(12)), End = TestFacility.Dtz(day.AddHours(22)),
+                SeriesMasterId = holdIsSeriesOccurrence ? $"master-{sheet}" : null
+            });
+        }
+
+        var claimGroupId = Guid.NewGuid();
+        foreach (var _ in sheets)
+        {
+            Assert.NotNull(await service.ClaimHoldAsync(day.AddHours(17), day.AddHours(19), new SheetBooking
+            {
+                SheetMailbox = "", Start = day.AddHours(17), End = day.AddHours(19), Category = BookingCategory.GroupEvent, State = BookingState.Confirmed, RenterName = "Robert"
+            }, claimGroupId));
+        }
+
+        var holds = (await service.GetBookingsForAllSheetsAsync(day, day.AddDays(1)))
+            .Where(b => b.State == BookingState.Hold).ToList();
+        var before = holds.Where(b => b.End == day.AddHours(17)).ToList();
+        var after = holds.Where(b => b.Start == day.AddHours(19)).ToList();
+        Assert.Equal(3, before.Count);
+        Assert.Equal(3, after.Count);
+        Assert.Single(before.Select(b => b.BookingGroupId).Distinct());
+        Assert.Single(after.Select(b => b.BookingGroupId).Distinct());
+        Assert.NotEqual(Guid.Empty, before[0].BookingGroupId);
+        Assert.NotEqual(claimGroupId, before[0].BookingGroupId); // never mistaken for a sibling of the claimed booking
+        // ...which is what the calendars actually group on: one chip each side, not one per sheet.
+        Assert.Equal(3, CalendarStyles.SiblingGroup(holds, before[0]).Count);
+        Assert.Equal(3, CalendarStyles.SiblingGroup(holds, after[0]).Count);
+    }
+
+    [Fact]
+    public async Task CancelGroupAsync_ReopenMergingNeighbours_AcrossSheets_ReopenedHoldsShareOneGroup()
+    {
+        // Same bug as above on the way back: releasing a multi-sheet booking into the leftover holds
+        // on either side merged each sheet into one wider hold, each with its own fresh group id.
+        var (service, gateway, facility, _) = Build();
+        var sheets = TestFacility.SheetMailboxes.Take(2).ToList();
+        var day = facility.Today.AddDays(2);
+        foreach (var sheet in sheets)
+        {
+            gateway.Seed(sheet, new Event
+            {
+                Subject = "Available for Group Events", ShowAs = FreeBusyStatus.Tentative,
+                Categories = [BookingCategory.GroupEvent.ToString()],
+                Start = TestFacility.Dtz(day.AddHours(12)), End = TestFacility.Dtz(day.AddHours(22))
+            });
+        }
+
+        var claimGroupId = Guid.NewGuid();
+        var claimed = new List<SheetBooking>();
+        foreach (var _ in sheets)
+        {
+            claimed.Add((await service.ClaimHoldAsync(day.AddHours(17), day.AddHours(19), new SheetBooking
+            {
+                SheetMailbox = "", Start = day.AddHours(17), End = day.AddHours(19), Category = BookingCategory.GroupEvent, State = BookingState.Confirmed
+            }, claimGroupId))!);
+        }
+
+        await service.CancelGroupAsync(claimed, reopenAsGroupEventHold: true, "tester");
+
+        var holds = (await service.GetBookingsForAllSheetsAsync(day, day.AddDays(1))).ToList();
+        Assert.Equal(2, holds.Count);
+        Assert.All(holds, h => Assert.Equal((day.AddHours(12), day.AddHours(22)), (h.Start, h.End)));
+        Assert.Single(holds.Select(h => h.BookingGroupId).Distinct());
+    }
+
     [Fact]
     public async Task CancelGroupAsync_Reopen_ClearsBookedByAndExternalBookingId()
     {

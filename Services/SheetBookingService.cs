@@ -512,7 +512,7 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
                             End = mergedEnd,
                             Category = BookingCategory.GroupEvent,
                             State = BookingState.Hold,
-                            BookingGroupId = merged ? Guid.NewGuid() : member.BookingGroupId
+                            BookingGroupId = merged ? LeftoverHoldGroupId(member.BookingGroupId) : member.BookingGroupId
                             // Renter-specific fields intentionally omitted - back to a plain open hold.
                         };
 

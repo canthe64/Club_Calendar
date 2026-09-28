@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using FacilityScheduler.Domain;
 using Microsoft.Graph.Models;
 
@@ -109,7 +110,7 @@ public partial class SheetBookingService
                 booking.EventId = created?.Id;
                 booking.ICalUId = created?.ICalUId;
 
-                await TrimHoldAsync(sheet, hold, start, end, ct);
+                await TrimHoldAsync(sheet, hold, start, end, groupId, ct);
 
                 InvalidateViewCache();
                 return booking;
@@ -123,8 +124,30 @@ public partial class SheetBookingService
         return null;
     }
 
-    private async Task TrimHoldAsync(string sheet, SheetBooking hold, DateTime claimedStart, DateTime claimedEnd, CancellationToken ct)
+    /// <summary>
+    /// The group id for an open hold left over when a grouped booking takes part of it (a claim's
+    /// remainder, TrimHoldAsync) or gives time back (a reopen that merges neighbours,
+    /// CancelGroupAsync). Deterministic from the source booking's group id, so the matching fragment
+    /// on every sheet of a multi-sheet booking gets the same id and the calendar shows it as one
+    /// hold - a fresh Guid per sheet split one open block into a chip per sheet. Derived rather than
+    /// reusing the source id itself, so a leftover hold is never mistaken for a sibling of the
+    /// booking it was carved from. An empty source (an untouched recurring occurrence, whose group
+    /// id doesn't propagate from the master) has nothing to share, so gets a fresh id as before.
+    /// </summary>
+    internal static Guid LeftoverHoldGroupId(Guid sourceGroupId)
     {
+        if (sourceGroupId == Guid.Empty)
+        {
+            return Guid.NewGuid();
+        }
+
+        var hash = SHA256.HashData([.. sourceGroupId.ToByteArray(), .. "leftover-hold"u8]);
+        return new Guid(hash.AsSpan(0, 16));
+    }
+
+    private async Task TrimHoldAsync(string sheet, SheetBooking hold, DateTime claimedStart, DateTime claimedEnd, Guid claimGroupId, CancellationToken ct)
+    {
+        var leftoverGroupId = LeftoverHoldGroupId(claimGroupId);
         var minInterval = TimeSpan.FromMinutes(_minimumGroupEventBookingIntervalMinutes);
 
         // A leftover fragment shorter than the configured minimum (Settings page) is dropped rather
@@ -155,7 +178,7 @@ public partial class SheetBookingService
                     End = segEnd,
                     Category = BookingCategory.GroupEvent,
                     State = BookingState.Hold,
-                    BookingGroupId = Guid.NewGuid()
+                    BookingGroupId = leftoverGroupId
                 };
                 await graph.CreateEventAsync(sheet, ToGraphEvent(remainderHold, titleOverride: AvailableForGroupEventsTitle), ct);
             }
@@ -172,13 +195,15 @@ public partial class SheetBookingService
             return;
         }
 
-        // One remainder: patch the existing hold in place to the shrunken window.
+        // One remainder: patch the existing hold in place to the shrunken window. The group id is
+        // rewritten too, so this fragment groups with its counterparts on the other claimed sheets.
         var (firstStart, firstEnd) = remainders[0];
         var patch = new Event
         {
             Subject = AvailableForGroupEventsTitle,
             Start = new DateTimeTimeZone { DateTime = firstStart.ToString("s"), TimeZone = facility.TimeZone },
-            End = new DateTimeTimeZone { DateTime = firstEnd.ToString("s"), TimeZone = facility.TimeZone }
+            End = new DateTimeTimeZone { DateTime = firstEnd.ToString("s"), TimeZone = facility.TimeZone },
+            SingleValueExtendedProperties = [new SingleValueLegacyExtendedProperty { Id = GroupIdPropertyId, Value = leftoverGroupId.ToString() }]
         };
         await graph.PatchEventAsync(sheet, hold.EventId!, patch, ct);
 
@@ -197,7 +222,7 @@ public partial class SheetBookingService
             End = secondEnd,
             Category = BookingCategory.GroupEvent,
             State = BookingState.Hold,
-            BookingGroupId = Guid.NewGuid()
+            BookingGroupId = leftoverGroupId
         };
         await graph.CreateEventAsync(sheet, ToGraphEvent(secondHold, titleOverride: AvailableForGroupEventsTitle), ct);
     }
