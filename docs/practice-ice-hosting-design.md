@@ -2,20 +2,18 @@
 
 **Status: implemented (2026-08-11).** This document is kept as the historical design record - the
 rationale, rejected alternatives, and every open question worked through with the operator before
-and during the build. The architecture doc's own account of what shipped, including six new Design
-Decision Record entries (D68-D73) covering points where implementation reversed or refined what's
-written below, lives at `docs/curling-facility-scheduling-architecture.md` §5.4.4. That's the
-authoritative current-state reference; this document is not maintained going forward.
+and during the build. The architecture doc's account of what shipped
+lives at `docs/curling-facility-scheduling-architecture.md` §5.4.4. That's the authoritative
+current-state reference; this document is not maintained going forward. Decisions D68-D73, covering
+points where implementation reversed or refined what's written below, are in `docs/decision-log.md`.
 
-One load-bearing thing decided during implementation, not below: this app has **no role/group
-distinction between staff and any other signed-in user** (§3.3 assumed member sign-in without
-examining that consequence). A member invited as a guest to submit a practice ice request can reach
-every staff page, including approvals for other members' requests. Flagged as an open, unresolved
-risk in the architecture doc §8 - read that before inviting members at any real volume.
+One load-bearing gap surfaced during implementation, not below: §3.3 assumed member sign-in without
+examining that, at the time, the app had no distinction between staff and any other signed-in user.
+That was closed by the staff/member authorization split (D74, architecture doc §6.5).
 
 Where this proposal contradicted an existing recorded decision at design time, that was called out
-explicitly in §8 below — largely superseded now by the architecture doc's own DDR entries, but left
-in place as the original reasoning trail.
+explicitly in §8 below — largely superseded now by the decision log's entries, but left in place as
+the original reasoning trail.
 
 ---
 

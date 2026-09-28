@@ -7,7 +7,7 @@ using FacilityScheduler.Services;
 namespace FacilityScheduler.Endpoints;
 
 /// <summary>
-/// The real Breely booking-notification webhook. A "dumb webhook" by design (architecture doc §5.4.5):
+/// The real Breely booking-notification webhook. A "dumb webhook" by design (architecture doc §4.8/§5.5):
 /// the booking already happened in the real world by the time this fires, so the job is to reflect
 /// it, never to reject it - always ack quickly and rely on logs/NeedsTriage markers, not the HTTP
 /// response, to surface anything that needs a human.

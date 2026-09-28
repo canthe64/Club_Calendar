@@ -93,7 +93,7 @@ Breely webhook    ─┘         └─→ ephemeral read cache                 
 
 Every anonymous route is a plain Minimal API endpoint rather than a Blazor page, each with its own explicit `.AllowAnonymous()`. 
 
-Full detail, including the design decision record and the reasoning behind rejected alternatives, is in [docs/curling-facility-scheduling-architecture.md](docs/curling-facility-scheduling-architecture.md).
+Full detail, including the key design decisions and the reasoning behind rejected alternatives, is in [docs/curling-facility-scheduling-architecture.md](docs/curling-facility-scheduling-architecture.md). The complete decision and findings history is in [docs/decision-log.md](docs/decision-log.md).
 
 ## Requirements
 
@@ -162,7 +162,8 @@ Services depend on an `IGraphEventGateway` abstraction rather than `GraphService
 
 | Document                                                                  | Contents                                                 |
 | ------------------------------------------------------------------------- | -------------------------------------------------------- |
-| [Architecture & design](docs/curling-facility-scheduling-architecture.md) | The system as built, plus the full decision record       |
+| [Architecture & design](docs/curling-facility-scheduling-architecture.md) | The system as built, and the key decisions behind it     |
+| [Decision & findings log](docs/decision-log.md)                           | Every numbered decision, finding, and implementation note |
 | [Deployment guide](docs/deployment-guide.md)                              | Tenant provisioning and deployment, start to finish      |
 | [API reference](docs/api-reference.md)                                    | Endpoint contracts                                       |
 | [Staff user guide](docs/staff-user-guide.md)                              | Day-to-day operation                                     |
