@@ -120,7 +120,7 @@
 </div>
 
 <EventFormModal IsOpen="_formOpen" Draft="_eventDraft" Conflicts="_formConflicts" IsSaving="_isSaving" OnSave="SaveEventDraft" OnCancel="CloseForm" OnDelete="DeleteOffIceEventDraft" />
-<ClubEventDetailModal ClubEvent="_clubEventDetail" OnClose="() => _clubEventDetail = null" OnEdit="StartEditClubEvent" OnDelete="DeleteClubEventDirect" />
+<ClubEventDetailModal ClubEvent="_clubEventDetail" OnClose="() => _clubEventDetail = null" OnEdit="StartEditClubEvent" OnDelete="DeleteClubEventDirect" OnResolve="ResolveTriageAlert" />
 <BookingDetailModal Group="_detailGroup" SeriesRange="_detailSeriesRange" IsLoadingSeriesRange="_isLoadingDetailSeriesRange"
                      OnClose="() => _detailGroup = null" OnEdit="StartEdit" OnCancelBooking="StartCancel" OnCancelSeries="StartCancelSeries" OnEditSeries="StartEditSeries" />
 <SeriesEditModal Group="_seriesEditGroup" SeriesRange="_seriesEditRange" IsLoadingSeriesRange="_isLoadingSeriesEditRange"
@@ -881,6 +881,14 @@
         _eventDraft.LoadForEdit(ce);
         _formConflicts = [];
         _formOpen = true;
+    }
+
+    private async Task ResolveTriageAlert(ClubEvent ce)
+    {
+        _clubEventDetail = null;
+        var actingUser = await GetCurrentUserNameAsync();
+        await ClubEventService.ResolveTriageMarkerAsync(ce, actingUser);
+        await LoadAsync();
     }
 
     private async Task DeleteClubEventDirect(ClubEvent ce)

@@ -80,6 +80,14 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     // literal string is what keeps the two checks from silently drifting apart.
     internal const string BookedByLabel = "Breely webhook";
 
+    /// <summary>Title of the off-ice marker FlagNeedsTriageAsync creates for staff review.</summary>
+    internal const string TriageMarkerTitle = "⚠ Web booking needs review";
+
+    /// <summary>True for a "needs review" marker this processor created - the calendar offers
+    /// "Resolve this alert" on these instead of the ordinary edit/delete controls.</summary>
+    public static bool IsTriageMarker(ClubEvent clubEvent) =>
+        clubEvent.BookedBy == BookedByLabel && clubEvent.Title == TriageMarkerTitle;
+
     // Guards against two concurrent webhook deliveries for the same external id (Breely has been
     // observed re-sending the same creation notification twice within minutes) racing through
     // FindByExternalIdAsync before either has claimed anything - without this, both could see "no
@@ -536,7 +544,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
         {
             var marker = new ClubEvent
             {
-                Title = "⚠ Web booking needs review",
+                Title = TriageMarkerTitle,
                 Category = ClubEventCategory.Other,
                 Start = date.Date,
                 End = date.Date,

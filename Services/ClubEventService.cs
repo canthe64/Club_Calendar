@@ -2,6 +2,7 @@ using FacilityScheduler.Domain;
 using FacilityScheduler.Services.Graph;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Graph.Models;
+using Microsoft.Graph.Models.ODataErrors;
 using System.Collections.Concurrent;
 
 namespace FacilityScheduler.Services;
@@ -69,6 +70,33 @@ public class ClubEventService(IGraphEventGateway graph, IMemoryCache cache, Faci
         await graph.DeleteEventAsync(facility.ClubEventsMailbox, eventId, ct);
         InvalidateViewCache();
         await log.LogActionAsync("ClubEventCancelled", actingUser, eventId, ct: ct);
+    }
+
+    /// <summary>
+    /// Resolves a Breely "needs review" marker: removes it and records who resolved it at Standard
+    /// tier, so the review is still on record once the marker is gone. A marker already removed (a
+    /// second staff member resolving it from a stale tab) counts as resolved. The marker's notes
+    /// aren't logged - they can carry the customer's real name.
+    /// </summary>
+    public async Task ResolveTriageMarkerAsync(ClubEvent marker, string actingUser, CancellationToken ct = default)
+    {
+        if (!BreelyBookingProcessor.IsTriageMarker(marker) || marker.EventId is null)
+        {
+            throw new ArgumentException("Only a web-booking review marker can be resolved.", nameof(marker));
+        }
+
+        try
+        {
+            await graph.DeleteEventAsync(facility.ClubEventsMailbox, marker.EventId, ct);
+        }
+        catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+        {
+            // Already resolved elsewhere.
+        }
+
+        InvalidateViewCache();
+        await log.LogActionAsync("TriageAlertResolved", actingUser, marker.EventId, sheet: null,
+            details: $"Web booking review alert for {marker.Start:d} resolved.", ct: ct);
     }
 
     /// <summary>Read-cached (Phase 7, 30s TTL) - used by Calendar.razor, ClubEvents.razor, both
