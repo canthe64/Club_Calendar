@@ -669,6 +669,10 @@ doesn't block anything above.
 5. **Re-run Step 13's first item** on the custom domain: sign in and confirm `/calendar` loads.
    Keep the `<default-domain>` URIs registered — having both hostnames working is what lets you
    tell a DNS problem apart from an app problem.
+6. **Tighten `AllowedHosts`** (Step 10, or Appendix A) from `*` to the real domain — a wildcard
+   (`*.example.org`) if the app might ever move subdomains, the exact hostname otherwise. Found via
+   code review (D146) - `*` accepts any `Host` header at all, which the framework's own host-header
+   validation exists specifically to reject once a real domain is in play.
 
 ---
 
@@ -731,6 +735,7 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Breely's `X-Webhook-Secret` value — **secret** | Breely only |
 | `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path, **outside** the deployed app folder | Strongly recommended |
 | `AppLog:RetentionDays` | `AppLog__RetentionDays` | Rotated files kept. Default `30` | No |
+| `AllowedHosts` | `AllowedHosts` | ASP.NET Core's own host-header allow-list (built-in, not app-specific config) — no colon/double-underscore section prefix. Set to the real custom domain (wildcard form, e.g. `*.curlingseattle.org`, works for any subdomain but not the bare apex — add that separately, semicolon-delimited, if it's ever also served) once Step 14 is done; `*` until then (D146). | Recommended once a custom domain exists |
 
 **Load-bearing** = the app throws at startup rather than running misconfigured. The two `PracticeIce`
 mail addresses are softer: the app boots without them, but request submission is blocked with an
