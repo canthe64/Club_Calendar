@@ -735,7 +735,7 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Breely's `X-Webhook-Secret` value — **secret** | Breely only |
 | `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path, **outside** the deployed app folder | Strongly recommended |
 | `AppLog:RetentionDays` | `AppLog__RetentionDays` | Rotated files kept. Default `30` | No |
-| `AllowedHosts` | `AllowedHosts` | ASP.NET Core's own host-header allow-list (built-in, not app-specific config) — no colon/double-underscore section prefix. Set to the real custom domain (wildcard form, e.g. `*.curlingseattle.org`, works for any subdomain but not the bare apex — add that separately, semicolon-delimited, if it's ever also served) once Step 14 is done; `*` until then (D146). | Recommended once a custom domain exists |
+| `AllowedHosts` | `AllowedHosts` | ASP.NET Core's own host-header allow-list (built-in, not app-specific config) — no colon/double-underscore section prefix. Semicolon-delimited list. Set to the real custom domain(s) once Step 14 is done; `*` until then (D146). The wildcard form (`*.example.org`) covers any subdomain but not the bare apex — list the apex too, semicolon-separated (`*.example.org;example.org`), if the app is ever reached at the root domain, e.g. embedded in an iframe served from it. | Recommended once a custom domain exists |
 
 **Load-bearing** = the app throws at startup rather than running misconfigured. The two `PracticeIce`
 mail addresses are softer: the app boots without them, but request submission is blocked with an
