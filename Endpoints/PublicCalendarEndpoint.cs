@@ -315,6 +315,19 @@ public static class PublicCalendarEndpoint
             <meta name="viewport" content="width=device-width, initial-scale=1.0">
             <title>Club Calendar</title>
             <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+            <style>
+                /* Frozen top rows (staff request 2026-09-28, "like Excel's Freeze top row"): the
+                   navigator + category filters stay put, and the date/weekday header row sticks
+                   just beneath them. --pub-sticky-top is that block's live height, set by the
+                   script at the end of the page. */
+                .pub-cal-sticky { position:sticky; top:0; z-index:20; background:#fff; padding-top:8px; margin-top:-8px; }
+                .pub-cal-colhead { position:sticky; top:var(--pub-sticky-top, 0px); z-index:10; background:#fff; }
+                /* A scroll container (overflow-x:auto) would capture the date headers' stickiness,
+                   so the hourly grid only side-scrolls on screens too narrow for a week's columns;
+                   there the navigator and filters still freeze, the date row doesn't. */
+                .pub-cal-hgrid { border:1px solid #e7ecef; border-radius:8px; padding:10px; background:#fff; }
+                @media (max-width: 800px) { .pub-cal-hgrid { overflow-x:auto; } }
+            </style>
             </head>
             <body style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;margin:0;color:#1e2a33">
             <header style="background:#1e2a33;color:#fff;padding:10px 24px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:16px">
@@ -473,15 +486,17 @@ public static class PublicCalendarEndpoint
         var sb = new StringBuilder();
         AppendPageOpen(sb);
 
+        sb.Append("""<div class="pub-cal-sticky">""");
         sb.Append(NavBar(anchorMonth.ToString("MMMM yyyy"),
             MonthHref(anchorMonth.AddMonths(-1), filterQuery), MonthHref(today, filterQuery), MonthHref(anchorMonth.AddMonths(1), filterQuery),
             ViewMode.Month, anchorMonth, filter));
         sb.Append(AppendCategoryFilterForm(ViewMode.Month, anchorMonth, filter));
+        sb.Append("</div>");
 
         sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:12px">""");
         foreach (var name in new[] { "Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat" })
         {
-            sb.Append($"""<div style="text-align:center;color:#90a0ab;font-weight:600;padding:2px 0">{name}</div>""");
+            sb.Append($"""<div class="pub-cal-colhead" style="text-align:center;color:#90a0ab;font-weight:600;padding:2px 0">{name}</div>""");
         }
 
         foreach (var cell in MonthCells(anchorMonth))
@@ -588,10 +603,12 @@ public static class PublicCalendarEndpoint
         var title = weekStart.Year == weekEnd.Year
             ? $"{weekStart:MMM d} - {weekEnd:MMM d, yyyy}"
             : $"{weekStart:MMM d, yyyy} - {weekEnd:MMM d, yyyy}";
+        sb.Append("""<div class="pub-cal-sticky">""");
         sb.Append(NavBar(title,
             WeekHref(weekStart.AddDays(-7), filterQuery), WeekHref(today, filterQuery), WeekHref(weekStart.AddDays(7), filterQuery),
             ViewMode.Week, weekStart, filter));
         sb.Append(AppendCategoryFilterForm(ViewMode.Week, weekStart, filter));
+        sb.Append("</div>");
 
         AppendHourlyGrid(sb, days, view, showDayHeaders: true);
         AppendLegend(sb);
@@ -607,10 +624,12 @@ public static class PublicCalendarEndpoint
         var sb = new StringBuilder();
         AppendPageOpen(sb);
 
+        sb.Append("""<div class="pub-cal-sticky">""");
         sb.Append(NavBar(day.ToString("dddd, MMMM d, yyyy"),
             DayHref(day.AddDays(-1), filterQuery), DayHref(today, filterQuery), DayHref(day.AddDays(1), filterQuery),
             ViewMode.Day, day, filter));
         sb.Append(AppendCategoryFilterForm(ViewMode.Day, day, filter));
+        sb.Append("</div>");
 
         AppendHourlyGrid(sb, [day], view, showDayHeaders: false);
         AppendLegend(sb);
@@ -624,13 +643,13 @@ public static class PublicCalendarEndpoint
         var allDayRowHeightPx = maxAllDayCount == 0 ? 0 : maxAllDayCount * AllDayChipHeightPx + Math.Max(0, maxAllDayCount - 1) * AllDayChipGapPx + 4;
         var isMultiDay = days.Count > 1;
 
-        sb.Append("""<div style="border:1px solid #e7ecef;border-radius:8px;padding:10px;background:#fff;overflow-x:auto">""");
+        sb.Append("""<div class="pub-cal-hgrid">""");
         sb.Append("""<div style="display:flex;gap:3px;font-size:12px">""");
 
         sb.Append("""<div style="width:52px;flex-shrink:0">""");
         if (showDayHeaders)
         {
-            sb.Append($"""<div style="height:{HourlyHeaderRowHeightPx}px"></div>""");
+            sb.Append($"""<div class="pub-cal-colhead" style="height:{HourlyHeaderRowHeightPx}px"></div>""");
         }
         if (allDayRowHeightPx > 0)
         {
@@ -660,7 +679,7 @@ public static class PublicCalendarEndpoint
         if (showHeader)
         {
             sb.Append($"""
-                <div style="box-sizing:border-box;height:{HourlyHeaderRowHeightPx}px;text-align:center;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
+                <div class="pub-cal-colhead" style="box-sizing:border-box;height:{HourlyHeaderRowHeightPx}px;text-align:center;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
                     <div style="font-weight:600;color:#1e2a33;font-size:13.5px">{day:ddd}</div>
                     <div style="color:#90a0ab;font-size:11.5px">{day:MMM d}</div>
                 </div>
@@ -831,6 +850,21 @@ public static class PublicCalendarEndpoint
                 // can take a noticeable moment), so the page just sits unchanged until it's replaced.
                 // Show an explicit loading state the instant a nav link is clicked; navigation then
                 // proceeds normally and the whole DOM (including this overlay) is replaced anyway.
+                // Keep the frozen date row pinned just below the frozen navigator/filter block,
+                // whose height depends on how the filter chips wrap at this width.
+                var stickyBlock = document.querySelector('.pub-cal-sticky');
+                if (stickyBlock) {
+                    var setStickyTop = function () {
+                        document.documentElement.style.setProperty('--pub-sticky-top', stickyBlock.offsetHeight + 'px');
+                    };
+                    setStickyTop();
+                    if (window.ResizeObserver) {
+                        new ResizeObserver(setStickyTop).observe(stickyBlock);
+                    } else {
+                        window.addEventListener('resize', setStickyTop);
+                    }
+                }
+
                 var loading = document.getElementById('pub-cal-loading');
                 document.querySelectorAll('.pub-cal-nav-link').forEach(function (link) {
                     link.addEventListener('click', function () {
