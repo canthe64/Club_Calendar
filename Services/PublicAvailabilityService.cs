@@ -237,114 +237,206 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     }
 
     /// <summary>
-    /// Windows, aligned to a 30-minute grid, where every sheet is simultaneously free of any booking
-    /// - any category, any state - and not covered by an ice-blocking club event: the pool of times
-    /// a member could volunteer to host practice ice (docs/practice-ice-hosting-design.md §3.1).
-    /// Deliberately different from GetOpenSlotsAsync above, which reports existing GroupEvent+Hold
-    /// rental inventory - group events, by policy, always take priority over practice ice, so
-    /// anything already on the calendar (sold or not) blocks a window here. Clipped to
-    /// [now + PracticeIceMinLeadHours, now + PracticeIceMaxHorizonDays] and floored at
-    /// PracticeIceRules.MinSessionMinutes so a sliver too short for any real session isn't offered.
+    /// Every time a member can start hosting practice ice (docs/practice-ice-hosting-design.md §3.1,
+    /// widened 2026-09-28): a 30-minute grid start, inside the eligible hours, lead time, horizon,
+    /// and booking season, from which at least PracticeIce:MinOpenSheets sheets stay free for the
+    /// shortest session. "Free" is <see cref="MemberFreeTime"/>'s rule - nothing booked, or an open
+    /// Group Event hold guests can no longer book. Some sheets may be in use; a session runs on the
+    /// free ones only.
     /// </summary>
-    public async Task<List<PublicAvailabilityWindow>> GetPracticeIceWindowsAsync(CancellationToken ct = default)
+    public async Task<List<PracticeIceStartOption>> GetPracticeIceStartsAsync(CancellationToken ct = default)
+    {
+        var (earliestStart, latestEnd) = MemberIceRange();
+        var cacheKey = $"practice-ice-starts:{earliestStart:yyyyMMddHHmm}:{latestEnd:yyyyMMddHHmm}";
+        if (cache.TryGetValue(cacheKey, out List<PracticeIceStartOption>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var (free, _) = await GetMemberIceSnapshotAsync(latestEnd, ct);
+        var result = new List<PracticeIceStartOption>();
+
+        for (var day = earliestStart.Date; day < latestEnd; day = day.AddDays(1))
+        {
+            var dayEnd = Min(day.AddHours(facility.PracticeIceEligibleEndHour), latestEnd);
+            for (var t = Max(day.AddHours(facility.PracticeIceEligibleStartHour), earliestStart);
+                 t.AddMinutes(PracticeIceRules.MinSessionMinutes) <= dayEnd;
+                 t = t.AddMinutes(PracticeIceRules.SlotIntervalMinutes))
+            {
+                var runs = new List<SheetFreeRun>();
+                foreach (var sheet in facility.SheetMailboxes)
+                {
+                    var interval = free[sheet].FirstOrDefault(i => i.Start <= t && i.End > t);
+                    if (interval == default)
+                    {
+                        continue;
+                    }
+
+                    var freeUntil = RoundDownToGrid(Min(interval.End, dayEnd), PracticeIceRules.SlotIntervalMinutes);
+                    if (freeUntil >= t.AddMinutes(PracticeIceRules.MinSessionMinutes))
+                    {
+                        runs.Add(new SheetFreeRun(sheet, freeUntil));
+                    }
+                }
+
+                if (runs.Count >= facility.PracticeIceMinOpenSheets)
+                {
+                    result.Add(new PracticeIceStartOption(t, runs));
+                }
+            }
+        }
+
+        cache.Set(cacheKey, result, CacheTtl);
+        viewCache.Track(cacheKey);
+        return result;
+    }
+
+    /// <summary>The practice ice start option at exactly <paramref name="start"/>, if it's still
+    /// offered - used both to build the request page's duration/sheet choices and to re-validate a
+    /// submission server-side, since the query string carrying the start is untrusted and can be
+    /// stale. A courtesy check against an up-to-60s-cached view, not the safety mechanism - the
+    /// write path's own live, locked conflict check is what prevents a double booking (§4.3).</summary>
+    public async Task<PracticeIceStartOption?> GetPracticeIceStartAsync(DateTime start, CancellationToken ct = default) =>
+        (await GetPracticeIceStartsAsync(ct)).FirstOrDefault(o => o.Start == start);
+
+    /// <summary>
+    /// Every two-hour make-up game slot (staff request 2026-09-28): a 30-minute grid start inside
+    /// the practice ice eligible start hours, lead time, horizon, and booking season, where some
+    /// sheet is free (<see cref="MemberFreeTime"/>'s rule) for the whole two hours AND another sheet
+    /// has a confirmed booking for the whole two hours - make-up games need someone already running
+    /// the club, so open or tentative ice alone never qualifies. The game goes on the
+    /// highest-numbered free sheet.
+    /// </summary>
+    public async Task<List<MakeUpGameOption>> GetMakeUpGameOptionsAsync(CancellationToken ct = default)
+    {
+        var (earliestStart, latestEnd) = MemberIceRange();
+        var cacheKey = $"make-up-game-options:{earliestStart:yyyyMMddHHmm}:{latestEnd:yyyyMMddHHmm}";
+        if (cache.TryGetValue(cacheKey, out List<MakeUpGameOption>? cached) && cached is not null)
+        {
+            return cached;
+        }
+
+        var (free, confirmedBusy) = await GetMemberIceSnapshotAsync(latestEnd, ct);
+        var sheetsHighestFirst = facility.SheetMailboxes.Reverse().ToList();
+        var result = new List<MakeUpGameOption>();
+
+        static bool Covers(List<(DateTime Start, DateTime End)> intervals, DateTime from, DateTime to) =>
+            intervals.Any(i => i.Start <= from && i.End >= to);
+
+        for (var day = earliestStart.Date; day < latestEnd; day = day.AddDays(1))
+        {
+            // The eligible hours bound when a game can START; a 2-hour game may run past the end hour.
+            var lastStart = day.AddHours(facility.PracticeIceEligibleEndHour);
+            for (var t = Max(day.AddHours(facility.PracticeIceEligibleStartHour), earliestStart);
+                 t < lastStart && t.AddMinutes(MakeUpGameRules.DurationMinutes) <= latestEnd;
+                 t = t.AddMinutes(PracticeIceRules.SlotIntervalMinutes))
+            {
+                var end = t.AddMinutes(MakeUpGameRules.DurationMinutes);
+                var sheet = sheetsHighestFirst.FirstOrDefault(s => Covers(free[s], t, end));
+                if (sheet is null || !facility.SheetMailboxes.Any(s => s != sheet && Covers(confirmedBusy[s], t, end)))
+                {
+                    continue;
+                }
+
+                result.Add(new MakeUpGameOption(t, end, sheet));
+            }
+        }
+
+        cache.Set(cacheKey, result, CacheTtl);
+        viewCache.Track(cacheKey);
+        return result;
+    }
+
+    /// <summary>The make-up game option starting at exactly <paramref name="start"/>, if still
+    /// offered - same courtesy re-validation role as <see cref="GetPracticeIceStartAsync"/>.</summary>
+    public async Task<MakeUpGameOption?> GetMakeUpGameOptionAsync(DateTime start, CancellationToken ct = default) =>
+        (await GetMakeUpGameOptionsAsync(ct)).FirstOrDefault(o => o.Start == start);
+
+    /// <summary>[earliest start, latest end] for member-hosted ice: now + lead time to now +
+    /// horizon, both grid-aligned, then clipped to the booking season - a member is never offered a
+    /// slot the facility isn't operating for.</summary>
+    private (DateTime EarliestStart, DateTime LatestEnd) MemberIceRange()
     {
         var now = facility.Now;
         var earliestStart = RoundUpToGrid(now.AddHours(facility.PracticeIceMinLeadHours), PracticeIceRules.SlotIntervalMinutes);
         var latestEnd = RoundDownToGrid(now.AddDays(facility.PracticeIceMaxHorizonDays), PracticeIceRules.SlotIntervalMinutes);
 
-        // Season window layered on top of the existing lead-time/horizon clamp, same shape: a
-        // member should never be offered (or able to submit against) a practice ice slot the
-        // facility isn't operating for. The final per-window clamp below already drops anything
-        // that ends up with End <= Start after this, so no separate filter is needed past this point.
         if (window.SeasonStartDate is { } seasonStart && earliestStart < seasonStart)
         {
             earliestStart = seasonStart;
         }
-        if (window.SeasonEndDate is { } seasonEnd)
+        if (window.SeasonEndDate is { } seasonEnd && latestEnd > seasonEnd.Date.AddDays(1))
         {
-            var seasonEndExclusive = seasonEnd.Date.AddDays(1);
-            if (latestEnd > seasonEndExclusive)
-            {
-                latestEnd = seasonEndExclusive;
-            }
+            latestEnd = seasonEnd.Date.AddDays(1);
         }
 
+        return (earliestStart, latestEnd);
+    }
+
+    /// <summary>Per sheet: its member-usable free time (<see cref="MemberFreeTime"/>) and its merged
+    /// confirmed-busy time, from today through <paramref name="latestEnd"/>'s day.</summary>
+    private async Task<(Dictionary<string, List<(DateTime Start, DateTime End)>> Free, Dictionary<string, List<(DateTime Start, DateTime End)>> ConfirmedBusy)>
+        GetMemberIceSnapshotAsync(DateTime latestEnd, CancellationToken ct)
+    {
         var rangeStart = facility.Today;
         var rangeEnd = latestEnd.Date.AddDays(1);
-        var cacheKey = $"practice-ice-windows:{rangeStart:yyyyMMdd}:{rangeEnd:yyyyMMdd}";
+        var bookings = await bookingService.GetBookingsForAllSheetsAsync(rangeStart, rangeEnd, ct);
+        var clubEvents = await clubEventService.GetEventsAsync(rangeStart, rangeEnd, ct);
 
-        if (cache.TryGetValue(cacheKey, out List<PublicAvailabilityWindow>? cached) && cached is not null)
-        {
-            return cached;
-        }
+        var free = MemberFreeTime(facility.SheetMailboxes, bookings, clubEvents, rangeStart, rangeEnd, facility.GroupEventHoldReleaseCutoff);
+        var confirmedBusy = facility.SheetMailboxes.ToDictionary(sheet => sheet, sheet => MergeIntervals(bookings
+            .Where(b => b.SheetMailbox == sheet && b.State == BookingState.Confirmed)
+            .Select(b => (b.Start, b.End))
+            .OrderBy(i => i.Start)
+            .ToList()));
 
-        var freeSlots = await GetFreeSlotsAsync(rangeStart, rangeEnd, ct);
-        var merged = FindConcurrentAvailability(freeSlots, facility.SheetMailboxes.Length);
-
-        var windows = merged
-            .Select(w => new PublicAvailabilityWindow(RoundUpToGrid(w.Start, PracticeIceRules.SlotIntervalMinutes), RoundDownToGrid(w.End, PracticeIceRules.SlotIntervalMinutes)))
-            .Select(w => new PublicAvailabilityWindow(w.Start < earliestStart ? earliestStart : w.Start, w.End > latestEnd ? latestEnd : w.End))
-            .Where(w => w.End - w.Start >= TimeSpan.FromMinutes(PracticeIceRules.MinSessionMinutes))
-            .OrderBy(w => w.Start)
-            .ToList();
-
-        cache.Set(cacheKey, windows, CacheTtl);
-        viewCache.Track(cacheKey);
-        return windows;
+        return (free, confirmedBusy);
     }
 
-    /// <summary>The practice ice window (if any) that contains <paramref name="start"/> - used both
-    /// to populate the request page's duration options and to re-validate a submission server-side,
-    /// since the query string carrying the chosen start is untrusted and can be stale. This is a
-    /// courtesy check against a up-to-60s-cached view, not the safety mechanism - CreateAcrossSheetsAsync's
-    /// own live, locked conflict check is what actually prevents a double-booking (§4.3).</summary>
-    public async Task<PublicAvailabilityWindow?> FindPracticeIceWindowContainingAsync(DateTime start, CancellationToken ct = default)
+    /// <summary>
+    /// Per sheet, the time over [start, end) a member may use for practice ice or a make-up game:
+    /// nothing booked there, and not inside an ice-blocking club event. An open Group Event hold is
+    /// the one booking that doesn't block, for the part of it before <paramref name="holdCutoff"/> -
+    /// guests can only book a group event more than PracticeIce:GroupEventHoldReleaseDays ahead, so
+    /// hold time inside that window can no longer sell; whichever request takes it trims the hold.
+    /// Every other booking - any category, any state, including pending practice ice - blocks.
+    /// </summary>
+    internal static Dictionary<string, List<(DateTime Start, DateTime End)>> MemberFreeTime(
+        IEnumerable<string> sheets, IEnumerable<SheetBooking> bookings, IEnumerable<ClubEvent> clubEvents,
+        DateTime start, DateTime end, DateTime holdCutoff)
     {
-        var windows = await GetPracticeIceWindowsAsync(ct);
-        return windows.FirstOrDefault(w => start >= w.Start && start < w.End);
-    }
-
-    /// <summary>Every sheet's free time within eligible hours, per day, over [start,end) - the
-    /// complement of GetOpenSlotsAsync's "already-advertised rental inventory": here, ANY booking
-    /// (every category, every state) and any ice-blocking club event removes time from what's
-    /// offered, since practice ice is only allowed when nothing else is planned, confirmed or not.</summary>
-    private async Task<List<SheetSlot>> GetFreeSlotsAsync(DateTime start, DateTime end, CancellationToken ct)
-    {
-        var bookings = await bookingService.GetBookingsForAllSheetsAsync(start, end, ct);
-        var clubEvents = await clubEventService.GetEventsAsync(start, end, ct);
+        var bookingList = bookings.ToList();
         var closures = clubEvents
             .Where(ce => ce.MarksSheetsUnavailable)
             .Select(ce => (ce.Start, End: ce.ExclusiveEnd))
             .ToList();
 
-        var result = new List<SheetSlot>();
-        foreach (var sheet in facility.SheetMailboxes)
+        var result = new Dictionary<string, List<(DateTime Start, DateTime End)>>();
+        foreach (var sheet in sheets)
         {
-            var sheetBookings = bookings.Where(b => b.SheetMailbox == sheet).ToList();
-
-            for (var day = start.Date; day < end; day = day.AddDays(1))
+            var blockers = new List<(DateTime Start, DateTime End)>(closures);
+            foreach (var b in bookingList.Where(b => b.SheetMailbox == sheet && b.Start < end && b.End > start))
             {
-                var dayStart = day.AddHours(facility.PracticeIceEligibleStartHour);
-                var dayEnd = day.AddHours(facility.PracticeIceEligibleEndHour);
-
-                var blockers = sheetBookings
-                    .Where(b => b.Start < dayEnd && b.End > dayStart)
-                    .Select(b => (b.Start, b.End))
-                    .Concat(closures.Where(c => c.Start < dayEnd && c.End > dayStart))
-                    .ToList();
-
-                foreach (var (segStart, segEnd) in CalendarStyles.SubtractIntervals(dayStart, dayEnd, blockers))
+                if (!PracticeIceRules.IsReleasableHold(b))
                 {
-                    if (segEnd > segStart)
-                    {
-                        result.Add(new SheetSlot(sheet, SheetLabel(sheet), segStart, segEnd));
-                    }
+                    blockers.Add((b.Start, b.End));
+                }
+                else if (b.End > holdCutoff)
+                {
+                    blockers.Add((Max(b.Start, holdCutoff), b.End));
                 }
             }
+
+            result[sheet] = CalendarStyles.SubtractIntervals(start, end, blockers)
+                .Where(seg => seg.End > seg.Start)
+                .ToList();
         }
 
         return result;
     }
+
+    private static DateTime Min(DateTime a, DateTime b) => a < b ? a : b;
+    private static DateTime Max(DateTime a, DateTime b) => a > b ? a : b;
 
     private static DateTime RoundUpToGrid(DateTime t, int minutes)
     {

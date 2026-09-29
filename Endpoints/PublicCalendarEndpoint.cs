@@ -291,7 +291,7 @@ public static class PublicCalendarEndpoint
     // internal, not private - reached directly by PublicCalendarHeaderLinksTests (D60's precedent),
     // so the header's target="_top" fix (see the comment below) is testable without a full HTTP host.
     //
-    // target="_top" on the two header links (added 2026-09-03, live-found via iframe embed) - without
+    // target="_top" on every header link (added 2026-09-03, live-found via iframe embed) - without
     // it, clicking either one navigates *inside* the iframe an embedding site created (the officially
     // documented embed method, docs/public-embed-instructions.md), landing on /public/search or
     // /public/practice-ice - both DENY-framed by the same security-headers middleware that exempts
@@ -333,6 +333,7 @@ public static class PublicCalendarEndpoint
             <header style="background:#1e2a33;color:#fff;padding:10px 24px;font-weight:600;font-size:14px;display:flex;align-items:center;gap:16px">
                 <span>GCC Ice &amp; Event Calendar</span>
                 <a href="/public/practice-ice" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none;margin-left:auto">Host practice ice</a>
+                <a href="/public/make-up-game" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none">Schedule Make-Up Game</a>
                 <a href="/public/search" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none">Find available times for a group event &#8250;</a>
             </header>
             <div style="padding:16px 24px;max-width:1150px">

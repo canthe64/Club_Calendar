@@ -23,6 +23,12 @@ public class FacilityConfiguration
     public int PracticeIceMinLeadHours { get; }
     public int PracticeIceMaxHorizonDays { get; }
     public int PracticeIceMaxPendingRequestsPerMember { get; }
+    public int PracticeIceMinOpenSheets { get; }
+    public int GroupEventHoldReleaseDays { get; }
+
+    /// <summary>The instant before which an open Group Event hold can no longer be booked by a guest
+    /// (now + GroupEventHoldReleaseDays) - hold time before it is free for member-hosted ice.</summary>
+    public DateTime GroupEventHoldReleaseCutoff => Now.AddDays(GroupEventHoldReleaseDays);
     public string PracticeIceApproverEmail { get; }
     public string PracticeIceMailerMailbox { get; }
 
@@ -98,12 +104,22 @@ public class FacilityConfiguration
         {
             throw new InvalidOperationException("PracticeIce:MaxPendingRequestsPerMember must be at least 1.");
         }
+        if (pi.MinOpenSheets < 1)
+        {
+            throw new InvalidOperationException("PracticeIce:MinOpenSheets must be at least 1.");
+        }
+        if (pi.GroupEventHoldReleaseDays < 0)
+        {
+            throw new InvalidOperationException("PracticeIce:GroupEventHoldReleaseDays cannot be negative.");
+        }
 
         PracticeIceEligibleStartHour = pi.EligibleStartHour;
         PracticeIceEligibleEndHour = pi.EligibleEndHour;
         PracticeIceMinLeadHours = pi.MinLeadHours;
         PracticeIceMaxHorizonDays = pi.MaxHorizonDays;
         PracticeIceMaxPendingRequestsPerMember = pi.MaxPendingRequestsPerMember;
+        PracticeIceMinOpenSheets = Math.Min(pi.MinOpenSheets, SheetMailboxes.Length);
+        GroupEventHoldReleaseDays = pi.GroupEventHoldReleaseDays;
         PracticeIceApproverEmail = pi.ApproverDistributionEmail;
         PracticeIceMailerMailbox = pi.MailerMailbox;
     }

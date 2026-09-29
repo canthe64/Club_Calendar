@@ -19,7 +19,9 @@ public class PracticeIcePublicEndpointTests
 
         var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
 
-        Assert.Contains($"requested at least {facility.PracticeIceMinLeadHours} hours in advance", html);
+        // Whitespace-collapsed - the copy wraps across source lines in the hand-built HTML.
+        var text = System.Text.RegularExpressions.Regex.Replace(html, @"\s+", " ");
+        Assert.Contains($"Requests must be at least {facility.PracticeIceMinLeadHours} hours in advance.", text);
     }
 
     [Fact]
@@ -57,12 +59,23 @@ public class PracticeIcePublicEndpointTests
     }
 
     [Fact]
-    public void RenderPage_DescribesCalendarTeamReview()
+    public void RenderPage_DescribesTentativeUntilConfirmedByTheCalendarTeam()
     {
         var facility = TestFacility.Create();
 
         var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
 
-        Assert.Contains("reviewed by the Calendar team to avoid conflicts.", html);
+        Assert.Contains("tentative until confirmed by the Calendar team", html);
+    }
+
+    [Fact]
+    public void RenderPage_StatesTheMinimumOpenSheets_AndThatExistingEventsHavePriority()
+    {
+        var facility = TestFacility.Create();
+
+        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
+
+        Assert.Contains($"enough available sheets are available (minimum {facility.PracticeIceMinOpenSheets})", html);
+        Assert.Contains("A pre-existing event has priority to select which sheets they wish to use.", html);
     }
 }

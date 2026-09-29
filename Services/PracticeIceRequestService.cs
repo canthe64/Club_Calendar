@@ -64,17 +64,20 @@ public class PracticeIceRequestService(
                 $"You already have {pendingForThisHost} pending request(s) awaiting approval. Please wait for a decision before submitting another.");
         }
 
-        var window = await availability.FindPracticeIceWindowContainingAsync(start, ct);
-        if (window is null)
+        var option = await availability.GetPracticeIceStartAsync(start, ct);
+        if (option is null)
         {
             return PracticeIceSubmitResult.Invalid("That slot is no longer available. Please choose another.");
         }
 
-        var maxMinutes = (int)(window.End - start).TotalMinutes;
+        var maxMinutes = option.MaxDurationMinutes(facility.PracticeIceMinOpenSheets);
         if (durationMinutes % PracticeIceRules.SlotIntervalMinutes != 0 || durationMinutes < PracticeIceRules.MinSessionMinutes || durationMinutes > maxMinutes)
         {
             return PracticeIceSubmitResult.Invalid("That duration no longer fits the available window. Please choose another.");
         }
+
+        // Every sheet free for the whole session - at least MinOpenSheets, by the check above.
+        var sheets = option.SheetsFor(durationMinutes);
 
         var template = new SheetBooking
         {
@@ -89,10 +92,11 @@ public class PracticeIceRequestService(
             Notes = notes
         };
 
-        // The real safety net - a live, per-sheet-locked conflict check - lives inside
-        // CreateAcrossSheetsAsync itself; FindPracticeIceWindowContainingAsync above is only a
-        // courtesy pre-check against an up-to-60s-cached view (§4.3).
-        var result = await bookingService.CreateAcrossSheetsAsync(facility.SheetMailboxes, template, hostName, ct);
+        // The real safety net - a live, per-sheet-locked conflict check - lives inside the create
+        // call itself; GetPracticeIceStartAsync above is only a courtesy pre-check against an
+        // up-to-60s-cached view (§4.3). Open Group Event hold time guests can no longer book is taken
+        // (and trimmed) rather than treated as a conflict; declining later doesn't restore it.
+        var result = await bookingService.CreateTakingReleasedHoldsAsync(sheets, template, facility.GroupEventHoldReleaseCutoff, hostName, ct);
         if (!result.IsSuccess)
         {
             return PracticeIceSubmitResult.Conflict();
@@ -102,12 +106,12 @@ public class PracticeIceRequestService(
         // happened and is the source of truth for what occurred here, regardless of what the mail
         // step below does. Live-found 2026-08-09: logging this after the mail send meant a mail
         // failure left NO audit trail for a request that had, in fact, succeeded.
-        await log.LogActionAsync("PracticeIceRequested", hostName, string.Join(",", result.Bookings.Select(b => b.EventId)), string.Join(",", facility.SheetMailboxes),
+        await log.LogActionAsync("PracticeIceRequested", hostName, string.Join(",", result.Bookings.Select(b => b.EventId)), string.Join(",", sheets),
             $"{template.Start:g}-{template.End:g}", ct);
 
         var notified = await TrySendMailAsync(facility.PracticeIceMailerMailbox, facility.PracticeIceApproverEmail, hostEmail,
             "Practice ice hosting request",
-            $"{hostName} ({hostEmail}) has requested to host practice ice on {template.Start:dddd, MMM d} from {template.Start:h:mmtt} to {template.End:h:mmtt}." +
+            $"{hostName} ({hostEmail}) has requested to host practice ice on {template.Start:dddd, MMM d} from {template.Start:h:mmtt} to {template.End:h:mmtt}, on {CalendarStyles.SheetListLabel(sheets)}." +
             (string.IsNullOrWhiteSpace(notes) ? "" : $"\n\nNotes: {notes}") +
             "\n\nReview at /practice-ice/approvals.",
             "PracticeIceRequestNotificationFailed", hostName, ct);

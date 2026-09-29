@@ -37,6 +37,18 @@ public class PublicCalendarHeaderLinksTests
     }
 
     [Fact]
+    public void MakeUpGameLink_IsPresent_AndCarriesTargetTop()
+    {
+        var sb = new StringBuilder();
+
+        PublicCalendarEndpoint.AppendPageOpen(sb);
+
+        var markup = sb.ToString();
+        Assert.Contains("""<a href="/public/make-up-game" target="_top" """, markup);
+        Assert.Contains("Schedule Make-Up Game", markup);
+    }
+
+    [Fact]
     public void SearchLink_ReadsAsAGroupEventAvailabilityLink_NotGenericIceSearch()
     {
         // Renamed 2026-09-03 (operator request): "Search available ice" read as if it searched every

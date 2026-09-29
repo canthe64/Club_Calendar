@@ -22,7 +22,7 @@
             No valid start time was given. <a href="/public/practice-ice">Go back and pick a time</a>.
         </div>
     }
-    else if (_window is null)
+    else if (_option is null)
     {
         <div style="padding:12px 16px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:8px;color:#a02c21;font-size:13px">
             That slot is no longer available. <a href="/public/practice-ice">Go back and pick another time</a>.
@@ -45,8 +45,8 @@
     else
     {
         <p style="color:#5a7183;font-size:13px;margin-bottom:14px">
-            Requesting <strong>@_start.Value.ToString("dddd, MMM d")</strong> starting <strong>@_start.Value.ToString("h:mmtt")</strong>,
-            open to all @Facility.SheetMailboxes.Length sheets. Certified practice ice hosts run the
+            Requesting <strong>@_start.Value.ToString("dddd, MMM d")</strong> starting <strong>@_start.Value.ToString("h:mmtt")</strong>
+            on <strong>@CalendarStyles.SheetListLabel(_option.SheetsFor(_durationMinutes))</strong>. Certified practice ice hosts run the
             session on behalf of the whole club - anyone may attend.
         </p>
 
@@ -84,7 +84,7 @@
 
     private DateTime? _start;
     private DateTime _end;
-    private PublicAvailabilityWindow? _window;
+    private PracticeIceStartOption? _option;
     private List<int> _durationOptions = [];
     private int _durationMinutes;
     private string? _notes;
@@ -103,14 +103,15 @@
         }
 
         _start = parsed;
-        _window = await AvailabilityService.FindPracticeIceWindowContainingAsync(parsed);
-        if (_window is null)
+        _option = await AvailabilityService.GetPracticeIceStartAsync(parsed);
+        if (_option is null)
         {
             return;
         }
 
-        var maxMinutes = (int)(_window.End - parsed).TotalMinutes;
-        _durationOptions = PracticeIceRules.DurationOptionsMinutes(maxMinutes).ToList();
+        // A longer session can cover fewer sheets (it runs on every sheet free for its whole
+        // length), so the longest offered is the longest that still keeps the minimum open.
+        _durationOptions = PracticeIceRules.DurationOptionsMinutes(_option.MaxDurationMinutes(Facility.PracticeIceMinOpenSheets)).ToList();
         _durationMinutes = _durationOptions.FirstOrDefault();
     }
 

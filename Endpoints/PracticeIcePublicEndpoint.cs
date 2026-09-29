@@ -19,8 +19,8 @@ public static class PracticeIcePublicEndpoint
     {
         app.MapGet("/public/practice-ice", async (PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
         {
-            var windows = await service.GetPracticeIceWindowsAsync(ct);
-            var html = RenderPage(facility, windows);
+            var starts = await service.GetPracticeIceStartsAsync(ct);
+            var html = RenderPage(facility, starts);
             return Results.Content(html, "text/html; charset=utf-8");
         })
         .AllowAnonymous()
@@ -31,7 +31,7 @@ public static class PracticeIcePublicEndpoint
 
     // internal, not private - reached directly by PracticeIcePublicEndpointTests (D60's precedent),
     // so this hand-built page's copy is testable without a full ASP.NET Core host.
-    internal static string RenderPage(FacilityConfiguration facility, List<PublicAvailabilityWindow> windows)
+    internal static string RenderPage(FacilityConfiguration facility, List<PracticeIceStartOption> starts)
     {
         var sb = new StringBuilder();
 
@@ -53,9 +53,10 @@ public static class PracticeIcePublicEndpoint
                 <div style="font-size:16px;font-weight:600;color:#1e2a33;margin-bottom:4px">Host Practice Ice</div>
                 <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     Any properly trained member can volunteer to host a practice ice session, open to all
-                    members, at a time when no other activity is planned on any sheet. Sessions must be
-                    requested at least {facility.PracticeIceMinLeadHours} hours in advance and will be
-                    reviewed by the Calendar team to avoid conflicts.
+                    members, at a time when enough available sheets are available (minimum {facility.PracticeIceMinOpenSheets}).
+                    When you submit a request to host practice ice, it will automatically appear on the
+                    calendar as tentative until confirmed by the Calendar team to avoid conflicts. Requests
+                    must be at least {facility.PracticeIceMinLeadHours} hours in advance.
                 </div>
                 <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     If you are not familiar with the responsibilities of being a practice ice host, email
@@ -80,23 +81,29 @@ public static class PracticeIcePublicEndpoint
                         is 1 hour) and click the checkbox certifying you're qualified to host</li>
                     <li style="margin-top:6px">Click "Submit Request"</li>
                 </ol>
-                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px">
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:8px">
                     Your practice ice time will be automatically added to the calendar on a tentative
                     basis. Once someone from the calendar team approves your request (making sure it
-                    doesn't conflict with anything), your practice ice session will be confirmed.
+                    doesn't conflict with anything), your practice ice session will be confirmed. If there
+                    is another activity also happening at the same time, your practice ice will be limited
+                    to the number of free sheets not in use (shown in the time slot).
+                </div>
+                <div style="font-size:13px;color:#90a0ab;margin-bottom:16px;font-weight:700">
+                    A pre-existing event has priority to select which sheets they wish to use. If the
+                    existing event requires additional sheets, they receive priority.
                 </div>
             """);
 
-        sb.Append(RenderWindows(windows));
+        sb.Append(RenderStarts(facility, starts));
 
         sb.Append(PublicPageFooter.Html);
         sb.Append("</div></body></html>");
         return sb.ToString();
     }
 
-    private static string RenderWindows(List<PublicAvailabilityWindow> windows)
+    private static string RenderStarts(FacilityConfiguration facility, List<PracticeIceStartOption> starts)
     {
-        if (windows.Count == 0)
+        if (starts.Count == 0)
         {
             return """
                 <div style="font-size:12px;color:#90a0ab;border:1px dashed #d7dfe5;border-radius:8px;padding:20px;text-align:center">
@@ -108,20 +115,21 @@ public static class PracticeIcePublicEndpoint
         var sb = new StringBuilder();
         sb.Append("""<div style="display:flex;flex-direction:column;gap:14px">""");
 
-        foreach (var day in windows.GroupBy(w => w.Start.Date).OrderBy(g => g.Key))
+        foreach (var day in starts.GroupBy(o => o.Start.Date).OrderBy(g => g.Key))
         {
             sb.Append($"""<div style="font-size:12px;font-weight:600;color:#1e2a33">{H(day.Key.ToString("dddd, MMMM d"))}</div>""");
             sb.Append("""<div style="display:flex;flex-wrap:wrap;gap:6px">""");
 
-            foreach (var window in day)
+            foreach (var option in day.OrderBy(o => o.Start))
             {
-                foreach (var startTime in StartOptions(window))
-                {
-                    var link = $"/practice-ice/request?start={startTime:yyyy-MM-ddTHH:mm}";
-                    sb.Append($"""
-                        <a href="{link}" style="border:1px solid #e7ecef;border-radius:6px;padding:8px 12px;font-size:12px;color:#1e2a33;text-decoration:none;background:#fff">{H(startTime.ToString("h:mmtt"))}</a>
-                        """);
-                }
+                // Some sheets may already be in use - say how many are open when it isn't all of them.
+                var sheetNote = option.Sheets.Count < facility.SheetMailboxes.Length
+                    ? $"""<span style="color:#90a0ab"> · {option.Sheets.Count} sheets</span>"""
+                    : "";
+                var link = $"/practice-ice/request?start={option.Start:yyyy-MM-ddTHH:mm}";
+                sb.Append($"""
+                    <a href="{link}" style="border:1px solid #e7ecef;border-radius:6px;padding:8px 12px;font-size:12px;color:#1e2a33;text-decoration:none;background:#fff">{H(option.Start.ToString("h:mmtt"))}{sheetNote}</a>
+                    """);
             }
 
             sb.Append("</div>");
@@ -129,16 +137,5 @@ public static class PracticeIcePublicEndpoint
 
         sb.Append("</div>");
         return sb.ToString();
-    }
-
-    // Every 30-minute boundary from which at least the shortest offerable session still fits before
-    // the window ends - the same floor PracticeIceRules.DurationOptionsMinutes applies on the
-    // request page, so a link is never offered here that would show no valid duration there.
-    private static IEnumerable<DateTime> StartOptions(PublicAvailabilityWindow window)
-    {
-        for (var t = window.Start; t.AddMinutes(PracticeIceRules.MinSessionMinutes) <= window.End; t = t.AddMinutes(PracticeIceRules.SlotIntervalMinutes))
-        {
-            yield return t;
-        }
     }
 }

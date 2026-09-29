@@ -17,6 +17,17 @@ public class PracticeIceOptions
     /// legitimate host blocked) is asymmetric enough to keep the default generous.</summary>
     public int MaxPendingRequestsPerMember { get; set; } = 3;
 
+    /// <summary>Fewest sheets a practice ice session can run on (staff request 2026-09-28). Sessions
+    /// no longer need the whole club empty - up to the rest of the sheets may be in use - and a
+    /// session covers only the sheets that are free for its whole length. Capped at the facility's
+    /// sheet count.</summary>
+    public int MinOpenSheets { get; set; } = 3;
+
+    /// <summary>How far ahead guests can still book an open Group Event hold (days). Inside this
+    /// window a hold can no longer sell, so its time counts as free for practice ice and make-up
+    /// games, and whichever takes it trims the hold.</summary>
+    public int GroupEventHoldReleaseDays { get; set; } = 7;
+
     /// <summary>Mail-enabled distribution group notified when a member submits a practice ice
     /// request. Empty until configured at deployment - submission is blocked with an explicit
     /// message rather than silently proceeding with nobody notified.</summary>

@@ -59,6 +59,7 @@ builder.Services.AddSingleton<FacilityScheduler.Services.ClubEventService>();
 builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.PracticeIceRequestService>();
+builder.Services.AddSingleton<FacilityScheduler.Services.MakeUpGameService>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>();
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyWebhookOutstandingWork>();
@@ -260,6 +261,7 @@ app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
 app.MapPublicSearchEndpoint();
 app.MapPracticeIcePublicEndpoint();
+app.MapMakeUpGamePublicEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
 app.MapSettingsLogsEndpoint();
 app.MapStaffSearchExportEndpoint();

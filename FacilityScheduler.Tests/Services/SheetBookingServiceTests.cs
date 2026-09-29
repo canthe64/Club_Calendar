@@ -261,6 +261,47 @@ public class SheetBookingServiceTests
         Assert.Equal(3, CalendarStyles.SiblingGroup(holds, after[0]).Count);
     }
 
+    [Theory]
+    [InlineData(true)]  // the booked time lies before the cutoff - guests can no longer book it
+    [InlineData(false)] // it lies past the cutoff - still sellable, so a genuine conflict
+    public async Task CreateTakingReleasedHoldsAsync_TakesAnOpenGroupEventHoldOnlyBeforeTheCutoff(bool beforeCutoff)
+    {
+        var (service, _, facility, _) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var day = facility.Today.AddDays(3);
+        Assert.True((await service.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(14), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester")).IsSuccess);
+        var cutoff = beforeCutoff ? day.AddHours(12) : day.AddHours(11);
+
+        var result = await service.CreateTakingReleasedHoldsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = day.AddHours(10), End = day.AddHours(12), Category = BookingCategory.PracticeIce, State = BookingState.Hold
+        }, cutoff, "tester");
+
+        Assert.Equal(beforeCutoff, result.IsSuccess);
+    }
+
+    [Fact]
+    public async Task CreateTakingReleasedHoldsAsync_AnyOtherOverlappingBooking_IsStillAConflict()
+    {
+        var (service, _, facility, _) = Build();
+        var sheet = TestFacility.SheetMailboxes[0];
+        var day = facility.Today.AddDays(3);
+        Assert.True((await service.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(14), Category = BookingCategory.GroupEvent, State = BookingState.Confirmed
+        }, "tester")).IsSuccess);
+
+        var result = await service.CreateTakingReleasedHoldsAsync([sheet], new SheetBooking
+        {
+            SheetMailbox = "", Start = day.AddHours(10), End = day.AddHours(12), Category = BookingCategory.PracticeIce, State = BookingState.Hold
+        }, day.AddDays(7), "tester");
+
+        Assert.False(result.IsSuccess);
+    }
+
     [Fact]
     public async Task CancelGroupAsync_ReopenMergingNeighbours_AcrossSheets_ReopenedHoldsShareOneGroup()
     {

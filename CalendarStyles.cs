@@ -123,6 +123,25 @@ public static class CalendarStyles
         return digits.Length > 0 ? $"Sheet {digits}" : localPart;
     }
 
+    /// <summary>Several sheets as one readable phrase: "Sheet 1", "Sheets 1, 2 and 4". Falls back to
+    /// comma-joined <see cref="SheetLabel"/>s when a mailbox's label isn't "Sheet N".</summary>
+    public static string SheetListLabel(IEnumerable<string> sheetMailboxes)
+    {
+        var labels = sheetMailboxes.Select(SheetLabel).ToList();
+        if (labels.Count <= 1)
+        {
+            return labels.FirstOrDefault() ?? "";
+        }
+
+        if (!labels.All(l => l.StartsWith("Sheet ", StringComparison.Ordinal)))
+        {
+            return string.Join(", ", labels);
+        }
+
+        var numbers = labels.Select(l => l["Sheet ".Length..]).ToList();
+        return $"Sheets {string.Join(", ", numbers.Take(numbers.Count - 1))} and {numbers[^1]}";
+    }
+
     /// <summary>Caps a title shown in a conflict list (staff feedback: include the conflicting
     /// event's title, but a long renter name or off-ice event title shouldn't overflow the dialog
     /// it's rendered in). Shared by every conflicts panel rather than each picking its own limit.</summary>

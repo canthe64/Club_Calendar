@@ -286,11 +286,11 @@ public class PublicAvailabilityServiceTests
         var (publicService, _, facility, window) = Build();
         await window.SetPublicCutoffAsync(facility.Today.AddDays(1), "tester");
 
-        var windows = await publicService.GetPracticeIceWindowsAsync();
+        var options = await publicService.GetPracticeIceStartsAsync();
 
-        // Default facility has no bookings at all - practice ice should offer plenty of windows
+        // Default facility has no bookings at all - practice ice should offer plenty of times
         // well past the cutoff, since the cutoff doesn't apply to this surface.
-        Assert.Contains(windows, w => w.Start.Date > facility.Today.AddDays(1));
+        Assert.Contains(options, o => o.Start.Date > facility.Today.AddDays(1));
     }
 
     // --- Season window: search + JSON widget + practice ice, not the calendar view ---
@@ -359,10 +359,10 @@ public class PublicAvailabilityServiceTests
         var seasonEnd = facility.Today.AddDays(10);
         await window.SetSeasonWindowAsync(null, seasonEnd, "tester");
 
-        var windows = await publicService.GetPracticeIceWindowsAsync();
+        var options = await publicService.GetPracticeIceStartsAsync();
 
-        Assert.NotEmpty(windows);
-        Assert.All(windows, w => Assert.True(w.End <= seasonEnd.Date.AddDays(1)));
+        Assert.NotEmpty(options);
+        Assert.All(options.SelectMany(o => o.Sheets), s => Assert.True(s.FreeUntil <= seasonEnd.Date.AddDays(1)));
     }
 
     [Fact]

@@ -1,3 +1,5 @@
+using FacilityScheduler.Domain;
+
 namespace FacilityScheduler.Services;
 
 /// <summary>
@@ -24,6 +26,13 @@ public static class PracticeIceRules
     /// ample headroom in the blob.</summary>
     public const int MaxNotesLength = 1000;
 
+    /// <summary>An open Group Event hold - the one kind of booking member-hosted ice (practice ice,
+    /// make-up games) may take over, and only inside FacilityConfiguration.GroupEventHoldReleaseCutoff.
+    /// Shared by the availability read (PublicAvailabilityService) and the write
+    /// (SheetBookingService.CreateTakingReleasedHoldsAsync) so the two can't disagree.</summary>
+    public static bool IsReleasableHold(SheetBooking b) =>
+        b.Category == BookingCategory.GroupEvent && b.State == BookingState.Hold;
+
     /// <summary>Every selectable duration (in minutes), from MinSessionMinutes up to
     /// <paramref name="maxMinutes"/> in SlotIntervalMinutes steps - empty if even the shortest
     /// session doesn't fit.</summary>
@@ -34,4 +43,24 @@ public static class PracticeIceRules
             yield return minutes;
         }
     }
+}
+
+/// <summary>Make-up game slot rules (staff request 2026-09-28). Start times, lead time, horizon,
+/// and eligible hours are practice ice's (PracticeIceRules/PracticeIceOptions).</summary>
+public static class MakeUpGameRules
+{
+    /// <summary>Every make-up game is two hours.</summary>
+    public const int DurationMinutes = 120;
+
+    /// <summary>The title when there's no usable requester name.</summary>
+    public const string Title = "Make-Up Game";
+
+    /// <summary>The booking title, shown on both calendars: "Make-Up Game Requested by {name}"
+    /// (operator decision 2026-09-28 - the requester is named publicly). Never a bare email/UPN,
+    /// which is what a sign-in without a display-name claim can fall back to - same guard as
+    /// practice ice's host name (D69).</summary>
+    public static string BookingTitle(string? requesterName) =>
+        string.IsNullOrWhiteSpace(requesterName) || requesterName.Contains('@')
+            ? Title
+            : $"{Title} Requested by {requesterName.Trim()}";
 }

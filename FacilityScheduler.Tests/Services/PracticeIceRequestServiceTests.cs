@@ -14,9 +14,9 @@ public class PracticeIceRequestServiceTests
         Build(PracticeIceOptions? practiceIce = null) => Build(out _, practiceIce);
 
     private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail, SchedulingWindowService Window)
-        Build(out FakeGraphEventGateway gateway, PracticeIceOptions? practiceIce = null)
+        Build(out FakeGraphEventGateway gateway, PracticeIceOptions? practiceIce = null, string[]? sheetLocalParts = null)
     {
-        var facility = TestFacility.Create(practiceIce: practiceIce);
+        var facility = TestFacility.Create(sheetLocalParts: sheetLocalParts, practiceIce: practiceIce);
         gateway = new FakeGraphEventGateway(facility.ZoneInfo);
         var cache = new MemoryCache(new MemoryCacheOptions());
         var appLog = TestAppLog.Create(facility);
@@ -185,13 +185,12 @@ public class PracticeIceRequestServiceTests
         var start = day.AddHours(10);
 
         // Prime the cache while the slot is genuinely free.
-        Assert.NotNull(await availability.FindPracticeIceWindowContainingAsync(start));
+        Assert.NotNull(await availability.GetPracticeIceStartAsync(start));
 
         Assert.True((await requestService.SubmitAsync(start, 60, HostName, HostEmail, certified: true, notes: null)).IsSuccess);
 
-        // Without invalidation this still returns the pre-submit window covering 10:00.
-        var windows = await availability.GetPracticeIceWindowsAsync();
-        Assert.DoesNotContain(windows, w => w.Start <= start && w.End > start);
+        // Without invalidation this still returns the pre-submit option at 10:00.
+        Assert.Null(await availability.GetPracticeIceStartAsync(start));
     }
 
     [Fact]
@@ -236,7 +235,7 @@ public class PracticeIceRequestServiceTests
         var day = facility.Today.AddDays(5);
         var start = day.AddHours(10);
 
-        Assert.NotNull(await availability.FindPracticeIceWindowContainingAsync(start));
+        Assert.NotNull(await availability.GetPracticeIceStartAsync(start));
 
         gateway.Seed(TestFacility.SheetMailboxes[0], new Microsoft.Graph.Models.Event
         {
@@ -411,5 +410,129 @@ public class PracticeIceRequestServiceTests
         var sent = Assert.Single(mail.Sent);
         Assert.Equal(HostEmail, sent.To);
         Assert.Contains("Ice needed for maintenance", sent.Body);
+    }
+
+    // ---- Partial-club sessions and released group event holds (staff request 2026-09-28) --------
+
+    // Five sheets, like the club's - the default minimum of 3 open would leave a 3-sheet test
+    // facility no room for a session alongside sheets already in use.
+    private static readonly string[] FiveSheetLocalParts = ["sheet1", "sheet2", "sheet3", "sheet4", "sheet5"];
+    private static readonly string[] FiveSheets = [.. FiveSheetLocalParts.Select(p => $"{p}@{TestFacility.TenantDomain}")];
+
+    private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail, SchedulingWindowService Window)
+        BuildFiveSheets() => Build(out _, sheetLocalParts: FiveSheetLocalParts);
+
+    private static async Task BookLeague(SheetBookingService bookingService, string sheet, DateTime start, DateTime end) =>
+        Assert.True((await bookingService.CreateConfirmedAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = start, End = end, Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "League"
+        }, "tester")).IsSuccess);
+
+    [Fact]
+    public async Task Submit_TwoSheetsInUse_CreatesTheSessionOnTheThreeFreeSheetsOnly()
+    {
+        var (requestService, bookingService, _, facility, mail, _) = BuildFiveSheets();
+        var day = facility.Today.AddDays(5);
+        var sheets = FiveSheets;
+        await BookLeague(bookingService, sheets[0], day.AddHours(9), day.AddHours(13));
+        await BookLeague(bookingService, sheets[1], day.AddHours(9), day.AddHours(13));
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.True(result.IsSuccess);
+        var practice = (await bookingService.GetBookingsForAllSheetsAsync(day, day.AddDays(1)))
+            .Where(b => b.Category == BookingCategory.PracticeIce).ToList();
+        Assert.Equal(sheets.Skip(2).OrderBy(s => s), practice.Select(b => b.SheetMailbox).OrderBy(s => s));
+        Assert.Contains("Sheets 3, 4 and 5", Assert.Single(mail.Sent).Body);
+    }
+
+    [Fact]
+    public async Task Submit_ThreeSheetsInUse_IsRejected_BelowTheMinimumOpenSheets()
+    {
+        var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
+        var day = facility.Today.AddDays(5);
+        foreach (var sheet in FiveSheets.Take(3))
+        {
+            await BookLeague(bookingService, sheet, day.AddHours(9), day.AddHours(13));
+        }
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.False(result.IsSuccess);
+        Assert.False(result.IsConflict);
+    }
+
+    [Fact]
+    public async Task Submit_LongerSession_CoversOnlyTheSheetsFreeForTheWholeLength()
+    {
+        // Sheet 1 is free only until 11:00; a 2-hour session from 10:00 runs on sheets 2-5.
+        var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
+        var day = facility.Today.AddDays(5);
+        var sheets = FiveSheets;
+        await BookLeague(bookingService, sheets[0], day.AddHours(11), day.AddHours(13));
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 120, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.True(result.IsSuccess);
+        var practice = (await bookingService.GetBookingsForAllSheetsAsync(day, day.AddDays(1)))
+            .Where(b => b.Category == BookingCategory.PracticeIce).Select(b => b.SheetMailbox).OrderBy(s => s);
+        Assert.Equal(sheets.Skip(1).OrderBy(s => s), practice);
+    }
+
+    [Fact]
+    public async Task Submit_OverAGroupEventHoldGuestsCanNoLongerBook_TakesAndTrimsTheHold()
+    {
+        var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
+        var day = facility.Today.AddDays(5); // inside the 7-day release window
+        var sheet = FiveSheets[0];
+        Assert.True((await bookingService.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(14), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester")).IsSuccess);
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 120, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.True(result.IsSuccess);
+        var onSheet = (await bookingService.GetBookingsAsync(sheet, day, day.AddDays(1))).OrderBy(b => b.Start).ToList();
+        Assert.Contains(onSheet, b => b.Category == BookingCategory.PracticeIce && b.Start == day.AddHours(10));
+        // The hold is trimmed around the session: 9-10 and 12-14 are left open for group events.
+        var leftovers = onSheet.Where(b => b.Category == BookingCategory.GroupEvent).Select(b => (b.Start, b.End)).ToList();
+        Assert.Equal([(day.AddHours(9), day.AddHours(10)), (day.AddHours(12), day.AddHours(14))], leftovers);
+    }
+
+    [Fact]
+    public async Task Submit_OverAGroupEventHoldGuestsCanStillBook_DoesNotTakeIt()
+    {
+        var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
+        var day = facility.Today.AddDays(10); // beyond the 7-day release window
+        var sheet = FiveSheets[0];
+        Assert.True((await bookingService.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(14), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester")).IsSuccess);
+
+        var result = await requestService.SubmitAsync(day.AddHours(10), 60, HostName, HostEmail, certified: true, notes: null);
+
+        Assert.True(result.IsSuccess); // still runs on the other four sheets
+        var hold = Assert.Single(await bookingService.GetBookingsAsync(sheet, day, day.AddDays(1)));
+        Assert.Equal((BookingCategory.GroupEvent, day.AddHours(9), day.AddHours(14)), (hold.Category, hold.Start, hold.End));
+    }
+
+    [Fact]
+    public async Task Decline_AfterTakingAGroupEventHold_DoesNotRestoreIt()
+    {
+        var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
+        var day = facility.Today.AddDays(5);
+        var sheet = FiveSheets[0];
+        await bookingService.CreateHoldAsync(new SheetBooking
+        {
+            SheetMailbox = sheet, Start = day.AddHours(10), End = day.AddHours(12), Category = BookingCategory.GroupEvent, State = BookingState.Hold
+        }, "tester");
+        Assert.True((await requestService.SubmitAsync(day.AddHours(10), 120, HostName, HostEmail, certified: true, notes: null)).IsSuccess);
+
+        var request = Assert.Single(await requestService.GetPendingAsync());
+        await requestService.DeclineAsync(request.BookingGroupId, "Not this time", "staff");
+
+        Assert.Empty(await bookingService.GetBookingsAsync(sheet, day, day.AddDays(1)));
     }
 }

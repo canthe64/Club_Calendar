@@ -196,7 +196,20 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
     /// and every conflict across every sheet is reported, so the caller can deselect a sheet or
     /// change the time rather than getting a partially-booked result.
     /// </summary>
-    public async Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser, CancellationToken ct = default)
+    public Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser, CancellationToken ct = default) =>
+        CreateAcrossSheetsCoreAsync(sheetMailboxes, template, holdReleaseCutoff: null, actingUser, ct);
+
+    /// <summary>
+    /// <see cref="CreateAcrossSheetsAsync"/> for member-hosted ice (practice ice, make-up games):
+    /// identical all-or-nothing, locked, live conflict check, except that an open Group Event hold
+    /// overlapping the booking only where it lies before <paramref name="holdReleaseCutoff"/> (time
+    /// a guest can no longer book, PracticeIce:GroupEventHoldReleaseDays) isn't a conflict - the
+    /// hold is trimmed around the new booking instead, the same way a Breely claim trims one.
+    /// </summary>
+    public Task<GroupBookingResult> CreateTakingReleasedHoldsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime holdReleaseCutoff, string actingUser, CancellationToken ct = default) =>
+        CreateAcrossSheetsCoreAsync(sheetMailboxes, template, holdReleaseCutoff, actingUser, ct);
+
+    private async Task<GroupBookingResult> CreateAcrossSheetsCoreAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime? holdReleaseCutoff, string actingUser, CancellationToken ct)
     {
         // Cheap short-circuit before any lock/Graph call - covers both the staff booking form and
         // PracticeIceRequestService.SubmitAsync (which calls this same method), so gating it here
@@ -223,10 +236,24 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
         try
         {
             var conflicts = new List<SheetBooking>();
+            var holdsToTrim = new List<SheetBooking>();
             foreach (var sheet in orderedSheets)
             {
                 var overlapping = await GetEventsInRangeAsync(sheet, template.Start, template.End, ct);
-                conflicts.AddRange(overlapping.Select(e => FromGraphEvent(sheet, e)));
+                foreach (var existing in overlapping.Select(e => FromGraphEvent(sheet, e)))
+                {
+                    // The part of the hold this booking covers must lie before the cutoff - past it,
+                    // a guest could still book that time.
+                    var coveredEnd = existing.End < template.End ? existing.End : template.End;
+                    if (holdReleaseCutoff is { } cutoff && PracticeIceRules.IsReleasableHold(existing) && coveredEnd <= cutoff)
+                    {
+                        holdsToTrim.Add(existing);
+                    }
+                    else
+                    {
+                        conflicts.Add(existing);
+                    }
+                }
             }
 
             if (conflicts.Count > 0)
@@ -274,6 +301,24 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
             {
                 await RollbackCreatedAsync(created, actingUser, ex, ct);
                 throw;
+            }
+
+            // Only once every booking exists: the booking is the real outcome, so a hold that fails to
+            // trim is logged for staff to tidy rather than turned into a failure for a booking that
+            // was actually made.
+            foreach (var hold in holdsToTrim)
+            {
+                try
+                {
+                    await TrimHoldAsync(hold.SheetMailbox, hold, template.Start, template.End, groupId, ct);
+                    await log.LogActionAsync("GroupEventHoldTrimmed", actingUser, hold.EventId, hold.SheetMailbox,
+                        $"{template.Category} {template.Start:g}-{template.End:g} took released hold time.", ct);
+                }
+                catch (Exception ex)
+                {
+                    await log.LogActionAsync("GroupEventHoldTrimFailed", actingUser, hold.EventId, hold.SheetMailbox,
+                        $"Hold still overlaps the new {template.Category} booking - remove it by hand. {ex.Message}", ct);
+                }
             }
 
             InvalidateViewCache();
