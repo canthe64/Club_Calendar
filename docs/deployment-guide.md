@@ -495,6 +495,7 @@ The minimum set for a working instance:
 | `PracticeIce__MailerMailbox` | the mailer address, if practice ice is enabled |
 | `PracticeIce__ApproverDistributionEmail` | mail-enabled group notified of new requests |
 | `Webhook__BreelySharedSecret` | only if integrating Breely — see Step 15 |
+| `AllowedHosts` | this site's hostname(s), semicolon-separated — e.g. `<app>.azurewebsites.net` |
 
 Four of these are **load-bearing**: `Facility__TenantDomain`, `Facility__SheetMailboxLocalParts`,
 `Facility__TimeZone`, and `StaffAccess__StaffGroupId`. The app refuses to start without them rather
@@ -508,6 +509,13 @@ Three details that bite:
   with no error (architecture doc §4.9).
 - **`Facility__TimeZone` must genuinely be the facility's zone.** Every "today" in the app derives
   from it, and a wrong value shifts the whole app a day forward during the facility's own evening.
+- **`AllowedHosts` must name this site's own hostname.** The repo's default only allows the club's
+  production domain (`*.curlingseattle.org;curlingseattle.org`), and host filtering runs in every
+  environment — so a site that doesn't override it answers every request with
+  `400 Invalid Hostname`. Use the exact name, not `*.azurewebsites.net`, which would accept any
+  Azure site. On a **deployment slot**, tick *Deployment slot setting* so the value stays with the
+  slot and doesn't swap into production. Production lists its custom domain(s) and its own
+  `<app>.azurewebsites.net` name (Step 14).
 
 Click **Apply → Save** and confirm the restart prompt.
 
@@ -641,6 +649,10 @@ against the new hostname — that's the only one the domain change can break.
       appears on `/calendar` and the approver email arrives; then approve it from
       `/practice-ice/approvals` and confirm the volunteer's confirmation email arrives. Mail failure
       here → Appendix C.
+- [ ] **Make-up game end to end** (needs a confirmed booking on the calendar 48+ hours out, with a
+      free sheet beside it): book a slot from `/public/make-up-game`, confirm it appears on `/calendar`
+      as a confirmed League booking, and that both the calendar team's list and the requester get the
+      confirmation email. It uses the same mail settings as practice ice.
 - [ ] **Logging:** take any booking action, open `/settings`, confirm the entry appears; confirm the
       log path is the one from Step 10, not `App_Data/logs`.
 - [ ] **Time zone:** confirm the calendar's "Today" is correct *in the facility's evening*, not just
@@ -669,10 +681,11 @@ doesn't block anything above.
 5. **Re-run Step 13's first item** on the custom domain: sign in and confirm `/calendar` loads.
    Keep the `<default-domain>` URIs registered — having both hostnames working is what lets you
    tell a DNS problem apart from an app problem.
-6. **Tighten `AllowedHosts`** (Step 10, or Appendix A) from `*` to the real domain — a wildcard
-   (`*.example.org`) if the app might ever move subdomains, the exact hostname otherwise. Found via
-   code review (D146) - `*` accepts any `Host` header at all, which the framework's own host-header
-   validation exists specifically to reject once a real domain is in play.
+6. **Add the custom domain to `AllowedHosts`** (Step 10's setting) alongside the
+   `<app>.azurewebsites.net` name already there — a wildcard (`*.example.org`) if the app might ever
+   move subdomains, the exact hostname otherwise, plus the apex if the site is embedded from it
+   (D146). Keep the Azure hostname listed so it stays usable for troubleshooting and for any
+   platform check that calls the app by that name.
 
 ---
 
@@ -732,10 +745,12 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `PracticeIce:MinLeadHours` | `PracticeIce__MinLeadHours` | Minimum notice. Default `48` | No |
 | `PracticeIce:MaxHorizonDays` | `PracticeIce__MaxHorizonDays` | How far out slots appear. Default `30` | No |
 | `PracticeIce:MaxPendingRequestsPerMember` | `PracticeIce__MaxPendingRequestsPerMember` | Cap on pending (not yet approved/declined) requests one member can hold at once (D138). Default `3` | No |
+| `PracticeIce:MinOpenSheets` | `PracticeIce__MinOpenSheets` | Fewest free sheets a practice ice session can run on; capped at the sheet count (D147). Default `3` | No |
+| `PracticeIce:GroupEventHoldReleaseDays` | `PracticeIce__GroupEventHoldReleaseDays` | Days ahead inside which an open Group Event hold counts as free for practice ice and make-up games — how far ahead guests can still book a group event (D148). Default `7` | No |
 | `Webhook:BreelySharedSecret` | `Webhook__BreelySharedSecret` | Breely's `X-Webhook-Secret` value — **secret** | Breely only |
 | `AppLog:LogDirectory` | `AppLog__LogDirectory` | Absolute path, **outside** the deployed app folder | Strongly recommended |
 | `AppLog:RetentionDays` | `AppLog__RetentionDays` | Rotated files kept. Default `30` | No |
-| `AllowedHosts` | `AllowedHosts` | ASP.NET Core's own host-header allow-list (built-in, not app-specific config) — no colon/double-underscore section prefix. Semicolon-delimited list. Set to the real custom domain(s) once Step 14 is done; `*` until then (D146). The wildcard form (`*.example.org`) covers any subdomain but not the bare apex — list the apex too, semicolon-separated (`*.example.org;example.org`), if the app is ever reached at the root domain, e.g. embedded in an iframe served from it. | Recommended once a custom domain exists |
+| `AllowedHosts` | `AllowedHosts` | ASP.NET Core's own host-header allow-list (built-in, not app-specific config) — no colon/double-underscore section prefix. Semicolon-delimited list. The repo default is the club's production domain, and filtering runs in every environment, so **every deployment must set its own** (Step 10): the site's `<app>.azurewebsites.net` name, plus custom domain(s) once Step 14 is done (D146). The wildcard form (`*.example.org`) covers any subdomain but not the bare apex — list the apex too (`*.example.org;example.org`) if the app is reached at the root domain, e.g. embedded in an iframe served from it. Local development allows `localhost` (`appsettings.Development.json`). | **Required** — a wrong value returns `400 Invalid Hostname` on every request |
 
 **Load-bearing** = the app throws at startup rather than running misconfigured. The two `PracticeIce`
 mail addresses are softer: the app boots without them, but request submission is blocked with an
@@ -827,6 +842,14 @@ domain is the app name plus a generated suffix plus a region segment
 (`myapp-a1b2c3d4.canadacentral-01.azurewebsites.net`), and a registration built from the plausible-
 looking `myapp.azurewebsites.net` fails exactly this way. Step 9 has the `az` command that prints
 the real value.
+
+### Every page returns `400 Invalid Hostname`
+
+`AllowedHosts` doesn't include the hostname you're browsing to. The app is running fine; the
+framework rejects the request before the app sees it. Add the exact hostname to the site's
+`AllowedHosts` App Service setting (Step 10), semicolon-separated from what's there, and restart.
+The repo default only allows the club's production domain, so any new environment (a staging site,
+a slot, a fresh deployment on its `*.azurewebsites.net` name) hits this until it's set.
 
 ### The app won't start at all
 

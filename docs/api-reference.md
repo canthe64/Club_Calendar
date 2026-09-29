@@ -12,6 +12,7 @@ SignalR circuit, not called via HTTP — the endpoints below are the deliberate 
 | `GET /public/calendar` | Anonymous | Full public calendar page (Month/Week/Day) |
 | `GET /public/search` | Anonymous | "Find a window with ≥N sheets open" search page |
 | `GET /public/practice-ice` | Anonymous | Open times a member could volunteer to host practice ice |
+| `GET /public/make-up-game` | Anonymous | Two-hour slots a member can book for a league make-up game |
 | `POST /api/webhooks/breely` | Shared secret | The one anonymous **write** surface — ingests Breely booking notifications (architecture doc §4.8/§5.5). A deliberate, bounded exception to "public surfaces are read-only," not a broadening of the rule. |
 | `GET /settings/logs/download` | Staff sign-in | Log archive download (architecture doc §5.6) |
 | `GET /search/export.csv` | Staff sign-in | CSV export of the staff event search (architecture doc §4.12/§5.7) |
@@ -24,9 +25,9 @@ anonymous surface must live entirely outside the Blazor component tree. The staf
 download follows the same pattern for a different reason: streaming a file download doesn't fit the
 SignalR circuit.
 
-Two authenticated Blazor **pages** also serve practice ice hosting (`/practice-ice/request`,
-`/practice-ice/approvals`) — they're pages, not API endpoints, so they aren't listed above; see
-[Staff-facing surface](#staff-facing-surface).
+Authenticated Blazor **pages** also serve practice ice hosting (`/practice-ice/request`,
+`/practice-ice/approvals`) and make-up games (`/make-up-game/request`) — they're pages, not API
+endpoints, so they aren't listed above; see [Staff-facing surface](#staff-facing-surface).
 
 This document covers:
 
@@ -230,10 +231,12 @@ booking or a `marksSheetsUnavailable` club event actually occupies part of it. C
 
 Returns a complete, self-contained HTML page (not JSON) - the anonymous half of practice ice hosting
 (architecture doc §5.4.4; full design rationale in `docs/practice-ice-hosting-design.md`). Lists
-upcoming windows where every sheet is genuinely free of any activity (a different, stricter
-"available" than every other endpoint on this page uses - see D68), each open half-hour linking to
-`/practice-ice/request?start=...`, an authenticated Blazor page (not part of this HTTP API - see
-[Staff-facing surface](#staff-facing-surface)) where a signed-in member actually submits the request.
+upcoming 30-minute start times where at least `PracticeIce:MinOpenSheets` (default 3) sheets are free
+for the shortest session (D147) - free meaning nothing booked, or an open Group Event hold inside the
+guest booking window (D148). Each time shows how many sheets are open when it isn't all of them, and
+links to `/practice-ice/request?start=...`, an authenticated Blazor page (not part of this HTTP API -
+see [Staff-facing surface](#staff-facing-surface)) where a signed-in member picks a length and
+submits the request.
 
 - **Auth:** none (anonymous) for this page; the linked request page requires sign-in.
 - **CORS:** not applicable (page navigation, not a cross-origin fetch).
@@ -245,6 +248,21 @@ upcoming windows where every sheet is genuinely free of any activity (a differen
 horizon bounds come entirely from configuration (`PracticeIce:*`, deployment guide Appendix A).
 
 ---
+
+### `GET /public/make-up-game`
+
+Returns a complete, self-contained HTML page (not JSON), linked from the public calendar's header
+(architecture doc §5.4.5, D149). Lists two-hour slots, on practice ice's start grid, eligible hours,
+lead time, and horizon, where some sheet is free for the whole two hours and another sheet has a
+confirmed booking for the whole two hours. Each shows the sheet it would go on (the highest-numbered
+free one) and links to `/make-up-game/request?start=...`, the authenticated page where the member
+acknowledges the conditions and books.
+
+- **Auth:** none for this page; the linked request page requires sign-in.
+- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Cache:** server-side, 60 seconds.
+
+**Response `200 OK`** — `text/html; charset=utf-8`. No query parameters.
 
 ### `POST /api/webhooks/breely`
 
@@ -371,8 +389,8 @@ service layer documented below rather than duplicating its logic.
 Per architecture doc §6.5/D74, the app's default authorization policy requires the `facility:staff`
 claim (decided by live Entra group membership, not Entra's own App Role assignment - this tenant is
 Entra ID Free, which doesn't support the group-based version of that feature), applied to every page
-except `/practice-ice/request`'s own explicit
-`[Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]` carve-out.
+except the explicit `[Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]`
+carve-outs on `/practice-ice/request` and `/make-up-game/request`.
 
 Note the claim type: an app-owned `facility:staff` matched with `RequireClaim`, deliberately **not**
 `ClaimTypes.Role` + `RequireRole` — that pairing silently never matches under Microsoft.Identity.Web's
@@ -397,7 +415,8 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 |---|---|---|
 | `CreateHoldAsync` | `Task<BookingResult> CreateHoldAsync(SheetBooking booking, string actingUser)` | Creates a single-sheet booking in `Hold` state. Conflict-checked against that sheet's existing events; returns `BookingResult.Conflict` (no write) if anything overlaps. Logs `BookingCreated` on success (`actingUser`, architecture doc §4.9). |
 | `CreateConfirmedAsync` | `Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, string actingUser)` | Same as above, in `Confirmed` state. |
-| `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. Season-gated (architecture doc §4.10, D84) - a request outside the configured booking season is rejected up front, before any lock or Graph call, via a synthetic `GroupBookingResult.Conflict` entry (`SheetMailbox = "__season__"`). Called by both the staff booking form and `PracticeIceRequestService.SubmitAsync`, so this one check covers both. |
+| `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. Season-gated (architecture doc §4.10, D84) - a request outside the configured booking season is rejected up front, before any lock or Graph call, via a synthetic `GroupBookingResult.Conflict` entry (`SheetMailbox = "__season__"`). Called by the staff booking form. |
+| `CreateTakingReleasedHoldsAsync` | `Task<GroupBookingResult> CreateTakingReleasedHoldsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime holdReleaseCutoff, string actingUser)` | `CreateAcrossSheetsAsync` for member-hosted ice (practice ice, make-up games): same season gate, locking, and all-or-nothing live check, except that an open Group Event hold is not a conflict where the time it overlaps lies before `holdReleaseCutoff` - it's trimmed around the new booking instead (D148), logged as `GroupEventHoldTrimmed`. A trim that fails after the booking is written is logged (`GroupEventHoldTrimFailed`), not thrown. |
 | `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
 | `CancelAsync` | `Task CancelAsync(string sheetMailbox, string eventId, string actingUser)` | Hard-deletes a single event. Tolerates a `404` from Graph as "already gone" (e.g. the Breely webhook already claimed/trimmed it) rather than throwing (architecture doc D37) - logged at Debug tier as a no-op in that case, `BookingCancelled` at Standard tier otherwise. |
 | `UpdateGroupAsync` | `Task<GroupBookingResult> UpdateGroupAsync(IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser, IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null)` | Updates every event in a booking group (time, category, renter/contact/notes, hold/confirmed state), and creates fresh events for any sheet in `newSheetMailboxes` that isn't already a member (added 2026-08-03 - a sheet added mid-edit previously had no existing event to update and was silently dropped). Re-checks conflicts against the new time before writing, for both existing and new sheets; all-or-nothing. `newBookingGroupId` splits an edited subset off into its own group when only some sheets in the original group were touched; new sheets join whichever group id the rest of the edit settles on. |
@@ -424,20 +443,32 @@ all (neither against sheet bookings nor between club events).
 | `CreateAsync` | `Task<ClubEvent> CreateAsync(ClubEvent clubEvent, string actingUser)` | Creates a club event. No conflict check. Logs `ClubEventCreated` on success (architecture doc §4.9). |
 | `UpdateAsync` | `Task UpdateAsync(ClubEvent clubEvent, string actingUser)` | Updates an existing club event by `EventId`. |
 | `CancelAsync` | `Task CancelAsync(string eventId, string actingUser)` | Hard-deletes a club event. |
+| `ResolveTriageMarkerAsync` | `Task ResolveTriageMarkerAsync(ClubEvent marker, string actingUser)` | Backs the calendar's "Resolve this alert" button on a Breely "⚠ Web booking needs review" marker. Removes the marker (a 404 counts as already resolved) and logs `TriageAlertResolved` at Standard tier with the actor, without the marker's notes (they can carry a customer's name). Throws `ArgumentException` for anything that isn't such a marker. |
 | `GetEventsAsync` | `Task<IReadOnlyList<ClubEvent>> GetEventsAsync(DateTime start, DateTime end)` | Reads club events in a window. Cached for 30 seconds, invalidated on every write. `IReadOnlyList`, not `List` (D133), same reasoning as `SheetBookingService.GetBookingsForAllSheetsAsync`. |
 
 ### `PracticeIceRequestService`
 
 Added for practice ice hosting (architecture doc §5.4.4). The write path - `PublicAvailabilityService`
-(also new: `GetPracticeIceWindowsAsync`/`FindPracticeIceWindowContainingAsync`) stays read-only,
-matching the existing split between it and `SheetBookingService`.
+(`GetPracticeIceStartsAsync`/`GetPracticeIceStartAsync`, returning `PracticeIceStartOption`s: a start
+time and each free sheet's free-until time) stays read-only, matching the existing split between it
+and `SheetBookingService`.
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `SubmitAsync` | `Task<PracticeIceSubmitResult> SubmitAsync(DateTime start, int durationMinutes, string hostName, string hostEmail, bool certified, string? notes)` | Re-validates everything server-side against a fresh availability check (the query string/form inputs are untrusted), then writes a `PracticeIce`+`Hold` booking across every sheet via `SheetBookingService.CreateAcrossSheetsAsync` (same all-or-nothing guarantee, same live per-sheet-locked conflict check as every other write path). Blocks outright with `PracticeIceSubmitResult.Invalid` if `FacilityConfiguration.PracticeIceMailConfigured` is false, rather than silently creating an unnotified hold. Also blocked if `hostEmail` already has `PracticeIceMaxPendingRequestsPerMember` pending requests (D138) - counted via `GetPendingAsync` by distinct `BookingGroupId`, not by sheet. On success, emails the approver group - a failed send doesn't undo the write or throw; it's reported via `NotificationSent` instead (D70). |
+| `SubmitAsync` | `Task<PracticeIceSubmitResult> SubmitAsync(DateTime start, int durationMinutes, string hostName, string hostEmail, bool certified, string? notes)` | Re-validates everything server-side against a fresh availability check (the query string/form inputs are untrusted), then writes a `PracticeIce`+`Hold` booking on every sheet free for the whole requested length (at least `PracticeIceMinOpenSheets`, D147) via `SheetBookingService.CreateTakingReleasedHoldsAsync` (same all-or-nothing guarantee and live per-sheet-locked conflict check as every other write path; released Group Event holds are trimmed, D148). Blocks outright with `PracticeIceSubmitResult.Invalid` if `FacilityConfiguration.PracticeIceMailConfigured` is false, rather than silently creating an unnotified hold. Also blocked if `hostEmail` already has `PracticeIceMaxPendingRequestsPerMember` pending requests (D138) - counted via `GetPendingAsync` by distinct `BookingGroupId`, not by sheet. On success, emails the approver group - a failed send doesn't undo the write or throw; it's reported via `NotificationSent` instead (D70). |
 | `GetPendingAsync` | `Task<List<PracticeIceRequestSummary>> GetPendingAsync()` | Every pending (`PracticeIce`+`Hold`) group, one row per `BookingGroupId`, ordered by upcoming start time (not submission age - `SheetBooking` has no created-at field). |
 | `ApproveAsync` | `Task<PracticeIceActionResult> ApproveAsync(Guid bookingGroupId, string actingUser)` | Confirms the group (`UpdateGroupAsync`) and emails the volunteer. `Success` reflects the confirm; `NotificationSent` is reported separately and independently (D70). |
 | `DeclineAsync` | `Task<PracticeIceActionResult> DeclineAsync(Guid bookingGroupId, string reason, string actingUser)` | Requires a non-empty `reason` (thrown as `ArgumentException` otherwise - the UI is expected to validate first). Cancels the group (`CancelGroupAsync`, hard delete per D9) and emails the volunteer with the reason. |
+
+### `MakeUpGameService`
+
+Added for make-up games (architecture doc §5.4.5, D149). Availability comes from
+`PublicAvailabilityService.GetMakeUpGameOptionsAsync`/`GetMakeUpGameOptionAsync` (`MakeUpGameOption`:
+start, end, sheet).
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `SubmitAsync` | `Task<MakeUpGameSubmitResult> SubmitAsync(DateTime start, string requesterName, string requesterEmail, bool acknowledged)` | Refused (`Invalid`) if mail isn't configured, the conditions weren't acknowledged, the sign-in gave no name/email, or `start` is no longer offered. Otherwise books a Confirmed League booking on the option's sheet via `CreateTakingReleasedHoldsAsync`, titled by `MakeUpGameRules.BookingTitle` ("Make-Up Game Requested by {name}", never a bare email), logs `MakeUpGameBooked`, and emails the calendar team's list and the requester. A lost race returns `Conflict`; a failed email is reported via `StaffNotified`/`RequesterNotified`, never thrown. |
 
 ### `StaffAccessService`
 
@@ -489,6 +520,7 @@ deployment fails immediately rather than on first request.
 
 Also exposes the practice ice settings (`PracticeIceEligibleStartHour`/`EligibleEndHour`,
 `PracticeIceMinLeadHours`/`MaxHorizonDays`, `PracticeIceMaxPendingRequestsPerMember` (D138),
+`PracticeIceMinOpenSheets` (D147), `GroupEventHoldReleaseDays` and `GroupEventHoldReleaseCutoff` (D148),
 `PracticeIceApproverEmail`, `PracticeIceMailerMailbox`, `PracticeIceMailConfigured`). Unlike `Facility:TenantDomain`/`SheetMailboxLocalParts`/`TimeZone`,
 the two mail addresses are allowed to be blank at startup - `PracticeIceMailConfigured` gates the
 feature at request time instead, so an incremental feature rollout doesn't stop an already-running

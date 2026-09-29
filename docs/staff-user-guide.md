@@ -258,8 +258,9 @@ automatically, same as always, but flags itself so a human can check whether it 
 — if the label is a genuine new or renamed Breely event type, add it to
 `BreelyBookingProcessor.GroupReservationSheetCounts` in the code so future bookings of that type claim
 the right number of sheets on their own. Either way, its notes include a link back to that booking's
-page in Breely. It doesn't close any ice itself ("Marks all sheets unavailable" is off) — delete it
-once you've verified or corrected the booking it refers to. Unlike a staff-written Note,
+page in Breely. It doesn't close any ice itself ("Marks all sheets unavailable" is off). Once you've
+verified or corrected the booking it refers to, click the alert on the calendar and choose
+**Resolve this alert** — that removes it and records in the activity log who resolved it. Unlike a staff-written Note,
 **this one is never shown on the public calendar** — it can name a real customer and links to an internal
 admin page, so it's automatically withheld from members regardless of the setting above.
 
@@ -418,18 +419,24 @@ elsewhere. If it keeps happening on the same action, that's worth reporting.
 
 ## 10. Practice Ice Requests
 
-Any properly-trained member can volunteer to host a practice ice session open to the whole club, at
-a time when nothing else is on the calendar. Members find open times and submit a request at
-`/public/practice-ice` (no sign-in needed to browse, sign-in required to actually submit); every
-request lands here for staff review before it's real.
+Any properly-trained member can volunteer to host a practice ice session open to the whole club,
+whenever at least 3 sheets are free — other sheets can already be in use. Members find open times
+and submit a request at `/public/practice-ice` (no sign-in needed to browse, sign-in required to
+actually submit); every request lands here for staff review before it's real.
+
+**Which sheets a session uses.** A session runs on every sheet free for its whole length, so a
+request may cover fewer than all the sheets — the time list shows how many are open, and the request
+records exactly which. An open group-event slot less than a week away counts as free (guests can
+only book group events a week or more ahead). A request that uses one trims the group-event slot
+around the session, and declining the request doesn't put it back.
 
 **Practice Ice Approvals** (menu button, top left; also linked from Settings) lists every pending request,
 soonest first - a request whose slot is coming up soon is the one most likely to need a decision
 first, since (unlike a booking) there's no record of *when* a member actually submitted it. Each
 entry shows the requested time, the volunteer's name and email, and any notes they added.
 
-- **Approve** confirms the slot immediately - it becomes a real "Practice Ice" booking across every
-  sheet, and the volunteer gets an email letting them know.
+- **Approve** confirms the slot immediately - it becomes a real "Practice Ice" booking on the sheets
+  it was requested on, and the volunteer gets an email letting them know.
 - **Decline** requires a short reason first (shown to the volunteer in their email, so they're not
   left guessing) - type it, then **Confirm decline**. This removes the request entirely; there's no
   record kept of a declined request once it's gone.
@@ -447,3 +454,18 @@ past that, submission is blocked with a message telling them how many they alrea
 Approving or declining one of their existing requests frees up their next slot. If a member genuinely
 needs more room than that (a volunteer coordinating several sessions at once, say), the cap is a
 deployment setting - see the deployment guide.
+
+---
+
+## 11. Make-Up Games
+
+Members can book a league make-up game themselves from `/public/make-up-game` (linked as "Schedule
+Make-Up Game" at the top of the public calendar). There's **no approval step**: a make-up game goes
+straight onto the calendar as a confirmed **League** booking titled "Make-Up Game Requested by
+{name}", and the calendar team's distribution list and the member both get a confirmation email.
+
+A time is only offered when another sheet already has a confirmed booking for the whole two hours
+(so someone qualified is running the club) and a sheet is free beside it. The game goes on the
+highest-numbered free sheet, but members agree when booking that existing events keep priority for
+sheet choice and extra sheets. To change or remove a make-up game, edit or cancel it on the Calendar
+page like any other booking.

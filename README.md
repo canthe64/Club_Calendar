@@ -44,7 +44,7 @@ Exchange does not enforce the booking rules so the app owns conflict detection a
 
 ## Overview
 
-There are only 2 types of users: Staff and Public. *One exception: if you use the practice ice feature, club members can sign in to request a hosting slot — that is the only thing a signed-in non-Staff user can do.* The app does not have a granular permissions model as this is complicated to manage. <u>Staff are effectively admins.</u>
+There are only 2 types of users: Staff and Public. *One exception: club members can sign in to request a practice ice hosting slot or book a league make-up game — those are the only things a signed-in non-Staff user can do.* The app does not have a granular permissions model as this is complicated to manage. <u>Staff are effectively admins.</u>
 
 Staff can perform all functions on the calendars: Create, edit, and delete events and all associated details. Public users can only view the publicly accessible webpage and a limited, PII cleansed set of event details.
 
@@ -71,9 +71,12 @@ Any Staff member can approve or decline practice ice requests, but only uses in 
 | `/public/calendar`         | Full club-wide calendar, Month/Week/Day, with category filters    |
 | `/public/search`           | Find windows where at least N sheets are open simultaneously      |
 | `/public/practice-ice`     | Times any trained member could volunteer to host practice ice     |
+| `/public/make-up-game`     | Two-hour slots a member can book for a league make-up game        |
 | `/api/public/availability` | Minimized JSON feed, plus a drop-in widget for embedding in a CMS |
 
-**Member practice-ice hosting** — If you wish to give your club members a way to easily volunteer to host practice ice during unused time slots, this feature allows signed-in members to claim an open window to host, which writes a pending hold and emails an approver address. Staff approve or decline (with a reason) from an in-app queue; the volunteer is emailed either way. Requests are automatically added to the calendar for visibility. Set rules for when practice ice sessions can begin/end, as well as minimum times. Requires ALL sheets to be available (e.g. - you cannot offer to host practice ice on unused sheets of a pre-existing event).
+**Member practice-ice hosting** — If you wish to give your club members a way to easily volunteer to host practice ice during unused time slots, this feature allows signed-in members to claim an open window to host, which writes a pending hold and emails an approver address. Staff approve or decline (with a reason) from an in-app queue; the volunteer is emailed either way. Requests are automatically added to the calendar for visibility. Set rules for when practice ice sessions can begin/end, as well as minimum times. Sessions can run on the unused sheets alongside another event, as long as a minimum number of sheets (default 3) are free, and can use group-event slots too close to be booked by guests.
+
+**Member make-up games** — signed-in members can book a single sheet for a two-hour league make-up game, beside a confirmed event that's already running. Bookings are auto-approved and confirmed by email to the member and your calendar team.
 
 **Inbound booking integration** — a webhook ingests bookings from 3rd party booking services (currently Breely). This is deliberately one-way and best-effort as the app has no way to send response data back. Breely (or whatever 3rd party tool) remains authoritative for what a customer was actually promised. But the feature can be expanded to other third party platforms that support webhook automations with additional development. 
 

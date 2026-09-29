@@ -5,7 +5,7 @@
 **Stack:** .NET 10 / C#, Blazor Server (D14)
 
 This document covers the architecture and the decisions and findings that shape it. The full history
-— every numbered decision (`D1`–`D146`), every live-found bug and review finding, and the detailed
+— every numbered decision (`D1`–`D149`), every live-found bug and review finding, and the detailed
 per-feature notes — is in [`decision-log.md`](decision-log.md). `D`-numbers cited here and in code
 comments are defined there; the key ones are summarized in §9.
 
@@ -24,11 +24,12 @@ but staff see one "event" concept with an on-ice/off-ice toggle (§4.4).
 
 Around that core:
 
-- **Four anonymous read surfaces** (§5.4): a JSON availability API for a CMS embed, a public
-  calendar, an availability search, and a practice-ice listing.
-- **Two non-staff write paths**: an inbound webhook from Breely, the club's customer-facing booking
-  platform (§4.8, a one-way stopgap), and a member practice-ice hosting request that creates a
-  pending hold for staff approval (§5.4.4).
+- **Five anonymous read surfaces** (§5.4): a JSON availability API for a CMS embed, a public
+  calendar, an availability search, a practice-ice listing, and a make-up game listing.
+- **Three non-staff write paths**: an inbound webhook from Breely, the club's customer-facing
+  booking platform (§4.8, a one-way stopgap); a member practice-ice hosting request that creates a
+  pending hold for staff approval (§5.4.4); and a member make-up game request, booked immediately
+  (§5.4.5).
 - **A staff Settings page** with a rotating activity/debug log (§4.9) and the scheduling-window
   settings (§4.10).
 
@@ -52,13 +53,15 @@ architecture is curling-specific (§10).
 - Anonymous public views, embeddable in the club website.
 - One-way reflection of Breely bookings onto the calendar.
 - Member-initiated practice-ice hosting, subject to staff approval.
+- Member-scheduled league make-up games alongside ice already in use, auto-approved.
 - A staff-visible record of what the app did in production.
 
 ### 2.2 Out of scope
 
 - Payments, fees, deposits; membership rules, booking caps, priority tiers, waitlists.
-- **General member self-service booking.** The only member write path is a practice-ice hosting
-  request, which creates a pending hold, not a booking (§5.4.4).
+- **General member self-service booking.** Members have exactly two narrow write paths: a
+  practice-ice hosting request, which creates a pending hold (§5.4.4), and a single two-hour
+  make-up game on a sheet free while other ice is in use (§5.4.5).
 - Audit history of cancellations — cancellation is a hard delete (D9).
 - Automatic expiry of holds, including unactioned practice-ice requests.
 - ICS publishing (rejected from prior operational experience).
@@ -73,7 +76,7 @@ architecture is curling-specific (§10).
 | Source of truth | Exchange Online. The app holds no authoritative data. For what a Breely customer was promised, Breely is authoritative, not this calendar (§4.8). |
 | Concurrency | Effectively one staff user at a time, two by rare coincidence. |
 | Cache | Ephemeral, short-TTL, rebuildable from EXO at any moment; never on the conflict-check path (§4.3). |
-| Public data | The JSON API is a hand-built minimized mapping, never a reuse of internal types (D11). The public calendar shows titles under three rules: a **staff-typed** title as-is (staff keep PII out of it); a **Breely-originated** title replaced with its category label, since it carries a customer's real name nobody reviewed (D52); a **member practice-ice** title names the volunteer host, an accepted exception since hosting is an outward-facing club role (D69, D145). Any new booking source needs its own explicit decision here. |
+| Public data | The JSON API is a hand-built minimized mapping, never a reuse of internal types (D11). The public calendar shows titles under three rules: a **staff-typed** title as-is (staff keep PII out of it); a **Breely-originated** title replaced with its category label, since it carries a customer's real name nobody reviewed (D52); a **member practice-ice** title names the volunteer host, an accepted exception since hosting is an outward-facing club role (D69, D145); a **member make-up game** is titled "Make-Up Game Requested by {name}" by the same reasoning (D149). Any new booking source needs its own explicit decision here. |
 | CMS | A thin embed or iframe, with no credentials and no Graph logic in the CMS. |
 | Tenant | Configuration-driven (§4.6). |
 | Deployment | Azure App Service (Linux) is the primary target; see `docs/deployment-guide.md`. |
@@ -99,8 +102,8 @@ flowchart TB
         API["Services<br/>SheetBookingService · ClubEventService<br/>conflict enforcement · FacilityConfiguration"]
         GW["IGraphEventGateway<br/>(Graph boundary)"]
         CACHE["Ephemeral cache (IMemoryCache)<br/>view reads only"]
-        PUB["Anonymous endpoints (Minimal API)<br/>JSON API · public calendar ·<br/>search · practice-ice listing"]
-        MEMBER_UI["Practice-ice request (Blazor)<br/>any signed-in user"]
+        PUB["Anonymous endpoints (Minimal API)<br/>JSON API · public calendar · search ·<br/>practice-ice and make-up listings"]
+        MEMBER_UI["Practice-ice and make-up requests<br/>(Blazor, any signed-in user)"]
         STAFFHTTP["Staff file endpoints (Minimal API)<br/>CSV export · log download"]
         WEBHOOK["Breely webhook (Minimal API)<br/>shared-secret auth"]
         LOG[["Rotating log files<br/>(outside app folder)"]]
@@ -428,16 +431,36 @@ computation as §5.4.1.
 
 **5.4.4 Practice-ice hosting.** Full rationale is in `docs/practice-ice-hosting-design.md`.
 
-- `GET /public/practice-ice` (anonymous) lists windows where **every sheet is completely free**,
-  within eligible hours, lead time, and horizon, on a 30-minute grid (D68). This deliberately
-  differs from §5.4.1's hold-based "available": group events take priority over practice ice.
+- `GET /public/practice-ice` (anonymous) lists 30-minute start times, within eligible hours, lead
+  time, and horizon, where at least `PracticeIce:MinOpenSheets` (default 3) sheets are free for the
+  shortest session (D147). A session runs on every sheet free for its whole length, so a longer one
+  can cover fewer sheets; the listing and request page show how many.
+- **"Free" for member-hosted ice** (`PublicAvailabilityService.MemberFreeTime`, shared with §5.4.5):
+  nothing booked on the sheet, with one exception. An open Group Event hold counts as free inside
+  `PracticeIce:GroupEventHoldReleaseDays` (default 7), because guests can no longer book that close
+  in (D148). Every other booking, any category or state, blocks.
 - `/practice-ice/request` is an authenticated Blazor page open to any signed-in user (§6.5). Members
   sign in as B2B guests in the staff tenant (D72). It re-validates server-side, then writes a
-  `PracticeIce` Hold across every sheet through the normal locked write path and emails approvers.
-  Pending requests are capped per member (D138).
+  `PracticeIce` Hold on the chosen sheets through `CreateTakingReleasedHoldsAsync`: the normal
+  locked, all-or-nothing write path, except that a released hold is trimmed around the session
+  instead of conflicting. A decline doesn't restore it. Pending requests are capped per member (D138).
 - `/practice-ice/approvals` (staff) confirms or declines, emailing the volunteer. A failed email
   never turns a successful write into an apparent failure (D70).
 - Mail uses `Mail.Send`, scoped by the same Application Access Policy group as the calendars (D73).
+
+**5.4.5 Make-up games** (D149).
+
+- `GET /public/make-up-game` (anonymous, linked from the calendar header) lists two-hour slots,
+  starting on practice ice's grid, eligible hours, lead time, and horizon, where some sheet is free
+  (§5.4.4's rule) for the whole two hours **and** another sheet has a confirmed booking for the
+  whole two hours. Requesters may not be qualified to open the club, so tentative or open ice alone
+  never qualifies.
+- `/make-up-game/request` (any signed-in user, §6.5) shows the slot and sheet, requires the member to
+  acknowledge the conditions, and books it immediately: a Confirmed League booking on the
+  highest-numbered free sheet, through the same `CreateTakingReleasedHoldsAsync` path. There's no
+  approval step and no per-member cap. The calendar team's distribution list and the requester are
+  both emailed, and submission is refused until mail is configured, since that email is staff's only
+  notice.
 
 ### 5.5 Breely Webhook Endpoint
 
@@ -479,7 +502,7 @@ meeting invite, so nothing can book a sheet around the app (D78).
 | Principal | Mechanism | Used for |
 |---|---|---|
 | Staff | Entra SSO + app-owned `facility:staff` claim (§6.5) | Everything in the staff UI. Also the actor recorded in the activity log. |
-| Member | Entra SSO as a B2B guest, no staff claim | `/practice-ice/request` only. |
+| Member | Entra SSO as a B2B guest, no staff claim | `/practice-ice/request` and `/make-up-game/request` only. |
 | App service identity | Client credentials, application permissions | **All** Graph calls. There is no delegated/on-behalf-of Graph access. |
 | Staff via Outlook | Reviewer calendar permission | Read-only fallback viewing. |
 | Anonymous public | None | The Minimal API read surfaces (§5.4), through the service layer. |
@@ -503,8 +526,10 @@ mail-enabled security group containing only the sheet, off-ice, and mailer mailb
   staff-visible and correctable, with no exfiltration or privilege escalation.
 - **Framing and sniffing headers:** `X-Frame-Options: DENY` and `frame-ancestors 'none'` on every
   route except `/public/calendar`. `X-Content-Type-Options: nosniff` everywhere (D53).
-- **Host filtering:** `AllowedHosts` is `*.curlingseattle.org;curlingseattle.org` (D146). A wildcard
-  entry doesn't match the apex domain, so the apex is listed separately.
+- **Host filtering:** `AllowedHosts` defaults to `*.curlingseattle.org;curlingseattle.org` (D146). A
+  wildcard entry doesn't match the apex domain, so the apex is listed separately. Filtering runs in
+  every environment, so each deployment overrides it with its own hostnames through an App Service
+  setting (a staging site's `*.azurewebsites.net` name, for example); Development allows `localhost`.
 - **Forwarded headers** are processed first in the pipeline (D123), so logged client IPs are the real
   caller's, not App Service's front end.
 - **The activity log is a security surface.** Its directory should be readable only by the app's
@@ -517,8 +542,8 @@ Practice ice brought non-staff sign-ins, so "authenticated" and "staff" stopped 
 (D74).
 
 - **Strict default.** The `FallbackPolicy` requires authentication **and** the staff claim, so every
-  page is staff-only unless it opts out. The only member-reachable page is `/practice-ice/request`
-  (`AnyAuthenticatedUser` policy). Staff-only Minimal API endpoints bind `StaffOnly` explicitly.
+  page is staff-only unless it opts out. The only member-reachable pages are `/practice-ice/request`
+  and `/make-up-game/request` (`AnyAuthenticatedUser` policy). Staff-only Minimal API endpoints bind `StaffOnly` explicitly.
   Policies live in `StaffAuthorizationPolicies` so tests exercise the real objects (D75).
 - **Staff membership is a live Entra group check at sign-in** (`StaffAccessService`,
   `checkMemberGroups`), not an App Role. Group-based app-role assignment needs Entra ID P1, and the
@@ -615,6 +640,7 @@ anyone changing it should know.
 | `/public/calendar` has no `frame-ancestors` restriction | Simplicity over locking to a domain; a hardening candidate. |
 | Member carve-out not live-verified with a non-staff account | Verify before real member volume (§6.5). |
 | No automatic hold expiry, including practice-ice requests | Staff-supervised volume; per-member cap bounds abuse (D138). |
+| Make-up games are auto-approved with no per-member cap | Operator decision (D149); every booking emails the calendar team, and members acknowledge that existing events keep priority over the sheet. |
 | Accidental deletion is recoverable only via Exchange's recoverable-items window | Acceptable at this scale. |
 
 ---
@@ -651,7 +677,7 @@ The decisions that define the architecture. The complete, numbered record is Par
 | D52 | Breely-originated titles are replaced by category on public pages | They carry unreviewed customer names. |
 | D53 | Anti-framing headers everywhere except the public calendar | That page is built to be iframed. |
 | D59 | Graph access behind `IGraphEventGateway` | Makes the services testable. |
-| D68 | Practice-ice availability means every sheet completely free | Group events take priority over practice ice. |
+| D68 | Practice ice never takes group-event ice guests can still book | Group events take priority over practice ice. (Originally "every sheet completely free"; narrowed by D147/D148.) |
 | D69 | Practice-ice titles publicly name the host | Hosting is an outward-facing club role. |
 | D72 | Members sign in as B2B guests in the staff tenant | Reuses existing identity; no separate CIAM tenant yet. |
 | D73 | `Mail.Send` scoped by the same access-policy group | One scoping mechanism. |
@@ -661,7 +687,10 @@ The decisions that define the architecture. The complete, numbered record is Par
 | D84 | Season gate in one method | Coverage follows from which write path is called. |
 | D90 | Searches cap at 60 days | `calendarView` cost scales with range width. |
 | D95 | One event form with an on-ice/off-ice toggle; code names unchanged | Staff think "uses ice or not," not "which mailbox." |
-| D146 | `AllowedHosts` restricted to the club's domain and its apex | Host-header hardening; the apex is embedded from the club site. |
+| D146 | `AllowedHosts` restricted to the club's domain and its apex, overridden per environment | Host-header hardening; the apex is embedded from the club site. |
+| D147 | Practice ice runs on partial sheets (minimum 3) | More usable practice time; a session covers every sheet free for its whole length. |
+| D148 | Group-event holds inside the 7-day guest booking window count as free for member-hosted ice | Guests can't book them anymore; taking one trims it. |
+| D149 | Make-up games: auto-approved, confirmed League booking beside a confirmed event | Someone qualified is already running the club; staff are emailed instead of approving. |
 
 ---
 
