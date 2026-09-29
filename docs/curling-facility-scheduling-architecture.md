@@ -5,7 +5,7 @@
 **Stack:** .NET 10 / C#, Blazor Server (D14)
 
 This document covers the architecture and the decisions and findings that shape it. The full history
-— every numbered decision (`D1`–`D149`), every live-found bug and review finding, and the detailed
+— every numbered decision (`D1`–`D150`), every live-found bug and review finding, and the detailed
 per-feature notes — is in [`decision-log.md`](decision-log.md). `D`-numbers cited here and in code
 comments are defined there; the key ones are summarized in §9.
 
@@ -29,7 +29,7 @@ Around that core:
 - **Three non-staff write paths**: an inbound webhook from Breely, the club's customer-facing
   booking platform (§4.8, a one-way stopgap); a member practice-ice hosting request that creates a
   pending hold for staff approval (§5.4.4); and a member make-up game request, booked immediately
-  (§5.4.5).
+  (§5.4.5). Members can cancel either themselves from the link in their booking email (§5.4.6).
 - **A staff Settings page** with a rotating activity/debug log (§4.9) and the scheduling-window
   settings (§4.10).
 
@@ -54,6 +54,7 @@ architecture is curling-specific (§10).
 - One-way reflection of Breely bookings onto the calendar.
 - Member-initiated practice-ice hosting, subject to staff approval.
 - Member-scheduled league make-up games alongside ice already in use, auto-approved.
+- Members cancelling their own practice ice and make-up games from their booking email.
 - A staff-visible record of what the app did in production.
 
 ### 2.2 Out of scope
@@ -462,6 +463,20 @@ computation as §5.4.1.
   both emailed, and submission is refused until mail is configured, since that email is staff's only
   notice.
 
+**5.4.6 Member self-cancel** (D150). The make-up game confirmation, the practice ice "request
+received" email, and the practice ice approval email each carry a link to `/my-booking/cancel?id=
+{BookingGroupId}` (any signed-in user, §6.5), built from `Facility:PublicBaseUrl`.
+
+- **Opening the link never cancels.** Mail scanners (Safe Links and the like) open every link in a
+  message, so the page only shows the booking; cancelling waits for its button.
+- **Only the booker, only member-made bookings, only before the start.** The signed-in email must
+  match the email stored on the booking (both read by `ClaimsPrincipal.MemberIdentity`, one shared
+  rule). Only practice ice and League bookings carrying a member email qualify, so staff bookings are
+  unreachable and read as not found. Everything is re-checked when the button is clicked.
+- Cancelling is the same hard delete staff use (D9), on every sheet of the booking; group-event
+  hold time it had taken isn't given back (D148). The calendar team's list and the member are
+  emailed.
+
 ### 5.5 Breely Webhook Endpoint
 
 `POST /api/webhooks/breely` is the one anonymous endpoint that writes.
@@ -502,7 +517,7 @@ meeting invite, so nothing can book a sheet around the app (D78).
 | Principal | Mechanism | Used for |
 |---|---|---|
 | Staff | Entra SSO + app-owned `facility:staff` claim (§6.5) | Everything in the staff UI. Also the actor recorded in the activity log. |
-| Member | Entra SSO as a B2B guest, no staff claim | `/practice-ice/request` and `/make-up-game/request` only. |
+| Member | Entra SSO as a B2B guest, no staff claim | `/practice-ice/request`, `/make-up-game/request`, and `/my-booking/cancel` only. |
 | App service identity | Client credentials, application permissions | **All** Graph calls. There is no delegated/on-behalf-of Graph access. |
 | Staff via Outlook | Reviewer calendar permission | Read-only fallback viewing. |
 | Anonymous public | None | The Minimal API read surfaces (§5.4), through the service layer. |
@@ -542,8 +557,8 @@ Practice ice brought non-staff sign-ins, so "authenticated" and "staff" stopped 
 (D74).
 
 - **Strict default.** The `FallbackPolicy` requires authentication **and** the staff claim, so every
-  page is staff-only unless it opts out. The only member-reachable pages are `/practice-ice/request`
-  and `/make-up-game/request` (`AnyAuthenticatedUser` policy). Staff-only Minimal API endpoints bind `StaffOnly` explicitly.
+  page is staff-only unless it opts out. The only member-reachable pages are `/practice-ice/request`,
+  `/make-up-game/request`, and `/my-booking/cancel` (`AnyAuthenticatedUser` policy). Staff-only Minimal API endpoints bind `StaffOnly` explicitly.
   Policies live in `StaffAuthorizationPolicies` so tests exercise the real objects (D75).
 - **Staff membership is a live Entra group check at sign-in** (`StaffAccessService`,
   `checkMemberGroups`), not an App Role. Group-based app-role assignment needs Entra ID P1, and the
@@ -691,6 +706,7 @@ The decisions that define the architecture. The complete, numbered record is Par
 | D147 | Practice ice runs on partial sheets (minimum 3) | More usable practice time; a session covers every sheet free for its whole length. |
 | D148 | Group-event holds inside the 7-day guest booking window count as free for member-hosted ice | Guests can't book them anymore; taking one trims it. |
 | D149 | Make-up games: auto-approved, confirmed League booking beside a confirmed event | Someone qualified is already running the club; staff are emailed instead of approving. |
+| D150 | Members cancel their own bookings from an emailed link to a signed-in page | Only the booker can cancel; opening the link never cancels, since mail scanners open links. |
 
 ---
 

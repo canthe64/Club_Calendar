@@ -18,14 +18,14 @@ architecture doc's invariants. Everything through 2026-09-28 is recorded below a
 
 **Contents**
 
-- [Part A. Decision Record (D1–D149)](#part-a-decision-record-d1d149)
+- [Part A. Decision Record (D1–D150)](#part-a-decision-record-d1d150)
 - [Part B. Findings, Incidents, and Accepted Risks](#part-b-findings-incidents-and-accepted-risks)
 - [Part C. Implementation Notes (archived from the architecture doc)](#part-c-implementation-notes-archived-from-the-architecture-doc)
 - [Part D. Test Coverage Notes (archived from the architecture doc)](#part-d-test-coverage-notes-archived-from-the-architecture-doc)
 
 ---
 
-## Part A. Decision Record (D1–D149)
+## Part A. Decision Record (D1–D150)
 
 Each entry states a decision with the reasoning behind it, as recorded when it was made. `§`
 references inside an entry point at the architecture doc's section numbering, which the rewrite kept
@@ -173,6 +173,7 @@ stable, or at the archived narrative in Part C (which keeps the same numbers).
 | D147 | Practice ice no longer requires every sheet free: a start is offered when at least `PracticeIce:MinOpenSheets` (default 3, capped at the sheet count) sheets are free for the shortest session, and a session runs on every sheet free for its whole length | Operator request, 2026-09-28. Sheets in use by another activity no longer block practice ice club-wide. Computed per start time (`PracticeIceStartOption`) rather than as windows, because the set of free sheets can change within a window - a longer session can cover fewer sheets, and the request page shows which. The public page states that pre-existing events keep priority over sheet choice. |
 | D148 | An open Group Event hold counts as free for member-hosted ice (practice ice, make-up games) for the part of it before now + `PracticeIce:GroupEventHoldReleaseDays` (default 7); a request that uses it trims the hold, and a declined practice-ice request doesn't restore it | Operator request, 2026-09-28: guests can only book a group event more than a week out, so hold time inside that week can no longer sell. The read (`PublicAvailabilityService.MemberFreeTime`) and the write (`SheetBookingService.CreateTakingReleasedHoldsAsync`) share one `PracticeIceRules.IsReleasableHold` rule and apply the same cutoff - the write accepts a hold only where the time it covers lies before the cutoff. Trimming reuses the Breely claim's `TrimHoldAsync`. Not restoring on decline was the operator's choice: that time is unsellable anyway. |
 | D149 | Make-up games (`/public/make-up-game`, `/make-up-game/request`): a two-hour slot where some sheet is free (D148's rule) and another sheet has a confirmed booking, both for the whole two hours, is booked immediately as a Confirmed League booking on the highest-numbered free sheet, titled "Make-Up Game Requested by {name}", with no approval step and no per-member cap | Operator decisions, 2026-09-28. Requesters may not be qualified to open the club, so a confirmed event must already be running - open or tentative ice never qualifies. Auto-approval replaces staff review with emails to the calendar team's distribution list and the requester, so submission is refused until mail is configured. The requester is named publicly by explicit decision (the §2.3 rule that every new booking source needs its own title decision); a bare email/UPN is never used. Members acknowledge that the slot and sheet aren't guaranteed and that existing events keep priority. |
+| D150 | Members cancel their own practice ice (pending or approved) and make-up games from a link in their booking emails, to `/my-booking/cancel`: sign-in required, only the account that booked, any time before the start, and only on the page's button - never on opening the link | Operator request and decisions, 2026-09-29. Sign-in rather than a secret-bearing link, so a forwarded email can't cancel and no signing key is needed - ownership is the signed-in email matching the one stored on the booking, read through one shared `MemberIdentity` rule so booking and cancelling can't disagree. A GET that cancelled would be triggered by mail scanners that open every link. Only practice ice / League bookings carrying a member email are reachable, so staff bookings can't be cancelled or even confirmed to exist. The calendar team and the member are emailed; any group-event hold time the booking took is not restored (as with D148's declines). Links need the new `Facility:PublicBaseUrl` per environment; without it emails go out link-less and the gap is logged. Practice ice gained a host "request received" email to carry the link for pending requests. |
 
 ---
 

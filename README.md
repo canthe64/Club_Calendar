@@ -78,6 +78,8 @@ Any Staff member can approve or decline practice ice requests, but only uses in 
 
 **Member make-up games** — signed-in members can book a single sheet for a two-hour league make-up game, beside a confirmed event that's already running. Bookings are auto-approved and confirmed by email to the member and your calendar team.
 
+**Member self-cancel** — the booking emails for make-up games and practice ice include a link members can use to cancel their own booking (after signing in), with the calendar team notified.
+
 **Inbound booking integration** — a webhook ingests bookings from 3rd party booking services (currently Breely). This is deliberately one-way and best-effort as the app has no way to send response data back. Breely (or whatever 3rd party tool) remains authoritative for what a customer was actually promised. But the feature can be expanded to other third party platforms that support webhook automations with additional development. 
 
 **Search**- Search for any event by name, notes, category, or day of week. Limited to 60 day window at a time.

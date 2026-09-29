@@ -26,8 +26,9 @@ download follows the same pattern for a different reason: streaming a file downl
 SignalR circuit.
 
 Authenticated Blazor **pages** also serve practice ice hosting (`/practice-ice/request`,
-`/practice-ice/approvals`) and make-up games (`/make-up-game/request`) — they're pages, not API
-endpoints, so they aren't listed above; see [Staff-facing surface](#staff-facing-surface).
+`/practice-ice/approvals`), make-up games (`/make-up-game/request`), and members cancelling their
+own bookings (`/my-booking/cancel`) — they're pages, not API endpoints, so they aren't listed above;
+see [Staff-facing surface](#staff-facing-surface).
 
 This document covers:
 
@@ -390,7 +391,7 @@ Per architecture doc §6.5/D74, the app's default authorization policy requires 
 claim (decided by live Entra group membership, not Entra's own App Role assignment - this tenant is
 Entra ID Free, which doesn't support the group-based version of that feature), applied to every page
 except the explicit `[Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]`
-carve-outs on `/practice-ice/request` and `/make-up-game/request`.
+carve-outs on `/practice-ice/request`, `/make-up-game/request`, and `/my-booking/cancel`.
 
 Note the claim type: an app-owned `facility:staff` matched with `RequireClaim`, deliberately **not**
 `ClaimTypes.Role` + `RequireRole` — that pairing silently never matches under Microsoft.Identity.Web's
@@ -457,8 +458,21 @@ and `SheetBookingService`.
 |---|---|---|
 | `SubmitAsync` | `Task<PracticeIceSubmitResult> SubmitAsync(DateTime start, int durationMinutes, string hostName, string hostEmail, bool certified, string? notes)` | Re-validates everything server-side against a fresh availability check (the query string/form inputs are untrusted), then writes a `PracticeIce`+`Hold` booking on every sheet free for the whole requested length (at least `PracticeIceMinOpenSheets`, D147) via `SheetBookingService.CreateTakingReleasedHoldsAsync` (same all-or-nothing guarantee and live per-sheet-locked conflict check as every other write path; released Group Event holds are trimmed, D148). Blocks outright with `PracticeIceSubmitResult.Invalid` if `FacilityConfiguration.PracticeIceMailConfigured` is false, rather than silently creating an unnotified hold. Also blocked if `hostEmail` already has `PracticeIceMaxPendingRequestsPerMember` pending requests (D138) - counted via `GetPendingAsync` by distinct `BookingGroupId`, not by sheet. On success, emails the approver group - a failed send doesn't undo the write or throw; it's reported via `NotificationSent` instead (D70). |
 | `GetPendingAsync` | `Task<List<PracticeIceRequestSummary>> GetPendingAsync()` | Every pending (`PracticeIce`+`Hold`) group, one row per `BookingGroupId`, ordered by upcoming start time (not submission age - `SheetBooking` has no created-at field). |
-| `ApproveAsync` | `Task<PracticeIceActionResult> ApproveAsync(Guid bookingGroupId, string actingUser)` | Confirms the group (`UpdateGroupAsync`) and emails the volunteer. `Success` reflects the confirm; `NotificationSent` is reported separately and independently (D70). |
+| `ApproveAsync` | `Task<PracticeIceActionResult> ApproveAsync(Guid bookingGroupId, string actingUser)` | Confirms the group (`UpdateGroupAsync`) and emails the volunteer, including their cancel link (D150). `Success` reflects the confirm; `NotificationSent` is reported separately and independently (D70). |
 | `DeclineAsync` | `Task<PracticeIceActionResult> DeclineAsync(Guid bookingGroupId, string reason, string actingUser)` | Requires a non-empty `reason` (thrown as `ArgumentException` otherwise - the UI is expected to validate first). Cancels the group (`CancelGroupAsync`, hard delete per D9) and emails the volunteer with the reason. |
+
+`SubmitAsync` also emails the host a "request received" receipt carrying their cancel link (D150);
+its failure is logged but doesn't affect `NotificationSent`, which reports the approver email.
+
+### `MemberBookingCancellationService`
+
+Members cancelling their own bookings (architecture doc §5.4.6, D150). Backs `/my-booking/cancel`.
+
+| Method | Signature | Behavior |
+|---|---|---|
+| `FindAsync` | `Task<MemberBookingLookup> FindAsync(Guid bookingGroupId, string signedInEmail)` | `NotFound` unless the group is a member-made booking (practice ice or League carrying a member email) inside the practice ice horizon; `NotYours` (no details) if the stored email doesn't match, case-insensitively; otherwise `Started` or `Cancellable`, with details (kind, times, sheets, pending). |
+| `CancelAsync` | `Task<MemberCancelResult> CancelAsync(Guid bookingGroupId, string signedInName, string signedInEmail)` | Re-runs `FindAsync`; only a `Cancellable` booking is cancelled (`CancelGroupAsync`, no reopen), logged as `MemberBookingCancelled`, and emailed to the calendar team and the member. Mail failures are reported via `StaffNotified`/`MemberNotified`, never thrown. |
+| `CancelLinkTextAsync` | `Task<string> CancelLinkTextAsync(Guid bookingGroupId, string actingUser)` | The "Need to cancel? Cancel this booking: …" line appended to member booking emails; empty (and logged as `CancelLinkOmitted`) when `Facility:PublicBaseUrl` isn't set. |
 
 ### `MakeUpGameService`
 

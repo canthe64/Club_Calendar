@@ -494,6 +494,7 @@ The minimum set for a working instance:
 | `AppLog__LogDirectory` | `%HOME%\LogFiles\facility-scheduler` (Windows) or `/home/LogFiles/facility-scheduler` (Linux) |
 | `PracticeIce__MailerMailbox` | the mailer address, if practice ice is enabled |
 | `PracticeIce__ApproverDistributionEmail` | mail-enabled group notified of new requests |
+| `Facility__PublicBaseUrl` | this site's public address, e.g. `https://calendar.yourclub.org` — builds members' cancel links |
 | `Webhook__BreelySharedSecret` | only if integrating Breely — see Step 15 |
 | `AllowedHosts` | this site's hostname(s), semicolon-separated — e.g. `<app>.azurewebsites.net` |
 
@@ -653,6 +654,9 @@ against the new hostname — that's the only one the domain change can break.
       free sheet beside it): book a slot from `/public/make-up-game`, confirm it appears on `/calendar`
       as a confirmed League booking, and that both the calendar team's list and the requester get the
       confirmation email. It uses the same mail settings as practice ice.
+- [ ] **Member self-cancel:** click "Cancel this booking" in that make-up game's confirmation email,
+      confirm the link points at this site (`Facility:PublicBaseUrl`), sign in as the member, cancel,
+      and confirm the booking leaves `/calendar` and both cancellation emails arrive.
 - [ ] **Logging:** take any booking action, open `/settings`, confirm the entry appears; confirm the
       log path is the one from Step 10, not `App_Data/logs`.
 - [ ] **Time zone:** confirm the calendar's "Today" is correct *in the facility's evening*, not just
@@ -738,6 +742,7 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID, e.g. `Pacific Standard Time` — resolves fine on Linux too, since .NET maps Windows zone IDs through ICU there; no IANA-form (`America/Los_Angeles`) equivalent needed | **Load-bearing** |
 | `Facility:Name` | `Facility__Name` | Display name — accepted but not yet wired to any UI | No |
 | `Facility:LogoPath` | `Facility__LogoPath` | Path under `wwwroot` — accepted but not yet wired to any UI | No |
+| `Facility:PublicBaseUrl` | `Facility__PublicBaseUrl` | This environment's public address (`https://…`, no trailing path), used to build the "cancel this booking" link in members' emails (D150). Set per environment, like `AllowedHosts`. Blank: emails go out without the link and the activity log says why; malformed: the app refuses to start | Recommended |
 | `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Staff group **object ID** (GUID). Not a secret. | **Load-bearing** |
 | `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox that sends notifications | Practice ice only |
 | `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Group notified of new requests | Practice ice only |

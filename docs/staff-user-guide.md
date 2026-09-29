@@ -469,3 +469,17 @@ A time is only offered when another sheet already has a confirmed booking for th
 highest-numbered free sheet, but members agree when booking that existing events keep priority for
 sheet choice and extra sheets. To change or remove a make-up game, edit or cancel it on the Calendar
 page like any other booking.
+
+---
+
+## 12. Members Cancelling Their Own Bookings
+
+Members can cancel their own make-up games and practice ice (pending or already approved) from the
+**Cancel this booking** link in their booking emails — no need to contact you. They have to sign in
+with the account they booked with, and it only works before the session starts; after that, the
+page tells them to contact the calendar team. When a member cancels, the booking disappears from the
+calendar (a pending request also leaves Practice Ice Approvals), and the calendar team's list gets a
+"… cancelled" email. The activity log records who cancelled.
+
+Bookings made before this feature existed have no link in their emails, so those members still
+contact you. You can always cancel any booking yourself from the Calendar page.
