@@ -60,6 +60,7 @@ builder.Services.AddMemoryCache();
 builder.Services.AddSingleton<FacilityScheduler.Services.PublicAvailabilityService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.PracticeIceRequestService>();
 builder.Services.AddSingleton<FacilityScheduler.Services.MakeUpGameService>();
+builder.Services.AddSingleton<FacilityScheduler.Services.MemberBookingCancellationService>();
 
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyBookingProcessor>();
 builder.Services.AddSingleton<FacilityScheduler.Services.BreelyWebhookOutstandingWork>();

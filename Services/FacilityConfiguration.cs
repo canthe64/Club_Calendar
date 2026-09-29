@@ -13,6 +13,9 @@ public class FacilityConfiguration
 {
     public string[] SheetMailboxes { get; }
     public string ClubEventsMailbox { get; }
+
+    /// <summary>Facility:PublicBaseUrl without a trailing slash, or null when not configured.</summary>
+    public string? PublicBaseUrl { get; }
     public string TimeZone { get; }
     public TimeZoneInfo ZoneInfo { get; }
     public string Name { get; }
@@ -77,6 +80,18 @@ public class FacilityConfiguration
         ZoneInfo = TimeZoneInfo.FindSystemTimeZoneById(o.TimeZone);
         Name = o.Name;
         LogoPath = o.LogoPath;
+
+        // Optional, but a malformed value would put broken links in members' emails - catch it at
+        // startup instead.
+        if (!string.IsNullOrWhiteSpace(o.PublicBaseUrl))
+        {
+            if (!Uri.TryCreate(o.PublicBaseUrl.Trim(), UriKind.Absolute, out var baseUri)
+                || (baseUri.Scheme != Uri.UriSchemeHttps && baseUri.Scheme != Uri.UriSchemeHttp))
+            {
+                throw new InvalidOperationException("Facility:PublicBaseUrl must be an absolute http(s) address, e.g. https://calendar.example.org.");
+            }
+            PublicBaseUrl = o.PublicBaseUrl.Trim().TrimEnd('/');
+        }
 
         var pi = practiceIceOptions.Value;
 

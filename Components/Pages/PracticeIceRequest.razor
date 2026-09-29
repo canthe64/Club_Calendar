@@ -1,6 +1,5 @@
 @page "/practice-ice/request"
 @attribute [Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]
-@using System.Security.Claims
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services
 @inject PublicAvailabilityService AvailabilityService
@@ -135,26 +134,10 @@
         }
     }
 
-    // Identity always comes from the signed-in token, never from anything typed into this form - a
-    // typed email could be anyone's (docs/practice-ice-hosting-design.md §3.3). Live-confirmed
-    // 2026-08-09: for this tenant's actual token shape, Identity.Name (Microsoft.Identity.Web's
-    // NameClaimType) resolves to the UPN, not a display name - so the explicit "name" claim (the
-    // real "First Last" value) must be checked FIRST, with Identity.Name only as a last-resort
-    // fallback, not the other way around as originally written here.
-    private async Task<(string Name, string Email)> GetHostIdentityAsync()
-    {
-        var authState = await AuthProvider.GetAuthenticationStateAsync();
-        var user = authState.User;
-
-        var name = user.FindFirst("name")?.Value ?? user.Identity?.Name ?? "Unknown";
-        var email = user.FindFirst("preferred_username")?.Value
-            ?? user.FindFirst(ClaimTypes.Email)?.Value
-            ?? user.FindFirst("email")?.Value
-            ?? user.Identity?.Name
-            ?? string.Empty;
-
-        return (name, email);
-    }
+    // From the signed-in token only, via the one rule booking and cancelling share
+    // (ClaimsPrincipalExtensions.MemberIdentity) - never from anything typed into this form.
+    private async Task<(string Name, string Email)> GetHostIdentityAsync() =>
+        (await AuthProvider.GetAuthenticationStateAsync()).User.MemberIdentity();
 
     private static string FormatDuration(int minutes) =>
         minutes % 60 == 0 ? $"{minutes / 60}h" : $"{minutes / 60}h {minutes % 60}m";

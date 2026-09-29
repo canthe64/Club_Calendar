@@ -19,15 +19,17 @@ public static class TestFacility
     public static readonly string ClubEventsMailbox = $"{ClubEventsLocalPart}@{TenantDomain}";
 
     public const string StaffGroupId = "staff-group-test-id";
+    public const string PublicBaseUrl = "https://calendar.test.example";
 
-    public static FacilityConfiguration Create(string[]? sheetLocalParts = null, string timeZoneId = TimeZoneId, PracticeIceOptions? practiceIce = null, StaffAccessOptions? staffAccess = null) =>
+    public static FacilityConfiguration Create(string[]? sheetLocalParts = null, string timeZoneId = TimeZoneId, PracticeIceOptions? practiceIce = null, StaffAccessOptions? staffAccess = null, string? publicBaseUrl = PublicBaseUrl) =>
         new(Options.Create(new FacilityOptions
         {
             TenantDomain = TenantDomain,
             SheetMailboxLocalParts = sheetLocalParts ?? SheetLocalParts,
             ClubEventsMailboxLocalPart = ClubEventsLocalPart,
             TimeZone = timeZoneId,
-            Name = "Test Facility"
+            Name = "Test Facility",
+            PublicBaseUrl = publicBaseUrl
         }), Options.Create(practiceIce ?? new PracticeIceOptions
         {
             // Filled in by default so most tests exercise the "mail configured" path; a test

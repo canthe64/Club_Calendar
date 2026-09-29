@@ -26,7 +26,8 @@ public class PracticeIceRequestServiceTests
         var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
         var availability = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
         var mail = new FakeGraphMailGateway();
-        var requestService = new PracticeIceRequestService(bookingService, availability, mail, facility, appLog);
+        var requestService = new PracticeIceRequestService(bookingService, availability, mail, facility, appLog,
+            new MemberBookingCancellationService(bookingService, mail, facility, appLog));
         return (requestService, bookingService, availability, facility, mail, window);
     }
 
@@ -215,10 +216,15 @@ public class PracticeIceRequestServiceTests
         });
         Assert.Single(bookings.Select(b => b.BookingGroupId).Distinct());
 
-        var sent = Assert.Single(mail.Sent);
+        Assert.Equal(2, mail.Sent.Count);
+        var sent = Assert.Single(mail.Sent, m => m.To == facility.PracticeIceApproverEmail);
         Assert.Equal(facility.PracticeIceMailerMailbox, sent.From);
-        Assert.Equal(facility.PracticeIceApproverEmail, sent.To);
         Assert.Equal(HostEmail, sent.ReplyTo);
+
+        // The host's own receipt carries the link to withdraw the request (2026-09-29).
+        var receipt = Assert.Single(mail.Sent, m => m.To == HostEmail);
+        Assert.Contains("waiting for approval", receipt.Body);
+        Assert.Contains($"{TestFacility.PublicBaseUrl}/my-booking/cancel?id={bookings[0].BookingGroupId}", receipt.Body);
     }
 
     [Fact]
@@ -367,6 +373,7 @@ public class PracticeIceRequestServiceTests
         var sent = Assert.Single(mail.Sent);
         Assert.Equal(HostEmail, sent.To);
         Assert.Contains("approved", sent.Subject, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains($"/my-booking/cancel?id={groupId}", sent.Body);
     }
 
     [Fact]
@@ -410,6 +417,7 @@ public class PracticeIceRequestServiceTests
         var sent = Assert.Single(mail.Sent);
         Assert.Equal(HostEmail, sent.To);
         Assert.Contains("Ice needed for maintenance", sent.Body);
+        Assert.DoesNotContain("/my-booking/cancel", sent.Body); // nothing left to cancel
     }
 
     // ---- Partial-club sessions and released group event holds (staff request 2026-09-28) --------
@@ -443,7 +451,7 @@ public class PracticeIceRequestServiceTests
         var practice = (await bookingService.GetBookingsForAllSheetsAsync(day, day.AddDays(1)))
             .Where(b => b.Category == BookingCategory.PracticeIce).ToList();
         Assert.Equal(sheets.Skip(2).OrderBy(s => s), practice.Select(b => b.SheetMailbox).OrderBy(s => s));
-        Assert.Contains("Sheets 3, 4 and 5", Assert.Single(mail.Sent).Body);
+        Assert.Contains("Sheets 3, 4 and 5", Assert.Single(mail.Sent, m => m.To == facility.PracticeIceApproverEmail).Body);
     }
 
     [Fact]

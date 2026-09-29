@@ -34,7 +34,8 @@ public class MakeUpGameTests
         var clubEvents = new ClubEventService(gateway, cache, facility, appLog, viewCache);
         var availability = new PublicAvailabilityService(bookings, clubEvents, cache, facility, viewCache, window);
         var mail = new FakeGraphMailGateway();
-        return new Harness(new MakeUpGameService(bookings, availability, mail, facility, appLog), availability, bookings, facility, mail);
+        var cancellation = new MemberBookingCancellationService(bookings, mail, facility, appLog);
+        return new Harness(new MakeUpGameService(bookings, availability, mail, facility, appLog, cancellation), availability, bookings, facility, mail);
     }
 
     private static async Task Book(SheetBookingService bookings, string sheet, DateTime start, DateTime end,

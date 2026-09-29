@@ -1,6 +1,5 @@
 @page "/make-up-game/request"
 @attribute [Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]
-@using System.Security.Claims
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services
 @inject PublicAvailabilityService AvailabilityService
@@ -122,19 +121,8 @@
         }
     }
 
-    // Identity comes from the signed-in token only - same claim order as PracticeIceRequest.razor
-    // (the explicit "name" claim first; Identity.Name is the UPN for this tenant, D71).
-    private async Task<(string Name, string Email)> GetRequesterIdentityAsync()
-    {
-        var user = (await AuthProvider.GetAuthenticationStateAsync()).User;
-
-        var name = user.FindFirst("name")?.Value ?? user.Identity?.Name ?? "Unknown";
-        var email = user.FindFirst("preferred_username")?.Value
-            ?? user.FindFirst(ClaimTypes.Email)?.Value
-            ?? user.FindFirst("email")?.Value
-            ?? user.Identity?.Name
-            ?? string.Empty;
-
-        return (name, email);
-    }
+    // From the signed-in token only, via the one rule booking and cancelling share
+    // (ClaimsPrincipalExtensions.MemberIdentity).
+    private async Task<(string Name, string Email)> GetRequesterIdentityAsync() =>
+        (await AuthProvider.GetAuthenticationStateAsync()).User.MemberIdentity();
 }

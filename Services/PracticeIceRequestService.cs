@@ -17,7 +17,8 @@ public class PracticeIceRequestService(
     PublicAvailabilityService availability,
     IGraphMailGateway mail,
     FacilityConfiguration facility,
-    AppLogService log)
+    AppLogService log,
+    MemberBookingCancellationService cancellation)
 {
     // Serializes approve/decline per booking group - the same read-then-act race the Breely path
     // closes with its own per-external-id lock. Without it, two approvers acting on the same request
@@ -116,6 +117,16 @@ public class PracticeIceRequestService(
             "\n\nReview at /practice-ice/approvals.",
             "PracticeIceRequestNotificationFailed", hostName, ct);
 
+        // The host's own receipt, carrying the link to withdraw the request (2026-09-29). Its
+        // outcome is logged on failure but doesn't change NotificationSent, which is about whether
+        // the approvers - the people who must act - were told.
+        var cancelLink = await cancellation.CancelLinkTextAsync(result.Bookings[0].BookingGroupId, hostName, ct);
+        await TrySendMailAsync(facility.PracticeIceMailerMailbox, hostEmail, facility.PracticeIceApproverEmail,
+            "Your practice ice request was received",
+            $"Your request to host practice ice on {template.Start:dddd, MMM d} from {template.Start:h:mmtt} to {template.End:h:mmtt}, on {CalendarStyles.SheetListLabel(sheets)}, " +
+            $"was received and is waiting for approval by the calendar team. You'll get another email once it's reviewed.{cancelLink}",
+            "PracticeIceReceiptNotificationFailed", hostName, ct);
+
         return PracticeIceSubmitResult.Success(notified);
     }
 
@@ -177,10 +188,11 @@ public class PracticeIceRequestService(
         // approval failed. Whether it went out IS surfaced back to the caller, though - discarding
         // it here left the previous bug (live-found 2026-08-09): staff had no way to know a decline
         // or approval notification silently didn't reach the volunteer.
+        var cancelLink = await cancellation.CancelLinkTextAsync(bookingGroupId, actingUser, ct);
         var notified = facility.PracticeIceMailConfigured && !string.IsNullOrWhiteSpace(first.RenterEmail)
             && await TrySendMailAsync(facility.PracticeIceMailerMailbox, first.RenterEmail, facility.PracticeIceApproverEmail,
                 "Your practice ice request was approved",
-                $"Your request to host practice ice on {first.Start:dddd, MMM d} from {first.Start:h:mmtt} to {first.End:h:mmtt} has been approved. See you on the ice!",
+                $"Your request to host practice ice on {first.Start:dddd, MMM d} from {first.Start:h:mmtt} to {first.End:h:mmtt} has been approved. See you on the ice!{cancelLink}",
                 "PracticeIceApprovalNotificationFailed", actingUser, ct);
 
         return PracticeIceActionResult.Done(notified);

@@ -1,0 +1,8 @@
+@* A plain red-bordered notice box, as the member-facing request pages use for "no longer available". *@
+<div style="padding:12px 16px;border:1px solid #e8b4ae;background:#fdf3f1;border-radius:8px;color:#a02c21;font-size:13px">
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+}

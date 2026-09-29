@@ -16,7 +16,8 @@ public class MakeUpGameService(
     PublicAvailabilityService availability,
     IGraphMailGateway mail,
     FacilityConfiguration facility,
-    AppLogService log)
+    AppLogService log,
+    MemberBookingCancellationService cancellation)
 {
     public async Task<MakeUpGameSubmitResult> SubmitAsync(DateTime start, string requesterName, string requesterEmail, bool acknowledged, CancellationToken ct = default)
     {
@@ -71,9 +72,10 @@ public class MakeUpGameService(
             "Make-up game booked",
             $"{requesterName} ({requesterEmail}) booked a make-up game on {when}. It's on the calendar as confirmed - no approval needed.",
             "MakeUpGameStaffNotificationFailed", requesterName, ct);
+        var cancelLink = await cancellation.CancelLinkTextAsync(result.Bookings[0].BookingGroupId, requesterName, ct);
         var requesterNotified = await TrySendMailAsync(requesterEmail, facility.PracticeIceApproverEmail,
             "Your make-up game is booked",
-            $"Your make-up game is booked for {when}. Reply to this email if you need to change or cancel it.",
+            $"Your make-up game is booked for {when}. Reply to this email if you need to change it.{cancelLink}",
             "MakeUpGameRequesterNotificationFailed", requesterName, ct);
 
         return MakeUpGameSubmitResult.Success(option, staffNotified, requesterNotified);

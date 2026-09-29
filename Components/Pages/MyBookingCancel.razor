@@ -1,0 +1,104 @@
+@page "/my-booking/cancel"
+@attribute [Authorize(Policy = StaffAuthorizationPolicies.AnyAuthenticatedUser)]
+@using FacilityScheduler.Domain
+@using FacilityScheduler.Services
+@inject MemberBookingCancellationService Cancellation
+@inject AuthenticationStateProvider AuthProvider
+
+@* The page behind the "cancel this booking" link in members' emails - open to any signed-in
+   member (the third carve-out from the Staff-only fallback policy), but it only ever acts on the
+   signed-in account's own practice ice or make-up game. Opening it never cancels anything: mail
+   scanners open every link in a message, so cancelling waits for the button. *@
+
+<PageTitle>Cancel Booking</PageTitle>
+
+<div style="padding:16px 24px;max-width:640px">
+    <h1 style="font-size:16px">Cancel Booking</h1>
+
+    @if (_result is { IsCancelled: true, Cancelled: { } cancelled })
+    {
+        <div style="padding:12px 16px;border:1px solid #b8ddc0;background:#f0fbf3;border-radius:8px;color:#2d7a3f;font-size:13px">
+            Your @cancelled.Description on @cancelled.Start.ToString("dddd, MMM d"), @cancelled.Start.ToString("h:mmtt")-@cancelled.End.ToString("h:mmtt")
+            is cancelled and has been removed from the calendar.
+            @if (_result.StaffNotified && _result.MemberNotified)
+            {
+                <text>A confirmation email is on its way to you and the calendar team.</text>
+            }
+            else
+            {
+                <text>The confirmation email couldn't be sent - please let the calendar team know directly.</text>
+            }
+        </div>
+    }
+    else if (_lookup is null)
+    {
+        <Notice>This link isn't valid. Please use the link from your booking email.</Notice>
+    }
+    else if (_lookup.Status == MemberBookingStatus.NotFound)
+    {
+        <Notice>This booking is no longer on the calendar - it may already have been cancelled.</Notice>
+    }
+    else if (_lookup.Status == MemberBookingStatus.NotYours)
+    {
+        <Notice>This booking was made by a different account. Sign in with the account you booked with, or contact the calendar team.</Notice>
+    }
+    else if (_lookup.Details is { } booking)
+    {
+        <div style="border:1px solid #e7ecef;border-radius:8px;padding:12px 16px;margin-bottom:14px;font-size:13px">
+            <div><strong>@char.ToUpperInvariant(booking.Description[0])@booking.Description[1..]</strong></div>
+            <div>@booking.Start.ToString("dddd, MMMM d")</div>
+            <div>@booking.Start.ToString("h:mmtt") - @booking.End.ToString("h:mmtt")</div>
+            <div>@CalendarStyles.SheetListLabel(booking.SheetMailboxes)</div>
+        </div>
+
+        @if (_lookup.Status == MemberBookingStatus.Started)
+        {
+            <Notice>This session has already started, so it can't be cancelled here. Please contact the calendar team.</Notice>
+        }
+        else
+        {
+            <button class="btn btn-primary" @onclick="CancelAsync" disabled="@_cancelling">Cancel this booking</button>
+        }
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery]
+    public string? Id { get; set; }
+
+    private Guid _id;
+    private MemberBookingLookup? _lookup;
+    private MemberCancelResult? _result;
+    private bool _cancelling;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Guid.TryParse(Id, out _id))
+        {
+            return;
+        }
+
+        var (_, email) = (await AuthProvider.GetAuthenticationStateAsync()).User.MemberIdentity();
+        _lookup = await Cancellation.FindAsync(_id, email);
+    }
+
+    private async Task CancelAsync()
+    {
+        _cancelling = true;
+        try
+        {
+            var (name, email) = (await AuthProvider.GetAuthenticationStateAsync()).User.MemberIdentity();
+            _result = await Cancellation.CancelAsync(_id, name, email);
+            if (!_result.IsCancelled)
+            {
+                // Something changed since the page loaded (cancelled elsewhere, started, moved to
+                // another account) - show the current state rather than a stale button.
+                _lookup = await Cancellation.FindAsync(_id, email);
+            }
+        }
+        finally
+        {
+            _cancelling = false;
+        }
+    }
+}
