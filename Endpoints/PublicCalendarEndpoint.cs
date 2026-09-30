@@ -326,7 +326,7 @@ public static class PublicCalendarEndpoint
                    so the hourly grid only side-scrolls on screens too narrow for a week's columns;
                    there the navigator and filters still freeze, the date row doesn't. */
                 .pub-cal-hgrid { border:1px solid #e7ecef; border-radius:8px; padding:10px; background:#fff; }
-                @media (max-width: 800px) { .pub-cal-hgrid { overflow-x:auto; } }
+                @media (max-width: 800px) { .pub-cal-hgrid { overflow-x:auto; } .pub-cal-hgrid .pub-cal-colhead { position:static; } }
             </style>
             </head>
             <body style="font-family:-apple-system,'Segoe UI',Roboto,sans-serif;margin:0;color:#1e2a33">
@@ -414,7 +414,14 @@ public static class PublicCalendarEndpoint
     // form already uses. Hidden fields carry the current view/date so applying a filter doesn't also
     // reset which page you're looking at. anchorHiddenField gives Month vs. Week/Day their own
     // param name (month= vs date=), matching MonthHref/WeekHref/DayHref's own scheme.
-    private static string AppendCategoryFilterForm(ViewMode mode, DateTime anchor, FilterState filter)
+    //
+    // Collapsible (2026-09-30, for phones): a native <details>, so it opens and closes with no script
+    // at all. FiltersStartStateScript only picks the starting state - open on a wide screen, closed on
+    // a phone, or whatever the visitor last chose this session. The summary says when some categories
+    // are hidden, so a collapsed filter can't silently explain an emptier-looking calendar.
+    //
+    // internal, not private - reached directly by PublicCalendarFilterCollapseTests (D60's precedent).
+    internal static string AppendCategoryFilterForm(ViewMode mode, DateTime anchor, FilterState filter)
     {
         var anchorField = mode == ViewMode.Month
             ? $"""<input type="hidden" name="month" value="{anchor:yyyy-MM}">"""
@@ -448,8 +455,16 @@ public static class PublicCalendarEndpoint
         // Two labeled rows rather than one flat run of twelve checkboxes: both families contain
         // "Other", and on-ice Bonspiel vs off-ice Out of Town Bonspiels is the pair D81 renamed
         // because staff conflated them. Matches the staff calendar's own grouped SHOW rows.
+        var shown = filter.Categories.Count + filter.ClubCategories.Count;
+        var total = AllCategories.Count + AllClubCategories.Count;
+        var filteredNote = shown < total
+            ? $"""<span style="font-weight:400;color:#90a0ab"> · {shown} of {total} categories shown</span>"""
+            : "";
+
         return $"""
-            <form method="get" style="display:flex;flex-direction:column;gap:7px;margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:13px">
+            <details class="pub-cal-filters" open style="margin-bottom:12px;padding:8px 10px;background:#f6f8f9;border:1px solid #e7ecef;border-radius:8px;font-size:13px">
+            <summary style="cursor:pointer;font-weight:600;color:#2d5f8a;font-size:13px">Filters{filteredNote}</summary>
+            <form method="get" style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
                 <input type="hidden" name="filtered" value="1">
                 <input type="hidden" name="clubFiltered" value="1">
                 {viewField}
@@ -464,8 +479,31 @@ public static class PublicCalendarEndpoint
                     <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
                 </div>
             </form>
-            """;
+            </details>
+            """ + FiltersStartStateScript;
     }
+
+    // Runs immediately after the <details> it controls, before the grid below renders, so a phone
+    // never shows the filters open and then snaps them shut. The breakpoint matches the hourly
+    // grid's own narrow-screen rule (.pub-cal-hgrid). Storage can be unavailable (private mode,
+    // blocked site data) - the page then just uses the width default.
+    private const string FiltersStartStateScript = """
+        <script>
+            (function () {
+                var filters = document.currentScript.previousElementSibling;
+                var saved = null;
+                try { saved = sessionStorage.getItem('pubCalFiltersOpen'); } catch (e) { }
+                filters.open = saved !== null ? saved === '1' : window.matchMedia('(min-width: 801px)').matches;
+                // Only a visitor's own click is remembered - setting the default above fires the
+                // same 'toggle' event, which would otherwise save the width default as a choice.
+                filters.querySelector('summary').addEventListener('click', function () {
+                    setTimeout(function () {
+                        try { sessionStorage.setItem('pubCalFiltersOpen', filters.open ? '1' : '0'); } catch (e) { }
+                    }, 0);
+                });
+            })();
+        </script>
+        """;
 
     private static void AppendLegend(StringBuilder sb)
     {
