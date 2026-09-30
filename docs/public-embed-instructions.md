@@ -69,7 +69,7 @@ renter name is not stripped out programmatically - keeping that private is handl
 switching views reloads the page (there's no client-side app here) - a brief "Loading…" overlay
 appears immediately so that reload isn't silent.
 
-The header's "Host practice ice", "Schedule Make-Up Game", and "Find available times for a group event" links open in the top-level page/tab
+The header's "Host practice ice" and "Schedule Make-Up Game" links open in the top-level page/tab
 (`target="_top"`), not inside your iframe - so clicking any of them navigates the whole browser tab
 away from your page, the same as any other outbound link would. This is deliberate: every destination
 send `X-Frame-Options: DENY` (this app's own security headers, applied to every route except this one),

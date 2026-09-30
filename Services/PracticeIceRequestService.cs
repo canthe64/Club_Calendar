@@ -114,7 +114,7 @@ public class PracticeIceRequestService(
             "Practice ice hosting request",
             $"{hostName} ({hostEmail}) has requested to host practice ice on {template.Start:dddd, MMM d} from {template.Start:h:mmtt} to {template.End:h:mmtt}, on {CalendarStyles.SheetListLabel(sheets)}." +
             (string.IsNullOrWhiteSpace(notes) ? "" : $"\n\nNotes: {notes}") +
-            "\n\nReview at /practice-ice/approvals.",
+            $"\n\nReview at {facility.PublicBaseUrl}/practice-ice/approvals",
             "PracticeIceRequestNotificationFailed", hostName, ct);
 
         // The host's own receipt, carrying the link to withdraw the request (2026-09-29). Its

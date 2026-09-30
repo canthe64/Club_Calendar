@@ -26,17 +26,6 @@ public class PublicCalendarHeaderLinksTests
     }
 
     [Fact]
-    public void SearchLink_CarriesTargetTop_SoItEscapesAnEmbeddingIframe()
-    {
-        var sb = new StringBuilder();
-
-        PublicCalendarEndpoint.AppendPageOpen(sb);
-
-        var markup = sb.ToString();
-        Assert.Contains("""<a href="/public/search" target="_top" """, markup);
-    }
-
-    [Fact]
     public void MakeUpGameLink_IsPresent_AndCarriesTargetTop()
     {
         var sb = new StringBuilder();
@@ -49,15 +38,14 @@ public class PublicCalendarHeaderLinksTests
     }
 
     [Fact]
-    public void SearchLink_ReadsAsAGroupEventAvailabilityLink_NotGenericIceSearch()
+    public void GroupEventSearchLink_IsNotInTheHeader()
     {
-        // Renamed 2026-09-03 (operator request): "Search available ice" read as if it searched every
-        // booking, when it only ever finds open Group Event slots (§5.4.3) - the new label says what
-        // it actually does.
+        // Removed 2026-09-30 (operator request): group events are booked through Breely for now.
+        // /public/search itself still exists; it just isn't linked from the calendar.
         var sb = new StringBuilder();
 
         PublicCalendarEndpoint.AppendPageOpen(sb);
 
-        Assert.Contains("Find available times for a group event", sb.ToString());
+        Assert.DoesNotContain("/public/search", sb.ToString());
     }
 }

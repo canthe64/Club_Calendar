@@ -220,6 +220,7 @@ public class PracticeIceRequestServiceTests
         var sent = Assert.Single(mail.Sent, m => m.To == facility.PracticeIceApproverEmail);
         Assert.Equal(facility.PracticeIceMailerMailbox, sent.From);
         Assert.Equal(HostEmail, sent.ReplyTo);
+        Assert.Contains($"Review at {TestFacility.PublicBaseUrl}/practice-ice/approvals", sent.Body);
 
         // The host's own receipt carries the link to withdraw the request (2026-09-29).
         var receipt = Assert.Single(mail.Sent, m => m.To == HostEmail);

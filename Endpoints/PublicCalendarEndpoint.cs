@@ -334,7 +334,6 @@ public static class PublicCalendarEndpoint
                 <span>GCC Ice &amp; Event Calendar</span>
                 <a href="/public/practice-ice" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none;margin-left:auto">Host practice ice</a>
                 <a href="/public/make-up-game" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none">Schedule Make-Up Game</a>
-                <a href="/public/search" target="_top" style="color:#a9c7e4;font-size:12px;font-weight:600;text-decoration:none">Find available times for a group event &#8250;</a>
             </header>
             <div style="padding:16px 24px;max-width:1150px">
             """);
