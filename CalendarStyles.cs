@@ -343,10 +343,18 @@ public static class CalendarStyles
     /// </summary>
     public static int AnchorLabelMinWidthPx(string view) => view.ToLowerInvariant() switch
     {
-        "day" => 260,
+        "day" => 320, // room for the "Today" badge, so the controls beside it don't shift on today
         "week" => 182,
         _ => 132,
     };
+
+    // Today's highlight (member request 2026-10-07), shared by the staff and public calendars so
+    // both mark today identically: a tinted Month cell with the date in a filled circle, a tinted
+    // Week column heading, and a "Today" badge beside the Day view's date.
+    public const string TodayAccent = "#2d5f8a";
+    public const string TodayBg = "#eaf3fb";
+    public const string TodayDayNumberStyle = "display:inline-block;min-width:20px;height:20px;line-height:20px;border-radius:10px;background:#2d5f8a;color:#fff;text-align:center;padding:0 4px;box-sizing:border-box";
+    public const string TodayBadgeStyle = "display:inline-block;background:#2d5f8a;color:#fff;font-size:11px;font-weight:700;padding:1px 8px;border-radius:9px;margin-left:8px;vertical-align:2px";
 
     public static string FormatHour(int hour) => new DateTime(1, 1, 1, hour, 0, 0).ToString("h tt");
 

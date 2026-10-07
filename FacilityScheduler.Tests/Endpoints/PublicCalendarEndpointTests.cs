@@ -248,9 +248,10 @@ public class PublicCalendarEndpointTests
         var filter = PublicCalendarEndpoint.ParseFilter("1", categories: null, showClubEvents: "1",
             clubFiltered: "1", clubCategories: [.. PublicCalendarEndpoint.AllClubCategories.Select(c => c.ToString())]);
 
-        // clubFiltered is what distinguishes "submitted with every off-ice box unchecked" from "a URL
-        // that predates off-ice category filtering", so it is emitted even when nothing is excluded.
-        Assert.Equal("&filtered=1&showClubEvents=1&clubFiltered=1", PublicCalendarEndpoint.FilterQuery(filter));
+        // Every off-ice category selected is written as showClubEvents=1 alone. clubFiltered=1 with
+        // no list parses as "none", so writing it here dropped every off-ice event from the next
+        // page (found 2026-10-07).
+        Assert.Equal("&filtered=1&showClubEvents=1", PublicCalendarEndpoint.FilterQuery(filter));
     }
 
     [Fact]
@@ -293,6 +294,11 @@ public class PublicCalendarEndpointTests
             ("1", ["League"], null, "1", null),
             ("1", null, "1", "1", ["Meetings"]),
             ("1", ["League", "Bonspiel"], "1", "1", ["Meetings", "Closure"]),
+            // Every off-ice category selected through the form - the case that used to come back empty.
+            ("1", ["League"], "1", "1", [.. PublicCalendarEndpoint.AllClubCategories.Select(c => c.ToString())]),
+            ("1", null, "1", "1", [.. PublicCalendarEndpoint.AllClubCategories.Select(c => c.ToString())]),
+            // No on-ice categories (the None link).
+            ("1", ["none"], "1", "1", ["Meetings"]),
         ];
 
         foreach (var (filtered, cats, show, clubFiltered, clubCats) in cases)

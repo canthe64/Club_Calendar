@@ -19,7 +19,10 @@
            click landed somewhere else. Sized per view (CalendarStyles.AnchorLabelMinWidthPx) rather
            than to one global maximum, which left a dead gap in Month view. A floor rather than a
            fixed width, so an unexpectedly long string still renders in full instead of clipping. *@
-        <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:@(CalendarStyles.AnchorLabelMinWidthPx(View.ToString()))px;display:inline-block">@AnchorLabel</span>
+        <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:@(CalendarStyles.AnchorLabelMinWidthPx(View.ToString()))px;display:inline-block">@AnchorLabel@if (View == ViewMode.Day && _anchorDate.Date == Facility.Today)
+        {
+            <span class="cal-today" style="@CalendarStyles.TodayBadgeStyle">Today</span>
+        }</span>
         <span style="display:flex;align-items:center;gap:8px;font-size:14px;color:#1e2a33">
             <span @onclick="GoPrevious" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 5px">&#8249;</span>
             <span @onclick="GoToday" style="cursor:pointer;color:#2d5f8a;font-weight:600;padding:0 5px">Today</span>
@@ -106,11 +109,11 @@
     }
     else if (View == ViewMode.Month)
     {
-        <MonthGrid Bookings="FilteredBookings" ClubEvents="VisibleClubEvents" AnchorMonth="_anchorDate" OnBookingClick="OpenDetail" OnClubEventClick="OpenClubEventDetail" OnDayClick="JumpToDay" />
+        <MonthGrid Today="Facility.Today" Bookings="FilteredBookings" ClubEvents="VisibleClubEvents" AnchorMonth="_anchorDate" OnBookingClick="OpenDetail" OnClubEventClick="OpenClubEventDetail" OnDayClick="JumpToDay" />
     }
     else if (View == ViewMode.Week)
     {
-        <WeekGrid Bookings="FilteredBookings" ClubEvents="VisibleClubEvents" WeekStart="WeekStart" OnBookingClick="OpenDetail" OnClubEventClick="OpenClubEventDetail" OnDayClick="JumpToDay" OnSlotClick="OpenWeekSlotForm" />
+        <WeekGrid Today="Facility.Today" Bookings="FilteredBookings" ClubEvents="VisibleClubEvents" WeekStart="WeekStart" OnBookingClick="OpenDetail" OnClubEventClick="OpenClubEventDetail" OnDayClick="JumpToDay" OnSlotClick="OpenWeekSlotForm" />
     }
     else
     {

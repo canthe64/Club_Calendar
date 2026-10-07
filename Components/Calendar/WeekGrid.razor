@@ -18,10 +18,12 @@
         {
             var dayAllDayEvents = AllDayEventsForDay(day);
             var laidOutItems = CalendarStyles.LayoutLanes(TimedItemsForDay(day), i => i.Start, i => i.End);
+            var isToday = day.Date == Today.Date;
             <div style="flex:1;min-width:0">
-                <div @onclick="() => OnDayClick.InvokeAsync(day)" style="box-sizing:border-box;height:@(HeaderRowHeightPx)px;text-align:center;cursor:pointer;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
-                    <div style="font-weight:600;color:#1e2a33;font-size:12.5px">@day.ToString("ddd")</div>
-                    <div style="color:#90a0ab;font-size:12.5px">@day.ToString("MMM d")</div>
+                <div @onclick="() => OnDayClick.InvokeAsync(day)" class="@(isToday ? "cal-today" : null)"
+                     style="box-sizing:border-box;height:@(HeaderRowHeightPx)px;text-align:center;cursor:pointer;padding-bottom:3px;border-bottom:@(isToday ? $"2px solid {CalendarStyles.TodayAccent}" : "1px solid #f2f5f7");background:@(isToday ? CalendarStyles.TodayBg : "transparent");border-radius:6px 6px 0 0">
+                    <div style="font-weight:@(isToday ? 700 : 600);color:@(isToday ? CalendarStyles.TodayAccent : "#1e2a33");font-size:12.5px">@day.ToString("ddd")</div>
+                    <div style="color:@(isToday ? CalendarStyles.TodayAccent : "#90a0ab");font-weight:@(isToday ? 600 : 400);font-size:12.5px">@day.ToString("MMM d")</div>
                 </div>
                 @if (WeekAllDayRowHeightPx > 0)
                 {
@@ -84,6 +86,9 @@
     [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
     [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
+
+    /// <summary>Facility-local today, highlighted. Unset (default) highlights nothing.</summary>
+    [Parameter] public DateTime Today { get; set; }
     [Parameter] public EventCallback<DateTime> OnSlotClick { get; set; }
 
     private const double AllDayChipHeightPx = 18;

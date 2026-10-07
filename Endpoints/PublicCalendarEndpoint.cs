@@ -129,10 +129,10 @@ public static class PublicCalendarEndpoint
     // "true"/"1" strings, since an unchecked checkbox is simply absent from a GET submission and
     // there's no other way to distinguish "unchecked" from "form never submitted".
     //
-    // No recognized category present (whether none were ever listed, or every box was unchecked)
-    // falls back to "all categories" rather than "none" - showing a blank calendar because every
-    // box happened to be unchecked isn't a real use case worth supporting, and defaulting back to
-    // "all" is a friendlier failure mode than an empty grid. showClubEvents doesn't get the same
+    // No on-ice category listed means "all" - that's how a link with the full set selected is
+    // written (FilterParams omits the list). "None" is the explicit categories=none marker, sent by
+    // the row's None link and by the form whenever every on-ice box is unchecked (2026-10-07; before
+    // the None link existed, unchecking everything fell back to all). showClubEvents doesn't get the same
     // fallback: unlike the multi-select category chips, it's a single on/off toggle where "off" is
     // the entire point of unchecking it, so its absence has to reliably mean off once filtered=1 is
     // present.
@@ -163,8 +163,15 @@ public static class PublicCalendarEndpoint
             club = ParseClubCategories(clubCategories);
         }
 
-        return new FilterState(true, selected.Count == 0 ? AllCategories : selected, club);
+        // The explicit "none" marker (the row's None link, or every on-ice box unchecked - the form
+        // always submits it alongside whatever is checked) means no on-ice categories. Without it,
+        // an empty list still means all: that's how a link with the full set selected is written.
+        var explicitlyNone = categories?.Any(c => string.Equals(c, NoCategories, StringComparison.OrdinalIgnoreCase)) == true;
+        return new FilterState(true, selected.Count == 0 && !explicitlyNone ? AllCategories : selected, club);
     }
+
+    /// <summary>The on-ice filter value meaning "none selected" (2026-10-07, for the None link).</summary>
+    internal const string NoCategories = "none";
 
     internal static HashSet<ClubEventCategory> ParseClubCategories(string[]? categories)
     {
@@ -222,7 +229,11 @@ public static class PublicCalendarEndpoint
 
         yield return ("filtered", "1");
 
-        if (!filter.Categories.SetEquals(AllCategories))
+        if (filter.Categories.Count == 0)
+        {
+            yield return ("categories", NoCategories);
+        }
+        else if (!filter.Categories.SetEquals(AllCategories))
         {
             foreach (var category in filter.Categories)
             {
@@ -237,10 +248,14 @@ public static class PublicCalendarEndpoint
             yield return ("showClubEvents", "1");
         }
 
-        yield return ("clubFiltered", "1");
-
+        // Every off-ice category selected is written as showClubEvents=1 alone, which ParseFilter
+        // reads back as all. clubFiltered=1 means "the list that follows is the selection", so it's
+        // only written with a partial (or empty) list - written with no list, it parsed back as
+        // "none", so Prev/Next/view links (and subscribe links) quietly dropped every off-ice event
+        // once any filter had been applied with all off-ice boxes checked (found 2026-10-07).
         if (!filter.ClubCategories.SetEquals(AllClubCategories))
         {
+            yield return ("clubFiltered", "1");
             foreach (var category in filter.ClubCategories)
             {
                 yield return ("clubCategories", category.ToString());
@@ -254,6 +269,13 @@ public static class PublicCalendarEndpoint
     {
         Bookings = [.. view.Bookings.Where(b => filter.Categories.Contains(ParseCategory(b.CategoryLabel)))],
         ClubEvents = [.. view.ClubEvents.Where(ce => filter.ClubCategories.Contains(ce.Category))]
+    };
+
+    private static string ViewHref(ViewMode mode, DateTime anchor, FilterState filter) => mode switch
+    {
+        ViewMode.Week => WeekHref(anchor, FilterQuery(filter)),
+        ViewMode.Day => DayHref(anchor, FilterQuery(filter)),
+        _ => MonthHref(anchor, FilterQuery(filter)),
     };
 
     private static string MonthHref(DateTime month, string filterQuery) => $"/public/calendar?view=month&month={month:yyyy-MM}{filterQuery}";
@@ -360,8 +382,9 @@ public static class PublicCalendarEndpoint
     // a Month/Week/Day toggle. representativeDate is the anchor used to translate the CURRENT view
     // into each toggle target's own query-param scheme, so switching views doesn't lose context
     // (e.g. switching from Month to Week lands on the week containing the displayed month's 1st).
-    private static string NavBar(string titleText, string prevHref, string todayHref, string nextHref, ViewMode current, DateTime representativeDate, FilterState filter)
+    private static string NavBar(string titleText, string prevHref, string todayHref, string nextHref, ViewMode current, DateTime representativeDate, FilterState filter, bool showTodayBadge = false)
     {
+        var todayBadge = showTodayBadge ? $"""<span class="pub-cal-today" style="{CalendarStyles.TodayBadgeStyle}">Today</span>""" : "";
         var filterQuery = FilterQuery(filter);
 
         string Tab(string label, ViewMode mode, string href)
@@ -374,7 +397,7 @@ public static class PublicCalendarEndpoint
 
         return $"""
             <div style="display:flex;align-items:center;gap:14px;margin-bottom:6px;flex-wrap:wrap">
-                <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:{CalendarStyles.AnchorLabelMinWidthPx(current.ToString())}px;display:inline-block">{H(titleText)}</span>
+                <span style="font-size:16px;font-weight:600;color:#1e2a33;min-width:{CalendarStyles.AnchorLabelMinWidthPx(current.ToString())}px;display:inline-block">{H(titleText)}{todayBadge}</span>
                 <span style="display:flex;align-items:center;gap:8px;font-size:12px">
                     <a href="{prevHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">&#8249;</a>
                     <a href="{todayHref}" class="pub-cal-nav-link" style="color:#2d5f8a;font-weight:600;padding:0 4px;text-decoration:none">Today</a>
@@ -461,6 +484,16 @@ public static class PublicCalendarEndpoint
         // Two labeled rows rather than one flat run of twelve checkboxes: both families contain
         // "Other", and on-ice Bonspiel vs off-ice Out of Town Bonspiels is the pair D81 renamed
         // because staff conflated them. Matches the staff calendar's own grouped SHOW rows.
+        // All/None per row, like the staff calendar's: "None" while anything in the row is showing,
+        // "All" once nothing is. A plain link to this same view with that row switched (D66 - no
+        // script), applied immediately; the other row keeps its current selection.
+        string RowToggle(bool anyShowing, FilterState target) =>
+            $"""<a href="{H(ViewHref(mode, anchor, target))}" class="pub-cal-nav-link" style="color:#2d5f8a;font-size:12px;font-weight:600;text-decoration:underline;white-space:nowrap">{(anyShowing ? "None" : "All")}</a>""";
+        var onIceToggle = RowToggle(filter.Categories.Count > 0,
+            filter with { IsFiltered = true, Categories = filter.Categories.Count > 0 ? [] : [.. AllCategories] });
+        var offIceToggle = RowToggle(filter.ClubCategories.Count > 0,
+            filter with { IsFiltered = true, ClubCategories = filter.ClubCategories.Count > 0 ? [] : [.. AllClubCategories] });
+
         var shown = filter.Categories.Count + filter.ClubCategories.Count;
         var total = AllCategories.Count + AllClubCategories.Count;
         var filteredNote = shown < total
@@ -473,14 +506,17 @@ public static class PublicCalendarEndpoint
             <form method="get" style="display:flex;flex-direction:column;gap:7px;margin-top:8px">
                 <input type="hidden" name="filtered" value="1">
                 <input type="hidden" name="clubFiltered" value="1">
+                <input type="hidden" name="categories" value="{NoCategories}">
                 {viewField}
                 {anchorField}
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:68px;flex-shrink:0;white-space:nowrap">ON ICE</span>
+                    {onIceToggle}
                     {string.Join("", onIceLabels)}
                 </div>
                 <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
                     <span style="font-weight:600;color:#90a0ab;font-size:12px;letter-spacing:.05em;width:68px;flex-shrink:0;white-space:nowrap">OFF ICE</span>
+                    {offIceToggle}
                     {string.Join("", offIceLabels)}
                     <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
                 </div>
@@ -506,7 +542,7 @@ public static class PublicCalendarEndpoint
             <details class="pub-cal-subscribe" style="margin-top:8px;border-top:1px solid #e7ecef;padding-top:8px">
                 <summary style="cursor:pointer;font-weight:600;color:#2d5f8a">Subscribe to this calendar</summary>
                 <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
-                    <div style="color:#5a7183">Adds this calendar, with the categories applied above, to your own calendar app.</div>
+                    <div style="color:#5a7183">You can subscribe to this calendar feed <strong>with the categories selected above</strong> to your own calendar app.</div>
                     <div style="display:flex;gap:8px;flex-wrap:wrap">
                         <a href="{H(googleUrl)}" target="_blank" rel="noopener" style="{button}">Add to Google Calendar</a>
                         <a href="{H(webcalUrl)}" target="_top" style="{button}">Open in Outlook / Apple Calendar</a>
@@ -595,7 +631,7 @@ public static class PublicCalendarEndpoint
 
         foreach (var cell in MonthCells(anchorMonth))
         {
-            AppendDayCell(sb, cell, anchorMonth, view);
+            AppendDayCell(sb, cell, anchorMonth, view, today);
         }
 
         sb.Append("</div>");
@@ -607,9 +643,10 @@ public static class PublicCalendarEndpoint
     // internal, not private - reached directly by PublicCalendarNotesRenderingTests (D108) via
     // InternalsVisibleTo (D60's precedent), so the Notes-rendering markup is testable without a full
     // ASP.NET Core test host.
-    internal static void AppendDayCell(StringBuilder sb, DateTime cell, DateTime anchorMonth, PublicMonthView view)
+    internal static void AppendDayCell(StringBuilder sb, DateTime cell, DateTime anchorMonth, PublicMonthView view, DateTime? today = null)
     {
         var inMonth = cell.Month == anchorMonth.Month;
+        var isToday = cell.Date == today?.Date;
         // CalendarStyles.ClubEventExclusiveEnd, not raw ce.End - a timed event ending exactly at
         // midnight has zero real duration on the day a raw .Date comparison would put it on
         // (live-found 2026-08-27); it also converts an all-day event's inclusive last day into a
@@ -627,8 +664,9 @@ public static class PublicCalendarEndpoint
         // identically on the staff calendar's own Month view, MonthGrid.razor).
         var visibleBookingCount = CalendarStyles.VisibleChipCount(dayBookings.Count, Math.Max(0, 3 - dayClubEvents.Count));
 
+        var dayNumber = isToday ? $"""<span class="pub-cal-today" style="{CalendarStyles.TodayDayNumberStyle}">{cell.Day}</span>""" : cell.Day.ToString();
         sb.Append($"""<div class="pub-cal-day" style="border:1px solid #e7ecef;border-radius:6px;min-height:92px;padding:3px 4px;background:{(inMonth ? "#fff" : "#fafbfc")}">""");
-        sb.Append($"""<div style="font-size:12px;color:{(inMonth ? "#90a0ab" : "#c1ccd4")};font-weight:600;padding:1px 2px">{cell.Day}</div>""");
+        sb.Append($"""<div style="font-size:12px;color:{(inMonth ? "#90a0ab" : "#c1ccd4")};font-weight:600;padding:1px 2px">{dayNumber}</div>""");
 
         foreach (var ce in dayClubEvents)
         {
@@ -679,7 +717,10 @@ public static class PublicCalendarEndpoint
 
     // ── Week / Day views (hourly grids) ─────────────────────────────────────────────────────────
 
-    private const double HourlyHeaderRowHeightPx = 32;
+    // Two lines (13.5px day + 11.5px date, ~33px at normal line height) plus padding and a few pixels
+    // of gap above the first time cell. At 32px the date line overran the heading's bottom border
+    // and sat right on the 12 AM row (fixed 2026-10-07).
+    private const double HourlyHeaderRowHeightPx = 40;
     private const double AllDayChipHeightPx = 18;
     private const double AllDayChipGapPx = 2;
 
@@ -704,7 +745,7 @@ public static class PublicCalendarEndpoint
         sb.Append(AppendCategoryFilterForm(ViewMode.Week, weekStart, filter, siteUrl));
         sb.Append("</div>");
 
-        AppendHourlyGrid(sb, days, view, showDayHeaders: true);
+        AppendHourlyGrid(sb, days, view, showDayHeaders: true, today);
         AppendLegend(sb);
         AppendPageClose(sb);
         return sb.ToString();
@@ -721,17 +762,17 @@ public static class PublicCalendarEndpoint
         sb.Append("""<div class="pub-cal-sticky">""");
         sb.Append(NavBar(day.ToString("dddd, MMMM d, yyyy"),
             DayHref(day.AddDays(-1), filterQuery), DayHref(today, filterQuery), DayHref(day.AddDays(1), filterQuery),
-            ViewMode.Day, day, filter));
+            ViewMode.Day, day, filter, showTodayBadge: day.Date == today.Date));
         sb.Append(AppendCategoryFilterForm(ViewMode.Day, day, filter, siteUrl));
         sb.Append("</div>");
 
-        AppendHourlyGrid(sb, [day], view, showDayHeaders: false);
+        AppendHourlyGrid(sb, [day], view, showDayHeaders: false, today);
         AppendLegend(sb);
         AppendPageClose(sb);
         return sb.ToString();
     }
 
-    private static void AppendHourlyGrid(StringBuilder sb, List<DateTime> days, PublicMonthView view, bool showDayHeaders)
+    private static void AppendHourlyGrid(StringBuilder sb, List<DateTime> days, PublicMonthView view, bool showDayHeaders, DateTime today)
     {
         var maxAllDayCount = days.Select(d => AllDayEventsForDay(view, d).Count).DefaultIfEmpty(0).Max();
         var allDayRowHeightPx = maxAllDayCount == 0 ? 0 : maxAllDayCount * AllDayChipHeightPx + Math.Max(0, maxAllDayCount - 1) * AllDayChipGapPx + 4;
@@ -758,24 +799,25 @@ public static class PublicCalendarEndpoint
 
         foreach (var day in days)
         {
-            AppendDayColumn(sb, day, view, allDayRowHeightPx, showDayHeaders, isMultiDay);
+            AppendDayColumn(sb, day, view, allDayRowHeightPx, showDayHeaders, isMultiDay, today);
         }
 
         sb.Append("</div></div>");
     }
 
     // internal, not private - see AppendDayCell's own comment above.
-    internal static void AppendDayColumn(StringBuilder sb, DateTime day, PublicMonthView view, double allDayRowHeightPx, bool showHeader, bool isMultiDay)
+    internal static void AppendDayColumn(StringBuilder sb, DateTime day, PublicMonthView view, double allDayRowHeightPx, bool showHeader, bool isMultiDay, DateTime? today = null)
     {
         var widthStyle = isMultiDay ? "flex:1;min-width:92px" : "flex:1;min-width:0";
+        var isToday = day.Date == today?.Date;
         sb.Append($"""<div style="{widthStyle}">""");
 
         if (showHeader)
         {
             sb.Append($"""
-                <div class="pub-cal-colhead" style="box-sizing:border-box;height:{HourlyHeaderRowHeightPx}px;text-align:center;padding-bottom:3px;border-bottom:1px solid #f2f5f7">
-                    <div style="font-weight:600;color:#1e2a33;font-size:13.5px">{day:ddd}</div>
-                    <div style="color:#90a0ab;font-size:11.5px">{day:MMM d}</div>
+                <div class="pub-cal-colhead{(isToday ? " pub-cal-today" : "")}" style="box-sizing:border-box;height:{HourlyHeaderRowHeightPx}px;text-align:center;padding-bottom:3px;border-bottom:{(isToday ? $"2px solid {CalendarStyles.TodayAccent}" : "1px solid #f2f5f7")};{(isToday ? $"background:{CalendarStyles.TodayBg};" : "")}border-radius:6px 6px 0 0">
+                    <div style="font-weight:{(isToday ? 700 : 600)};color:{(isToday ? CalendarStyles.TodayAccent : "#1e2a33")};font-size:13.5px">{day:ddd}</div>
+                    <div style="color:{(isToday ? CalendarStyles.TodayAccent : "#90a0ab")};font-weight:{(isToday ? 600 : 400)};font-size:11.5px">{day:MMM d}</div>
                 </div>
                 """);
         }

@@ -8,9 +8,19 @@
     @foreach (var cell in MonthCells)
     {
         var inMonth = cell.Month == AnchorMonth.Month;
+        var isToday = cell.Date == Today.Date;
         <div @onclick="() => OnDayClick.InvokeAsync(cell)"
              style="border:1px solid #e7ecef;border-radius:6px;min-height:112px;padding:4px 5px;background:@(inMonth ? "#fff" : "#fafbfc");cursor:pointer">
-            <div style="font-size:13px;color:@(inMonth ? "#90a0ab" : "#c1ccd4");font-weight:600;padding:1px 2px">@cell.Day</div>
+            <div style="font-size:13px;color:@(inMonth ? "#90a0ab" : "#c1ccd4");font-weight:600;padding:1px 2px">
+                @if (isToday)
+                {
+                    <span class="cal-today" style="@CalendarStyles.TodayDayNumberStyle">@cell.Day</span>
+                }
+                else
+                {
+                    @cell.Day
+                }
+            </div>
             @{
                 // ce.ExclusiveEnd, not raw ce.End - a timed event ending exactly at midnight has zero
                 // real duration on the day a raw .Date comparison would put it on (live-found
@@ -62,6 +72,9 @@
     [Parameter] public EventCallback<SheetBooking> OnBookingClick { get; set; }
     [Parameter] public EventCallback<ClubEvent> OnClubEventClick { get; set; }
     [Parameter] public EventCallback<DateTime> OnDayClick { get; set; }
+
+    /// <summary>Facility-local today, highlighted. Unset (default) highlights nothing.</summary>
+    [Parameter] public DateTime Today { get; set; }
 
     private static readonly string[] DowNames = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 

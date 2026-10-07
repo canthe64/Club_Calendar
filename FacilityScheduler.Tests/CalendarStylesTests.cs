@@ -395,7 +395,7 @@ public class CalendarStylesTests
     [Theory]
     [InlineData("Month", 132)]
     [InlineData("Week", 182)]
-    [InlineData("Day", 260)]
+    [InlineData("Day", 320)] // widest date plus the "Today" badge (2026-10-07)
     public void AnchorLabelMinWidth_MatchesTheMeasuredWidthForEachView(string view, int expected)
     {
         Assert.Equal(expected, CalendarStyles.AnchorLabelMinWidthPx(view));
