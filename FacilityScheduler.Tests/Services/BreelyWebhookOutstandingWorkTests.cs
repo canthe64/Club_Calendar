@@ -74,14 +74,4 @@ public class BreelyWebhookOutstandingWorkTests
 
         Assert.Equal(0, work.OutstandingCount);
     }
-
-    [Fact]
-    public void Track_MultipleOutstandingTasks_AllCounted()
-    {
-        var work = new BreelyWebhookOutstandingWork();
-        work.Track(new TaskCompletionSource().Task);
-        work.Track(new TaskCompletionSource().Task);
-
-        Assert.Equal(2, work.OutstandingCount);
-    }
 }

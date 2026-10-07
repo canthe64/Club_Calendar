@@ -1,9 +1,7 @@
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using Moq;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -17,8 +15,7 @@ public class AppLogServiceTests
         // instance that recycles at least once a day (routine, not exceptional) would otherwise never
         // see a rollover and AppLog:RetentionDays would never actually apply. Must happen at startup.
         var facility = TestFacility.Create();
-        var logDirectory = Path.Combine(Path.GetTempPath(), "FacilitySchedulerTests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(logDirectory);
+        var logDirectory = TestTempDirectory.Create();
 
         const int retentionDays = 5;
         var expiredFile = Path.Combine(logDirectory, $"app-{facility.Today.AddDays(-(retentionDays + 10)):yyyy-MM-dd}.log");
@@ -27,9 +24,7 @@ public class AppLogServiceTests
         File.WriteAllText(freshFile, "recent\n");
 
         var options = Options.Create(new AppLogOptions { LogDirectory = logDirectory, RetentionDays = retentionDays });
-        var env = new Mock<IHostEnvironment>().Object; // ContentRootPath never read - LogDirectory is always set above
-
-        _ = new AppLogService(options, env, NullLogger<AppLogService>.Instance, facility);
+        _ = new AppLogService(options, new StubHostEnvironment(), NullLogger<AppLogService>.Instance, facility);
 
         Assert.False(File.Exists(expiredFile));
         Assert.True(File.Exists(freshFile));

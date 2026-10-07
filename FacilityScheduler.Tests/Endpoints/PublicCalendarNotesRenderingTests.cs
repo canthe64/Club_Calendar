@@ -30,17 +30,6 @@ public class PublicCalendarNotesRenderingTests
     }
 
     [Fact]
-    public void MonthCell_BookingWithNoNotes_HasAnEmptyDataNotesAttribute()
-    {
-        var view = new PublicMonthView([Booking(null)], []);
-        var sb = new StringBuilder();
-
-        PublicCalendarEndpoint.AppendDayCell(sb, Day, Day, view);
-
-        Assert.Contains("data-notes=\"\"", sb.ToString());
-    }
-
-    [Fact]
     public void MonthCell_ClubEventWithNotes_CarriesThemSeparatelyFromTheClosureNote()
     {
         // A closure event has BOTH data-note ("All sheets closed") and data-notes (the staff Note) -

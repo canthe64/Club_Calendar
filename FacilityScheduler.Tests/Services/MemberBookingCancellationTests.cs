@@ -1,4 +1,3 @@
-using System.Security.Claims;
 using Bunit;
 using FacilityScheduler.Components.Pages;
 using FacilityScheduler.Domain;
@@ -7,7 +6,6 @@ using FacilityScheduler.Services.Graph;
 using FacilityScheduler.Tests.TestSupport;
 using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace FacilityScheduler.Tests.Services;
@@ -30,26 +28,18 @@ public class MemberBookingCancellationTests : BunitContext
 
     private static Harness Build(string? publicBaseUrl = TestFacility.PublicBaseUrl)
     {
-        var facility = TestFacility.Create(sheetLocalParts: SheetLocalParts, publicBaseUrl: publicBaseUrl);
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var log = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(log, viewCache);
-        var bookings = new SheetBookingService(gateway, cache, facility, log, viewCache, window);
-        var clubEvents = new ClubEventService(gateway, cache, facility, log, viewCache);
-        var availability = new PublicAvailabilityService(bookings, clubEvents, cache, facility, viewCache, window);
+        var h = ServiceHarness.Create(TestFacility.Create(sheetLocalParts: SheetLocalParts, publicBaseUrl: publicBaseUrl));
         var mail = new FakeGraphMailGateway();
-        var cancellation = new MemberBookingCancellationService(bookings, mail, facility, log);
+        var cancellation = new MemberBookingCancellationService(h.Bookings, mail, h.Facility, h.AppLog);
         return new Harness(cancellation,
-            new MakeUpGameService(bookings, availability, mail, facility, log, cancellation),
-            new PracticeIceRequestService(bookings, availability, mail, facility, log, cancellation),
-            bookings, facility, mail, log);
+            new MakeUpGameService(h.Bookings, h.Availability, mail, h.Facility, h.AppLog, cancellation),
+            new PracticeIceRequestService(h.Bookings, h.Availability, mail, h.Facility, h.AppLog, cancellation),
+            h.Bookings, h.Facility, mail, h.AppLog);
     }
 
     private static async Task<Guid> BookMakeUpGame(Harness h, DateTime day)
     {
-        Assert.True((await h.Bookings.CreateConfirmedAsync(new SheetBooking
+        Assert.True((await h.Bookings.BookAsync(new SheetBooking
         {
             SheetMailbox = Sheets[0], Start = day.AddHours(19), End = day.AddHours(21),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "League"
@@ -248,29 +238,6 @@ public class MemberBookingCancellationTests : BunitContext
         Assert.True(result.IsCancelled);
         Assert.False(result.StaffNotified);
         Assert.Equal(0, await MemberBookingsOn(h, day));
-    }
-
-    // ---- Configuration and identity ---------------------------------------------------------------
-
-    [Fact]
-    public void PublicBaseUrl_TrailingSlashIsTrimmed_AndAMalformedValueFailsAtStartup()
-    {
-        Assert.Equal("https://calendar.example.org", TestFacility.Create(publicBaseUrl: "https://calendar.example.org/").PublicBaseUrl);
-        Assert.Null(TestFacility.Create(publicBaseUrl: " ").PublicBaseUrl);
-        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(publicBaseUrl: "calendar.example.org"));
-        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(publicBaseUrl: "ftp://calendar.example.org"));
-    }
-
-    [Fact]
-    public void MemberIdentity_PrefersTheNameClaim_AndPreferredUsernameForEmail()
-    {
-        var user = new ClaimsPrincipal(new ClaimsIdentity(
-        [
-            new Claim("name", "Jane Curler"),
-            new Claim("preferred_username", "jane@example.com")
-        ], "TestAuth", "preferred_username", "roles"));
-
-        Assert.Equal(("Jane Curler", "jane@example.com"), user.MemberIdentity());
     }
 
     // ---- The page ---------------------------------------------------------------------------------

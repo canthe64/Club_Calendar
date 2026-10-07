@@ -11,9 +11,7 @@ public class SettingsLogsEndpointTests
 {
     private static string MakeTempFile(string content)
     {
-        var dir = Path.Combine(Path.GetTempPath(), "FacilitySchedulerTests", Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(dir);
-        var path = Path.Combine(dir, "app-2026-09-14.log");
+        var path = Path.Combine(TestTempDirectory.Create(), "app-2026-09-14.log");
         File.WriteAllText(path, content, Encoding.UTF8);
         return path;
     }

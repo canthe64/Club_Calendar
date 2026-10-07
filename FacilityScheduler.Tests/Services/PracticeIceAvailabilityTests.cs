@@ -1,7 +1,6 @@
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -22,16 +21,8 @@ public class PracticeIceAvailabilityTests
 
     private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, ClubEventService ClubEventService, FacilityConfiguration Facility, SchedulingWindowService Window) Build(PracticeIceOptions? practiceIce = null)
     {
-        var facility = TestFacility.Create(sheetLocalParts: SheetLocalParts, practiceIce: practiceIce);
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(appLog, viewCache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
-        return (publicService, bookingService, clubEventService, facility, window);
+        var h = ServiceHarness.Create(TestFacility.Create(sheetLocalParts: SheetLocalParts, practiceIce: practiceIce));
+        return (h.Availability, h.Bookings, h.ClubEvents, h.Facility, h.Window);
     }
 
     private static Task Book(SheetBookingService bookingService, string sheet, DateTime start, DateTime end,

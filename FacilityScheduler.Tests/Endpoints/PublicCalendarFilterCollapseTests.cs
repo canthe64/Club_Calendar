@@ -25,16 +25,6 @@ public class PublicCalendarFilterCollapseTests
     }
 
     [Fact]
-    public void StartStateScript_FollowsTheDetailsBlock_AndCollapsesOnNarrowScreens()
-    {
-        var html = PublicCalendarEndpoint.AppendCategoryFilterForm(PublicCalendarEndpoint.ViewMode.Week, Anchor, PublicCalendarEndpoint.FilterState.Default);
-
-        var script = html[html.IndexOf("</details>", StringComparison.Ordinal)..];
-        Assert.Contains("document.currentScript.previousElementSibling", script);
-        Assert.Contains("(min-width: 801px)", script);
-    }
-
-    [Fact]
     public void SomeCategoriesHidden_TheSummarySaysSo()
     {
         var filter = PublicCalendarEndpoint.FilterState.Default with

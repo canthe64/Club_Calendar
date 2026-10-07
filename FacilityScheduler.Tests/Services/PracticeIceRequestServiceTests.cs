@@ -1,7 +1,6 @@
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -16,19 +15,12 @@ public class PracticeIceRequestServiceTests
     private static (PracticeIceRequestService RequestService, SheetBookingService BookingService, PublicAvailabilityService Availability, FacilityConfiguration Facility, FakeGraphMailGateway Mail, SchedulingWindowService Window)
         Build(out FakeGraphEventGateway gateway, PracticeIceOptions? practiceIce = null, string[]? sheetLocalParts = null)
     {
-        var facility = TestFacility.Create(sheetLocalParts: sheetLocalParts, practiceIce: practiceIce);
-        gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(appLog, viewCache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var availability = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
+        var h = ServiceHarness.Create(TestFacility.Create(sheetLocalParts: sheetLocalParts, practiceIce: practiceIce));
+        gateway = h.Gateway;
         var mail = new FakeGraphMailGateway();
-        var requestService = new PracticeIceRequestService(bookingService, availability, mail, facility, appLog,
-            new MemberBookingCancellationService(bookingService, mail, facility, appLog));
-        return (requestService, bookingService, availability, facility, mail, window);
+        var requestService = new PracticeIceRequestService(h.Bookings, h.Availability, mail, h.Facility, h.AppLog,
+            new MemberBookingCancellationService(h.Bookings, mail, h.Facility, h.AppLog));
+        return (requestService, h.Bookings, h.Availability, h.Facility, mail, h.Window);
     }
 
     [Fact]
@@ -337,7 +329,7 @@ public class PracticeIceRequestServiceTests
             SheetMailbox = "", Start = soon, End = soon.AddHours(1),
             Category = BookingCategory.PracticeIce, State = BookingState.Hold, RenterName = "Soon Host", RenterEmail = "soon@example.com"
         }, "tester");
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = soon.AddHours(3), End = soon.AddHours(4),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Unrelated League"
@@ -432,7 +424,7 @@ public class PracticeIceRequestServiceTests
         BuildFiveSheets() => Build(out _, sheetLocalParts: FiveSheetLocalParts);
 
     private static async Task BookLeague(SheetBookingService bookingService, string sheet, DateTime start, DateTime end) =>
-        Assert.True((await bookingService.CreateConfirmedAsync(new SheetBooking
+        Assert.True((await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = sheet, Start = start, End = end, Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "League"
         }, "tester")).IsSuccess);
@@ -494,7 +486,7 @@ public class PracticeIceRequestServiceTests
         var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
         var day = facility.Today.AddDays(5); // inside the 7-day release window
         var sheet = FiveSheets[0];
-        Assert.True((await bookingService.CreateHoldAsync(new SheetBooking
+        Assert.True((await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(14), Category = BookingCategory.GroupEvent, State = BookingState.Hold
         }, "tester")).IsSuccess);
@@ -515,7 +507,7 @@ public class PracticeIceRequestServiceTests
         var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
         var day = facility.Today.AddDays(10); // beyond the 7-day release window
         var sheet = FiveSheets[0];
-        Assert.True((await bookingService.CreateHoldAsync(new SheetBooking
+        Assert.True((await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = sheet, Start = day.AddHours(9), End = day.AddHours(14), Category = BookingCategory.GroupEvent, State = BookingState.Hold
         }, "tester")).IsSuccess);
@@ -533,7 +525,7 @@ public class PracticeIceRequestServiceTests
         var (requestService, bookingService, _, facility, _, _) = BuildFiveSheets();
         var day = facility.Today.AddDays(5);
         var sheet = FiveSheets[0];
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = sheet, Start = day.AddHours(10), End = day.AddHours(12), Category = BookingCategory.GroupEvent, State = BookingState.Hold
         }, "tester");

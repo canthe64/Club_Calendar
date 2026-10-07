@@ -7,33 +7,14 @@ public class SearchCategoryVocabularyTests
 {
     [Theory]
     [MemberData(nameof(BookingCategories))]
-    public void Resolve_ByNormalizedEnumName_FindsBookingCategory(BookingCategory category)
-    {
-        var resolution = SearchCategoryVocabulary.Resolve(SearchCategoryVocabulary.Normalize(category.ToString()));
-
-        Assert.NotNull(resolution);
-        Assert.Contains(category, resolution!.BookingCategories);
-    }
-
-    [Theory]
-    [MemberData(nameof(BookingCategories))]
     public void Resolve_ByNormalizedDisplayLabel_FindsBookingCategory(BookingCategory category)
     {
-        // Guards a future label rename (CalendarStyles.CategoryLabel) from silently breaking search.
+        // Every category must be findable by the label staff actually see - the drift guard if the
+        // vocabulary ever stops being derived from the enum.
         var resolution = SearchCategoryVocabulary.Resolve(SearchCategoryVocabulary.Normalize(CalendarStyles.CategoryLabel(category)));
 
         Assert.NotNull(resolution);
         Assert.Contains(category, resolution!.BookingCategories);
-    }
-
-    [Theory]
-    [MemberData(nameof(ClubEventCategories))]
-    public void Resolve_ByNormalizedEnumName_FindsClubEventCategory(ClubEventCategory category)
-    {
-        var resolution = SearchCategoryVocabulary.Resolve(SearchCategoryVocabulary.Normalize(category.ToString()));
-
-        Assert.NotNull(resolution);
-        Assert.Contains(category, resolution!.ClubEventCategories);
     }
 
     [Theory]

@@ -2,7 +2,6 @@ using FacilityScheduler.Domain;
 using FacilityScheduler.Endpoints;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -24,18 +23,10 @@ public class MakeUpGameTests
 
     private static Harness Build(PracticeIceOptions? practiceIce = null)
     {
-        var facility = TestFacility.Create(sheetLocalParts: SheetLocalParts, practiceIce: practiceIce);
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(appLog, viewCache);
-        var bookings = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
-        var clubEvents = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var availability = new PublicAvailabilityService(bookings, clubEvents, cache, facility, viewCache, window);
+        var h = ServiceHarness.Create(TestFacility.Create(sheetLocalParts: SheetLocalParts, practiceIce: practiceIce));
         var mail = new FakeGraphMailGateway();
-        var cancellation = new MemberBookingCancellationService(bookings, mail, facility, appLog);
-        return new Harness(new MakeUpGameService(bookings, availability, mail, facility, appLog, cancellation), availability, bookings, facility, mail);
+        var cancellation = new MemberBookingCancellationService(h.Bookings, mail, h.Facility, h.AppLog);
+        return new Harness(new MakeUpGameService(h.Bookings, h.Availability, mail, h.Facility, h.AppLog, cancellation), h.Availability, h.Bookings, h.Facility, mail);
     }
 
     private static async Task Book(SheetBookingService bookings, string sheet, DateTime start, DateTime end,

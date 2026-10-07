@@ -1,12 +1,8 @@
 using Bunit;
-using Microsoft.Extensions.DependencyInjection;
 using FacilityScheduler.Components.Pages;
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
-using FacilityScheduler.Services.Graph;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.AspNetCore.Components.Authorization;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Components;
 
@@ -14,20 +10,8 @@ public class SettingsTests : BunitContext
 {
     private (SheetBookingService BookingService, AppLogService LogService, SchedulingWindowService Window) RegisterServices()
     {
-        var facility = TestFacility.Create();
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var logService = TestAppLog.Create();
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(logService, viewCache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, logService, viewCache, window);
-
-        Services.AddSingleton(logService);
-        Services.AddSingleton(bookingService);
-        Services.AddSingleton(window);
-        Services.AddSingleton<AuthenticationStateProvider>(new FakeAuthStateProvider());
-
-        return (bookingService, logService, window);
+        var h = StaffPageServices.Register(this);
+        return (h.Bookings, h.AppLog, h.Window);
     }
 
     [Fact]

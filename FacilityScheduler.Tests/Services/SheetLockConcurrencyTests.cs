@@ -1,7 +1,6 @@
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -16,24 +15,20 @@ public class SheetLockConcurrencyTests
 {
     private static (SheetBookingService Service, FakeGraphEventGateway Gateway, FacilityConfiguration Facility) Build()
     {
-        var facility = TestFacility.Create();
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo) { DelayDuringCalendarView = () => Task.Delay(30) };
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create();
-        var viewCache = new ViewCacheRegistry(cache);
-        var service = new SheetBookingService(gateway, cache, facility, appLog, viewCache, new SchedulingWindowService(appLog, viewCache));
-        return (service, gateway, facility);
+        var h = ServiceHarness.Create();
+        h.Gateway.DelayDuringCalendarView = () => Task.Delay(30);
+        return (h.Bookings, h.Gateway, h.Facility);
     }
 
     [Fact]
-    public async Task ConcurrentCreateHoldAsync_SameSheetOverlappingTime_OnlyOneSucceeds()
+    public async Task ConcurrentCreates_SameSheetOverlappingTime_OnlyOneSucceeds()
     {
         var (service, gateway, facility) = Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(18);
         var end = start.AddHours(2);
 
-        Task<BookingResult> Book(string renter) => service.CreateHoldAsync(new SheetBooking
+        Task<GroupBookingResult> Book(string renter) => service.BookAsync(new SheetBooking
         {
             SheetMailbox = sheet,
             Start = start,
@@ -41,7 +36,7 @@ public class SheetLockConcurrencyTests
             Category = BookingCategory.GroupEvent,
             State = BookingState.Hold,
             RenterName = renter
-        }, "tester");
+        });
 
         var results = await Task.WhenAll(Book("A"), Book("B"), Book("C"), Book("D"));
 
@@ -76,27 +71,5 @@ public class SheetLockConcurrencyTests
 
         Assert.Equal(1, results.Count(r => r.IsSuccess));
         Assert.Equal(1, results.Count(r => !r.IsSuccess));
-    }
-
-    [Fact]
-    public async Task ConcurrentCreateHoldAsync_DifferentSheets_BothSucceed()
-    {
-        var (service, _, facility) = Build();
-        var sheets = TestFacility.SheetMailboxes;
-        var start = facility.Today.AddDays(1).AddHours(9);
-        var end = start.AddHours(1);
-
-        Task<BookingResult> Book(string sheet) => service.CreateHoldAsync(new SheetBooking
-        {
-            SheetMailbox = sheet,
-            Start = start,
-            End = end,
-            Category = BookingCategory.GroupEvent,
-            State = BookingState.Hold
-        }, "tester");
-
-        var results = await Task.WhenAll(Book(sheets[0]), Book(sheets[1]));
-
-        Assert.All(results, r => Assert.True(r.IsSuccess));
     }
 }

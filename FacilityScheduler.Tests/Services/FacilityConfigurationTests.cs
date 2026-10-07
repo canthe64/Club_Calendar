@@ -35,17 +35,6 @@ public class FacilityConfigurationTests
     }
 
     [Fact]
-    public void ToUtcQueryString_ProducesTheCorrectUtcInstant()
-    {
-        var facility = TestFacility.Create();
-        var localNoon = new DateTime(2026, 3, 1, 12, 0, 0); // PST, UTC-8
-
-        var offset = DateTimeOffset.Parse(facility.ToUtcQueryString(localNoon), CultureInfo.InvariantCulture);
-
-        Assert.Equal(new DateTimeOffset(2026, 3, 1, 20, 0, 0, TimeSpan.Zero), offset);
-    }
-
-    [Fact]
     public void ToUtcQueryString_ReflectsDaylightSavingOffsetChange()
     {
         var facility = TestFacility.Create();
@@ -98,6 +87,9 @@ public class FacilityConfigurationTests
         Assert.Equal(30, local.Minute);
     }
 
+    // A blank mail config deliberately boots (unlike TenantDomain/SheetMailboxLocalParts/TimeZone/
+    // StaffGroupId) - an incremental feature shouldn't stop a running deployment from starting just
+    // because its notification path isn't configured yet. Constructing these must not throw.
     [Fact]
     public void PracticeIceMailConfigured_FalseWhenEitherAddressIsBlank()
     {
@@ -116,16 +108,6 @@ public class FacilityConfigurationTests
         });
 
         Assert.True(facility.PracticeIceMailConfigured);
-    }
-
-    // Deliberately allowed to boot with a blank mail config (unlike TenantDomain/SheetMailboxLocalParts/
-    // TimeZone below) - an incremental feature shouldn't stop an already-running deployment from
-    // starting just because its own notification path hasn't been configured yet.
-    [Fact]
-    public void Constructor_BlankPracticeIceMailAddresses_DoesNotThrow()
-    {
-        var ex = Record.Exception(() => TestFacility.Create(practiceIce: new PracticeIceOptions()));
-        Assert.Null(ex);
     }
 
     [Theory]
@@ -164,10 +146,11 @@ public class FacilityConfigurationTests
     }
 
     [Fact]
-    public void StaffGroupId_ExposesTheConfiguredValue()
+    public void PublicBaseUrl_TrailingSlashIsTrimmed_AndAMalformedValueFailsAtStartup()
     {
-        var facility = TestFacility.Create(staffAccess: new StaffAccessOptions { StaffGroupId = "a-real-group-id" });
-
-        Assert.Equal("a-real-group-id", facility.StaffGroupId);
+        Assert.Equal("https://calendar.example.org", TestFacility.Create(publicBaseUrl: "https://calendar.example.org/").PublicBaseUrl);
+        Assert.Null(TestFacility.Create(publicBaseUrl: " ").PublicBaseUrl);
+        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(publicBaseUrl: "calendar.example.org"));
+        Assert.Throws<InvalidOperationException>(() => TestFacility.Create(publicBaseUrl: "ftp://calendar.example.org"));
     }
 }

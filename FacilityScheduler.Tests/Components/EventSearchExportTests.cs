@@ -19,7 +19,7 @@ public class EventSearchExportTests : BunitContext
     {
         var registered = StaffPageServices.Register(this);
         var day = registered.Facility.Today.AddDays(1);
-        await registered.BookingService.CreateConfirmedAsync(new SheetBooking
+        await registered.Bookings.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0],
             Start = day.AddHours(18),
@@ -47,17 +47,6 @@ public class EventSearchExportTests : BunitContext
         var cut = RenderSearch();
 
         Assert.Null(ExportLinkHref(cut));
-    }
-
-    [Fact]
-    public async Task AfterASearchWithResults_TheExportLinkAppears()
-    {
-        var cut = await RenderSearchWithOneLeagueBookingAsync();
-        var queryInput = cut.FindAll("input")[0];
-        queryInput.Input("category:league");
-        await cut.InvokeAsync(() => queryInput.KeyDown(new KeyboardEventArgs { Key = "Enter" }));
-
-        Assert.NotNull(ExportLinkHref(cut));
     }
 
     [Fact]

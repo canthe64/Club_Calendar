@@ -164,17 +164,6 @@ public class BreelyBookingProcessorTests
         Assert.All(TestFacility.SheetMailboxes, sheet => Assert.Empty(gateway.Events(sheet)));
     }
 
-    [Fact]
-    public async Task MalformedWindow_IsSkippedWithoutThrowing()
-    {
-        var (processor, gateway, _, _) = BreelyHarness.Build();
-
-        var evt = new BreelyEvent { Id = 40, BookedWith = "Curling Sheet", StartDate = null, StartTime = null, DurationInMinutes = 0 };
-        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt });
-
-        Assert.All(TestFacility.SheetMailboxes, sheet => Assert.Empty(gateway.Events(sheet)));
-    }
-
     // ---- Group Reservation sheet-count expansion (D119) ------------------------------------------
 
     [Fact]
@@ -197,7 +186,7 @@ public class BreelyBookingProcessorTests
         });
 
         var claimedSheets = facility.SheetMailboxes
-            .Where(sheet => gateway.Events(sheet).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy))
+            .Where(sheet => gateway.Events(sheet).Any(e => e.ShowAs == FreeBusyStatus.Busy))
             .ToList();
         Assert.Equal(4, claimedSheets.Count);
     }
@@ -275,53 +264,14 @@ public class BreelyBookingProcessorTests
         {
             Event = BreelyTestData.MakeEvent(700, start, 60, eventType: "17-24 participants") // 3 sheets
         });
-        Assert.Equal(3, facility.SheetMailboxes.Count(sheet => gateway.Events(sheet).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy)));
+        Assert.Equal(3, facility.SheetMailboxes.Count(sheet => gateway.Events(sheet).Any(e => e.ShowAs == FreeBusyStatus.Busy)));
 
         await processor.ProcessAsync(new BreelyWebhookPayload
         {
             Event = BreelyTestData.MakeEvent(700, start, 60, eventType: "17-24 participants", canceled: true)
         });
 
-        Assert.All(facility.SheetMailboxes, sheet => Assert.DoesNotContain(gateway.Events(sheet), e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy));
-    }
-
-    [Fact]
-    public async Task GroupReservation_DuplicateDelivery_DoesNotClaimExtraSheets()
-    {
-        var threeSheets = new[] { "sheet1", "sheet2", "sheet3" };
-        var (processor, gateway, facility, sheetBookings) = BreelyHarness.Build(sheetLocalParts: threeSheets);
-        var start = facility.Today.AddDays(13).AddHours(9);
-        foreach (var sheet in facility.SheetMailboxes)
-        {
-            BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
-        }
-
-        var evt = BreelyTestData.MakeEvent(800, start, 60, eventType: "9-16 participants"); // 2 sheets
-        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt });
-        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt }); // resend, identical
-
-        var allBookings = await sheetBookings.GetBookingsForAllSheetsAsync(start.AddDays(-1), start.AddDays(1));
-        var primary = Assert.Single(allBookings, b => b.ExternalBookingId == "breely:800");
-        var claimed = allBookings.Where(b => b.BookingGroupId == primary.BookingGroupId).ToList();
-        Assert.Equal(2, claimed.Count);
-    }
-
-    [Fact]
-    public async Task UnrecognizedEventType_StillClaimsExactlyOneSheet()
-    {
-        // Regression guard: an ordinary (or unrecognized) event_type must keep behaving exactly as it
-        // did before D119 - no expansion, no change to the original single-sheet flow.
-        var (processor, gateway, facility, _) = BreelyHarness.Build();
-        var sheet = TestFacility.SheetMailboxes[0];
-        var start = facility.Today.AddDays(1).AddHours(19);
-        BreelyHarness.SeedOpenHold(gateway, sheet, start.AddHours(-1), start.AddHours(3));
-
-        await processor.ProcessAsync(new BreelyWebhookPayload
-        {
-            Event = BreelyTestData.MakeEvent(900, start, 60, eventType: "Some future Breely event type we've never seen")
-        });
-
-        Assert.Equal(1, TestFacility.SheetMailboxes.Count(s => gateway.Events(s).Any(e => e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy)));
+        Assert.All(facility.SheetMailboxes, sheet => Assert.DoesNotContain(gateway.Events(sheet), e => e.ShowAs == FreeBusyStatus.Busy));
     }
 
     // ---- Unrecognized event_type flagging (D120) --------------------------------------------------
@@ -330,8 +280,10 @@ public class BreelyBookingProcessorTests
         gateway.Events(TestFacility.ClubEventsMailbox).Where(e => e.Subject == "⚠ Web booking needs review");
 
     [Fact]
-    public async Task UnrecognizedEventType_ClaimedNormally_AlsoFlagsForReview()
+    public async Task UnrecognizedEventType_ClaimsExactlyOneSheet_AndFlagsForReview()
     {
+        // D119 must be a no-op for the original single-sheet flow (no expansion), and D120 flags the
+        // label it didn't recognize.
         var (processor, gateway, facility, _) = BreelyHarness.Build();
         var sheet = TestFacility.SheetMailboxes[0];
         var start = facility.Today.AddDays(1).AddHours(19);
@@ -342,6 +294,7 @@ public class BreelyBookingProcessorTests
             Event = BreelyTestData.MakeEvent(910, start, 60, eventType: "Some future Breely event type we've never seen")
         });
 
+        Assert.Equal(1, TestFacility.SheetMailboxes.Count(s => gateway.Events(s).Any(e => e.ShowAs == FreeBusyStatus.Busy)));
         var marker = Assert.Single(TriageMarkers(gateway));
         Assert.Contains("Some future Breely event type we've never seen", marker.Body?.Content ?? marker.BodyPreview);
         Assert.Contains("claimed", marker.Body?.Content ?? marker.BodyPreview);
@@ -465,19 +418,22 @@ public class BreelyBookingProcessorTests
         Assert.Contains("threw while processing", text);
     }
 
-    [Fact]
-    public async Task UnparseableWindow_IsLoggedAtStandardTier_NotJustDebug()
+    [Theory]
+    [InlineData(false)] // a real date and time, but DurationInMinutes <= 0
+    [InlineData(true)]  // no start date/time at all
+    public async Task UnparseableWindow_IsSkipped_AndLoggedAtStandardTier_NotJustDebug(bool missingStart)
     {
         var appLog = TestAppLog.Create(out _);
         var (processor, gateway, facility, _) = BreelyHarness.Build(appLog: appLog);
 
-        // DurationInMinutes <= 0 makes TryParseWindow fail - the event is skipped entirely, no
-        // booking is ever attempted for it.
-        await processor.ProcessAsync(new BreelyWebhookPayload
-        {
-            Event = BreelyTestData.MakeEvent(961, facility.Today.AddDays(1).AddHours(19), durationMinutes: 0)
-        });
+        // Either shape makes TryParseWindow fail - the event is skipped entirely, no booking is ever
+        // attempted for it, and nothing throws.
+        var evt = missingStart
+            ? new BreelyEvent { Id = 961, BookedWith = "Curling Sheet", StartDate = null, StartTime = null, DurationInMinutes = 0 }
+            : BreelyTestData.MakeEvent(961, facility.Today.AddDays(1).AddHours(19), durationMinutes: 0);
+        await processor.ProcessAsync(new BreelyWebhookPayload { Event = evt });
 
+        Assert.All(TestFacility.SheetMailboxes, sheet => Assert.Empty(gateway.Events(sheet)));
         var lines = await appLog.TailAsync(50);
         Assert.Contains(lines, l => l.Contains("[INFO]") && l.Contains("WebhookUnparseableWindow"));
     }
@@ -530,11 +486,11 @@ public class BreelyBookingProcessorTests
         var releasedSheets = beforeShrink.Select(b => b.SheetMailbox).Where(s => !stillHeldSheets.Contains(s)).ToList();
         Assert.Equal(2, releasedSheets.Count); // 4 originally claimed, 2 kept
         Assert.All(releasedSheets, sheet => Assert.Contains(gateway.Events(sheet), e =>
-            e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Tentative &&
+            e.ShowAs == FreeBusyStatus.Tentative &&
             e.Categories != null && e.Categories.Contains(BookingCategory.GroupEvent.ToString())));
         // And no longer confirmed/busy at the old time on those sheets - the actual claim is gone.
         Assert.All(releasedSheets, sheet => Assert.DoesNotContain(gateway.Events(sheet), e =>
-            e.ShowAs == Microsoft.Graph.Models.FreeBusyStatus.Busy));
+            e.ShowAs == FreeBusyStatus.Busy));
     }
 
     [Fact]

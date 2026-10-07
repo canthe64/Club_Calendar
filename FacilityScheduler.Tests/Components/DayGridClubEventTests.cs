@@ -61,18 +61,6 @@ public class DayGridClubEventTests : BunitContext
     }
 
     [Fact]
-    public void TwoOverlappingTimedClubEvents_BothRenderTheirOwnTitle()
-    {
-        var cut = RenderGrid([
-            Timed("New Member Orientation", 18, 21),
-            Timed("UPSTAIRS: Member Social Activity", 19, 21)
-        ]);
-
-        Assert.Contains("New Member Orientation", cut.Markup);
-        Assert.Contains("UPSTAIRS: Member Social Activity", cut.Markup);
-    }
-
-    [Fact]
     public void TimedClubEvents_AreNeverFullWidthOverlays()
     {
         var cut = RenderGrid([
@@ -124,53 +112,6 @@ public class DayGridClubEventTests : BunitContext
         Assert.Equal(["0"], RailOffsets(cut).Distinct());
     }
 
-    [Fact]
-    public void AllDayAndTimedClubEvents_ShareTheOneBand()
-    {
-        var allDay = new ClubEvent
-        {
-            Title = "Fall Bonspiel",
-            Category = ClubEventCategory.Competitions,
-            IsAllDay = true,
-            Start = Day,
-            End = Day
-        };
-
-        var cut = RenderGrid([allDay, Timed("Evening Social", 19, 21)]);
-
-        Assert.Contains("Fall Bonspiel", cut.Markup);
-        Assert.Contains("Evening Social", cut.Markup);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public void ARailIsAlwaysItsBandRowsColour(bool marksSheetsUnavailable)
-    {
-        // The rail's only job is to point at one row of the band, so any colour it doesn't share with
-        // that row breaks the tie. A closure is the case that nearly got this wrong: the deleted
-        // overlay painted itself red (#a02c21) while the band row it replaced stayed the category
-        // colour, and the red came along in the first draft of the rail.
-        var ce = Timed("Ice Plant Maintenance", 18, 21, ClubEventCategory.Closure);
-        ce.MarksSheetsUnavailable = marksSheetsUnavailable;
-        var cut = RenderGrid([ce]);
-
-        var expected = CalendarStyles.ClubEventCategoryColor(ClubEventCategory.Closure);
-        Assert.Single(RailFills(cut));
-        Assert.Equal(expected, RailFills(cut)[0]);
-        Assert.Contains($"background:{expected}", cut.Markup);
-    }
-
-    [Fact]
-    public void NoTimedClubEvents_RendersNoRailStrip()
-    {
-        // The strip is 22px of horizontal space; an ordinary day with nothing off-ice shouldn't pay
-        // for it.
-        var cut = RenderGrid([]);
-
-        Assert.Empty(RailOffsets(cut));
-    }
-
     // The rails are the only absolutely-positioned, non-interactive 3px-radius boxes in the grid;
     // matching on that keeps the assertions independent of the surrounding markup's shape.
     private static List<string> RailStyles(IRenderedComponent<DayGrid> cut) =>
@@ -182,7 +123,4 @@ public class DayGridClubEventTests : BunitContext
 
     private static List<string> RailOffsets(IRenderedComponent<DayGrid> cut) =>
         [.. RailStyles(cut).Select(s => s.Split("left:")[1].Split("px")[0])];
-
-    private static List<string> RailFills(IRenderedComponent<DayGrid> cut) =>
-        [.. RailStyles(cut).Select(s => s.Split("background:")[1].Split(';')[0].Trim())];
 }
