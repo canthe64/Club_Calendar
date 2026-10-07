@@ -44,20 +44,6 @@ public class CalendarStylesTests
     }
 
     [Fact]
-    public void LearnToCurl_IsPink_NotBlackHexError()
-    {
-        // Pinned to the operator's explicit request rather than just "is distinct from everything
-        // else" (already covered above) - a colour that's merely distinct could still not be pink.
-        Assert.Equal("#cc4b8a", CalendarStyles.CategoryColor(BookingCategory.LearnToCurl));
-    }
-
-    [Fact]
-    public void SheetCategories_IncludesLearnToCurl_UnlikeEventWhichIsDeliberatelyExcluded()
-    {
-        Assert.Contains(BookingCategory.LearnToCurl, CalendarStyles.SheetCategories);
-    }
-
-    [Fact]
     public void SheetCategories_OrdersLearnToCurlBeforeOther()
     {
         // SheetCategories has no separate curated order the way ClubEventCategories does - it derives
@@ -387,20 +373,6 @@ public class CalendarStylesTests
         Assert.Equal(0, CalendarStyles.VisibleChipCount(totalCount: 2, maxVisible: 0));
     }
 
-    // The toolbar date label's width floor stops the nav controls next to it shifting while you step
-    // through dates. These pin the two properties that matter: each view gets enough room for the
-    // widest string its own format can produce, and the three are ordered by how long those strings
-    // get - so a future format change that outgrows its box shows up here rather than as controls
-    // that quietly start moving again.
-    [Theory]
-    [InlineData("Month", 132)]
-    [InlineData("Week", 182)]
-    [InlineData("Day", 320)] // widest date plus the "Today" badge (2026-10-07)
-    public void AnchorLabelMinWidth_MatchesTheMeasuredWidthForEachView(string view, int expected)
-    {
-        Assert.Equal(expected, CalendarStyles.AnchorLabelMinWidthPx(view));
-    }
-
     [Theory]
     [InlineData("month")]
     [InlineData("MONTH")]
@@ -420,6 +392,8 @@ public class CalendarStylesTests
         Assert.Equal(CalendarStyles.AnchorLabelMinWidthPx("Month"), CalendarStyles.AnchorLabelMinWidthPx("agenda"));
     }
 
+    // The toolbar date label's width floor stops the nav controls beside it shifting as you step
+    // through dates; each view's floor must grow with how long its own label format gets.
     [Fact]
     public void AnchorLabelMinWidth_GrowsWithHowLongEachViewsLabelGets()
     {

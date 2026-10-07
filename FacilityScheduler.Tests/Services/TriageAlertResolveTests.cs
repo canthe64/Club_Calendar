@@ -3,7 +3,6 @@ using FacilityScheduler.Components.Calendar;
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -38,11 +37,8 @@ public class TriageAlertResolveTests : BunitContext
 
     private static (ClubEventService Service, FakeGraphEventGateway Gateway, AppLogService Log) BuildService()
     {
-        var facility = TestFacility.Create();
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var log = TestAppLog.Create();
-        return (new ClubEventService(gateway, cache, facility, log, new ViewCacheRegistry(cache)), gateway, log);
+        var h = ServiceHarness.Create();
+        return (h.ClubEvents, h.Gateway, h.AppLog);
     }
 
     [Fact]

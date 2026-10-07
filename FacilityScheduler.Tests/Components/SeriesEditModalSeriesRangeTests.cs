@@ -72,13 +72,4 @@ public class SeriesEditModalSeriesRangeTests : BunitContext
         Assert.DoesNotContain("Starting", cut.Markup);
     }
 
-    [Fact]
-    public void ScheduleSummary_StillRendersAlongsideTheRange()
-    {
-        // The pre-existing "Tuesdays, 6:00PM-8:00PM." text must survive this addition unchanged.
-        var range = new SeriesDateRange(new DateTime(2026, 9, 8), new DateTime(2026, 9, 29));
-        var cut = Render(range);
-
-        Assert.Contains("Tuesdays, 7:00PM–9:00PM.", cut.Markup);
-    }
 }

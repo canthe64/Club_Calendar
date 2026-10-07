@@ -37,15 +37,4 @@ public class PublicCalendarHeaderLinksTests
         Assert.Contains("Schedule Make-Up Game", markup);
     }
 
-    [Fact]
-    public void GroupEventSearchLink_IsNotInTheHeader()
-    {
-        // Removed 2026-09-30 (operator request): group events are booked through Breely for now.
-        // /public/search itself still exists; it just isn't linked from the calendar.
-        var sb = new StringBuilder();
-
-        PublicCalendarEndpoint.AppendPageOpen(sb);
-
-        Assert.DoesNotContain("/public/search", sb.ToString());
-    }
 }

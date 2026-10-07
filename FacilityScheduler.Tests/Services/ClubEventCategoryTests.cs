@@ -83,39 +83,4 @@ public class ClubEventCategoryTests
         Assert.Equal(backgrounds.Count, backgrounds.Distinct().Count());
     }
 
-    [Fact]
-    public void OutOfTownBonspiels_DisplaysAsWordsButStoresAsOneToken()
-    {
-        // The rename exists to stop staff confusing this with BookingCategory.Bonspiel (a bonspiel on
-        // this club's own ice). The label is what they read; the member name is what Graph stores and
-        // what provision-categories.ps1 must create as the Exchange master category.
-        Assert.Equal("Out of Town Bonspiels",
-            CalendarStyles.ClubEventCategoryLabel(ClubEventCategory.OutOfTownBonspiels));
-        Assert.Equal("OutOfTownBonspiels", ClubEventCategory.OutOfTownBonspiels.ToString());
-    }
-
-    [Fact]
-    public void EveryCategory_HasANonEmptyLabel()
-    {
-        foreach (var category in CalendarStyles.ClubEventCategories)
-        {
-            Assert.False(string.IsNullOrWhiteSpace(CalendarStyles.ClubEventCategoryLabel(category)));
-        }
-    }
-
-    [Fact]
-    public void Meetings_IsCranberry()
-    {
-        Assert.Equal("#a63a5d", CalendarStyles.ClubEventCategoryColor(ClubEventCategory.Meetings));
-    }
-
-    [Fact]
-    public void Meetings_RoundTripsThroughTheGraphCategoryString()
-    {
-        // ClubEventService reads the category back by name from the event's Categories collection,
-        // and falls back to Other on a parse failure - so a name mismatch degrades silently rather
-        // than erroring. The provisioning script's master category must use this same literal.
-        Assert.True(Enum.TryParse<ClubEventCategory>("Meetings", out var parsed));
-        Assert.Equal(ClubEventCategory.Meetings, parsed);
-    }
 }

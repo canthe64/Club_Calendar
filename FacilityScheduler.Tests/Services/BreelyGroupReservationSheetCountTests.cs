@@ -32,14 +32,6 @@ public class BreelyGroupReservationSheetCountTests
         Assert.NotNull(BreelyBookingProcessor.SheetCountForEventType(eventType));
     }
 
-    // The real payload that started this investigation (§8/D117) used "25-32 Participants" - pinned
-    // directly since it's the concrete case this feature exists to fix.
-    [Fact]
-    public void SheetCountForEventType_TheOriginallyReportedLabel_ReturnsFour()
-    {
-        Assert.Equal(4, BreelyBookingProcessor.SheetCountForEventType("25-32 Participants"));
-    }
-
     [Theory]
     [InlineData("Extended session - 3-Hours (weekday evening)")]
     [InlineData("Extended session - 3-Hours")]

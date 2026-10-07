@@ -3,7 +3,6 @@ using FacilityScheduler.Domain;
 using FacilityScheduler.Endpoints;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Endpoints;
 
@@ -158,28 +157,12 @@ public class PublicCalendarFeedTests
         Assert.Contains("subscriptions sometimes stop updating without warning", html);
     }
 
-    [Fact]
-    public void FiltersSection_ContainsTheSubscribeSection()
-    {
-        var html = PublicCalendarEndpoint.AppendCategoryFilterForm(PublicCalendarEndpoint.ViewMode.Month, new DateTime(2026, 10, 1),
-            PublicCalendarEndpoint.FilterState.Default, "https://calendar.test.example");
-
-        Assert.Contains("Subscribe to this calendar", html);
-    }
-
     // ---- The feed and the page show the same events ---------------------------------------------
 
     private static (PublicAvailabilityService Service, SheetBookingService Bookings, ClubEventService ClubEvents, FacilityConfiguration Facility, SchedulingWindowService Window) BuildServices()
     {
-        var facility = TestFacility.Create();
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var log = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(log, viewCache);
-        var bookings = new SheetBookingService(gateway, cache, facility, log, viewCache, window);
-        var clubEvents = new ClubEventService(gateway, cache, facility, log, viewCache);
-        return (new PublicAvailabilityService(bookings, clubEvents, cache, facility, viewCache, window), bookings, clubEvents, facility, window);
+        var h = ServiceHarness.Create();
+        return (h.Availability, h.Bookings, h.ClubEvents, h.Facility, h.Window);
     }
 
     [Fact]
@@ -189,7 +172,7 @@ public class PublicCalendarFeedTests
         var today = facility.Today;
         foreach (var (offsetDays, name) in new[] { (-40, "Too old"), (-20, "Recent"), (80, "Upcoming"), (100, "Too far") })
         {
-            await bookings.CreateConfirmedAsync(new SheetBooking
+            await bookings.BookAsync(new SheetBooking
             {
                 SheetMailbox = TestFacility.SheetMailboxes[0], Start = today.AddDays(offsetDays).AddHours(19), End = today.AddDays(offsetDays).AddHours(21),
                 Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = name
@@ -211,7 +194,7 @@ public class PublicCalendarFeedTests
             SheetMailbox = "", Start = day.AddHours(19), End = day.AddHours(21), Category = BookingCategory.League,
             State = BookingState.Confirmed, RenterName = "Monday League"
         }, "tester");
-        await bookings.CreateHoldAsync(new SheetBooking
+        await bookings.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(10), End = day.AddHours(12),
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
@@ -237,7 +220,7 @@ public class PublicCalendarFeedTests
     {
         var (service, bookings, _, facility, window) = BuildServices();
         await window.SetPublicCutoffAsync(facility.Today.AddDays(10), "tester");
-        await bookings.CreateConfirmedAsync(new SheetBooking
+        await bookings.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = facility.Today.AddDays(20).AddHours(19), End = facility.Today.AddDays(20).AddHours(21),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Not yet published"
@@ -252,7 +235,7 @@ public class PublicCalendarFeedTests
         var (service, bookings, _, facility, _) = BuildServices();
         Assert.Empty((await service.GetFeedViewAsync()).Bookings);
 
-        await bookings.CreateConfirmedAsync(new SheetBooking
+        await bookings.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = facility.Today.AddDays(2).AddHours(19), End = facility.Today.AddDays(2).AddHours(21),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Just added"

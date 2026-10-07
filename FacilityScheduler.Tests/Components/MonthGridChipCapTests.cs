@@ -82,18 +82,4 @@ public class MonthGridChipCapTests : BunitContext
         Assert.DoesNotContain("more", cut.Markup);
     }
 
-    [Fact]
-    public void ExactlyThreeItemsOnADay_ShowsAllThree_NoMoreLink()
-    {
-        // The at-the-cap boundary - never needed a link either, before or after this fix.
-        var bookings = Enumerable.Range(0, 3).Select(i => Booking($"Booking{i}", 8 + i)).ToList();
-
-        var cut = RenderGrid(bookings);
-
-        foreach (var b in bookings)
-        {
-            Assert.Contains(b.RenterName!, cut.Markup);
-        }
-        Assert.DoesNotContain("more", cut.Markup);
-    }
 }

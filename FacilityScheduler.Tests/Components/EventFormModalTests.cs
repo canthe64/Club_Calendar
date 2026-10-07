@@ -47,25 +47,6 @@ public class EventFormModalTests : BunitContext
     }
 
     [Fact]
-    public void OffIceMode_StillRendersTheSheetChips_ButGreyedOut()
-    {
-        var cut = RenderModal(CreateDraft(EventMode.OffIce));
-
-        // Greyed rather than hidden, so the layout doesn't jump on toggle and the concept stays visible.
-        Assert.Contains("Sheet 1", cut.Markup);
-        Assert.Contains("opacity:.45", cut.Markup);
-    }
-
-    [Fact]
-    public void OnIceMode_RendersTheSheetChipsAtFullOpacity()
-    {
-        var cut = RenderModal(CreateDraft(EventMode.OnIce));
-
-        Assert.Contains("Sheet 1", cut.Markup);
-        Assert.DoesNotContain("opacity:.45", cut.Markup);
-    }
-
-    [Fact]
     public void OffIceMode_ClickingASheetChipDoesNothing()
     {
         var draft = CreateDraft(EventMode.OffIce);
@@ -140,7 +121,7 @@ public class EventFormModalTests : BunitContext
     }
 
     [Fact]
-    public void EditingAnExistingEvent_RendersTheModeAsAStaticBadge_WithNoToggle()
+    public void EditingAnExistingEvent_ShowsTheModeAsAnInertBadge_WithNoToggle()
     {
         var draft = new EventDraft();
         draft.LoadForEdit(new ClubEvent
@@ -150,27 +131,10 @@ public class EventFormModalTests : BunitContext
             Start = Today,
             End = Today,
         });
-
         var cut = RenderModal(draft);
 
-        Assert.Contains("Off the ice", cut.Markup);
         Assert.DoesNotContain("On the ice", cut.Markup);
         Assert.Contains("can't be moved between on-ice and off-ice", cut.Markup);
-    }
-
-    [Fact]
-    public void EditingAnExistingEvent_TheModeBadgeCarriesNoClickHandlerAtAll()
-    {
-        var draft = new EventDraft();
-        draft.LoadForEdit(new ClubEvent
-        {
-            Title = "Board Meeting",
-            Category = ClubEventCategory.Meetings,
-            Start = Today,
-            End = Today,
-        });
-        var cut = RenderModal(draft);
-
         var badge = cut.FindAll("span").First(s => s.TextContent.Trim() == "Off the ice");
 
         // Not merely a no-op handler - the badge is inert markup, so there is nothing to click and
@@ -195,15 +159,6 @@ public class EventFormModalTests : BunitContext
         var badge = cut.FindAll("span").First(s => s.TextContent.Trim() == "Off the ice");
         Assert.Throws<Bunit.MissingEventHandlerException>(() => badge.Click());
         Assert.Equal(EventMode.OffIce, draft.Mode);
-    }
-
-    [Fact]
-    public void CreatingAnEvent_ShowsBothToggleOptions()
-    {
-        var cut = RenderModal(CreateDraft(EventMode.OnIce));
-
-        Assert.Contains("On the ice", cut.Markup);
-        Assert.Contains("Off the ice", cut.Markup);
     }
 
     [Fact]

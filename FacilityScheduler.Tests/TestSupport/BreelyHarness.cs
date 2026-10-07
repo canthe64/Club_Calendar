@@ -1,6 +1,5 @@
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
-using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Graph.Models;
 
@@ -14,22 +13,17 @@ public static class BreelyHarness
     public static (BreelyBookingProcessor Processor, FakeGraphEventGateway Gateway, FacilityConfiguration Facility, SheetBookingService SheetBookings) Build(
         Func<Task>? delayDuringFindEvents = null, string[]? sheetLocalParts = null, AppLogService? appLog = null)
     {
-        var facility = TestFacility.Create(sheetLocalParts);
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo) { DelayDuringFindEvents = delayDuringFindEvents };
-        var cache = new MemoryCache(new MemoryCacheOptions());
         // Callers that need to assert on what got written to the app log (code review C3) pass their
-        // own pre-built instance in; everyone else gets a private throwaway one, same as before.
-        appLog ??= TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var sheetBookings = new SheetBookingService(gateway, cache, facility, appLog, viewCache, new SchedulingWindowService(appLog, viewCache));
-        var clubEvents = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var processor = new BreelyBookingProcessor(sheetBookings, clubEvents, facility, appLog, NullLogger<BreelyBookingProcessor>.Instance);
-        return (processor, gateway, facility, sheetBookings);
+        // own pre-built instance in; everyone else gets a private throwaway one.
+        var h = ServiceHarness.Create(TestFacility.Create(sheetLocalParts), appLog: appLog);
+        h.Gateway.DelayDuringFindEvents = delayDuringFindEvents;
+        var processor = new BreelyBookingProcessor(h.Bookings, h.ClubEvents, h.Facility, h.AppLog, NullLogger<BreelyBookingProcessor>.Instance);
+        return (processor, h.Gateway, h.Facility, h.Bookings);
     }
 
     /// <summary>Seeds an open Group Event hold directly on the fake, the same shape
-    /// SheetBookingService.CreateHoldAsync would have written - avoids needing the private
-    /// extended-property ids to set up "there's already an open hold here" starting state.</summary>
+    /// SheetBookingService would have written - avoids needing the private extended-property ids to
+    /// set up "there's already an open hold here" starting state.</summary>
     public static string SeedOpenHold(FakeGraphEventGateway gateway, string sheet, DateTime start, DateTime end) =>
         gateway.Seed(sheet, new Event
         {

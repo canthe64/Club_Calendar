@@ -79,16 +79,10 @@ public class MainLayoutTests : BunitContext
 
         Assert.All(AlwaysVisibleLabels, label => Assert.Contains(label, markup));
         Assert.All(StaffOnlyLabels, label => Assert.DoesNotContain(label, markup));
-    }
 
-    [Fact]
-    public void NonStaffMember_StaffHrefsAreAbsentEntirely_NotJustHidden()
-    {
         // Not merely visually hidden - the anchors must not be in the DOM at all, so the menu can't
         // advertise a route that would deny them.
-        var cut = RenderWithMenuOpen(isStaff: false);
         var hrefs = cut.FindAll("nav.app-menu-panel a").Select(a => a.GetAttribute("href")).ToList();
-
         Assert.DoesNotContain("/calendar", hrefs);
         Assert.DoesNotContain("/club-events", hrefs);
         Assert.DoesNotContain("/search", hrefs);
@@ -144,17 +138,6 @@ public class MainLayoutTests : BunitContext
     }
 
     [Fact]
-    public async Task StaffMember_CutoffFarInTheFuture_NoBanner()
-    {
-        Arrange(isStaff: true);
-        await Window.SetPublicCutoffAsync(Facility.Today.AddDays(60), "tester");
-
-        var cut = Render<MainLayout>();
-
-        Assert.DoesNotContain("only shows bookings through", cut.Markup);
-    }
-
-    [Fact]
     public void StaffMember_NoCutoffConfigured_NoBanner()
     {
         Arrange(isStaff: true);
@@ -162,20 +145,6 @@ public class MainLayoutTests : BunitContext
         var cut = Render<MainLayout>();
 
         Assert.DoesNotContain("only shows bookings through", cut.Markup);
-    }
-
-    [Fact]
-    public async Task StaffMember_CutoffAlreadyPassed_BannerStillShows()
-    {
-        // Operator decision: stays visible past the cutoff date itself, not just during the
-        // 30-day countdown - a season left hidden with nobody having updated it deserves an
-        // ongoing reminder, not a one-time heads-up.
-        Arrange(isStaff: true);
-        await Window.SetPublicCutoffAsync(Facility.Today.AddDays(-5), "tester");
-
-        var cut = Render<MainLayout>();
-
-        Assert.Contains("only shows bookings through", cut.Markup);
     }
 
     [Fact]

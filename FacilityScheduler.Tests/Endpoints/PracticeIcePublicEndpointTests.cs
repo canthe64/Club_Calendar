@@ -1,81 +1,36 @@
-using FacilityScheduler.Domain;
+using System.Text.RegularExpressions;
 using FacilityScheduler.Endpoints;
 using FacilityScheduler.Tests.TestSupport;
 
 namespace FacilityScheduler.Tests.Endpoints;
 
 /// <summary>
-/// The intro copy on /public/practice-ice - operator-supplied rewrite, 2026-09-24: replaced the
-/// short two-paragraph intro with a fuller walkthrough (a responsibilities-info email, a numbered
-/// step list with a lettered sub-list for the login/guest-account detail, and a closing contact
-/// line), superseding the earlier D115 call-to-action wording this test file used to pin.
+/// The intro copy on /public/practice-ice. Operator-supplied wording isn't pinned here - only the parts
+/// that read live configuration, and the contact addresses, where a typo would go unnoticed in use.
 /// </summary>
 public class PracticeIcePublicEndpointTests
 {
+    // Whitespace-collapsed - the copy wraps across source lines in the hand-built HTML.
+    private static string RenderedText() =>
+        Regex.Replace(PracticeIcePublicEndpoint.RenderPage(TestFacility.Create(), []), @"\s+", " ");
+
     [Fact]
-    public void RenderPage_MentionsTheLeadTimeRequirement()
+    public void RenderPage_StatesTheConfiguredLeadTimeAndMinimumOpenSheets()
     {
         var facility = TestFacility.Create();
 
-        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
+        var text = RenderedText();
 
-        // Whitespace-collapsed - the copy wraps across source lines in the hand-built HTML.
-        var text = System.Text.RegularExpressions.Regex.Replace(html, @"\s+", " ");
         Assert.Contains($"Requests must be at least {facility.PracticeIceMinLeadHours} hours in advance.", text);
+        Assert.Contains($"enough available sheets are available (minimum {facility.PracticeIceMinOpenSheets})", text);
     }
 
     [Fact]
-    public void RenderPage_LinksToTheResponsibilitiesEmail()
+    public void RenderPage_LinksBothContactAddresses()
     {
-        var facility = TestFacility.Create();
+        var text = RenderedText();
 
-        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
-
-        Assert.Contains("""<a href="mailto:practice@curlingseattle.org" """, html);
-        Assert.Contains("learn the responsibilities", html);
-    }
-
-    [Fact]
-    public void RenderPage_ListsTheThreeVolunteerSteps()
-    {
-        var facility = TestFacility.Create();
-
-        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
-
-        Assert.Contains("Select an available time slot from the list below", html);
-        Assert.Contains("Select the length of time you'll host practice ice (minimum", html);
-        Assert.Contains("""Click "Submit Request"</li>""", html);
-    }
-
-    [Fact]
-    public void RenderPage_GuestAccountSubStep_LinksToCharlieForAGuestAccount()
-    {
-        var facility = TestFacility.Create();
-
-        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
-
-        Assert.Contains("if you have a \"guest\" account", html);
-        Assert.Contains("""<a href="mailto:charlie@curlingseattle.org" """, html);
-    }
-
-    [Fact]
-    public void RenderPage_DescribesTentativeUntilConfirmedByTheCalendarTeam()
-    {
-        var facility = TestFacility.Create();
-
-        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
-
-        Assert.Contains("tentative until confirmed by the Calendar team", html);
-    }
-
-    [Fact]
-    public void RenderPage_StatesTheMinimumOpenSheets_AndThatExistingEventsHavePriority()
-    {
-        var facility = TestFacility.Create();
-
-        var html = PracticeIcePublicEndpoint.RenderPage(facility, []);
-
-        Assert.Contains($"enough available sheets are available (minimum {facility.PracticeIceMinOpenSheets})", html);
-        Assert.Contains("A pre-existing event has priority to select which sheets they wish to use.", html);
+        Assert.Contains("""<a href="mailto:practice@curlingseattle.org" """, text);
+        Assert.Contains("""<a href="mailto:charlie@curlingseattle.org" """, text);
     }
 }

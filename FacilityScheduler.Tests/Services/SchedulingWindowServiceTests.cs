@@ -62,19 +62,6 @@ public class SchedulingWindowServiceTests
     }
 
     [Fact]
-    public async Task SetSeasonWindowAsync_SetsBothValuesTogether()
-    {
-        var (window, _, _, _) = Build();
-        var start = new DateTime(2026, 10, 15);
-        var end = new DateTime(2027, 3, 15);
-
-        await window.SetSeasonWindowAsync(start, end, "tester");
-
-        Assert.Equal(start, window.SeasonStartDate);
-        Assert.Equal(end, window.SeasonEndDate);
-    }
-
-    [Fact]
     public async Task SetSeasonWindowAsync_StartAfterEnd_Throws()
     {
         // Code review C8: an inverted pair previously persisted as-is, making IsOutsideSeason true

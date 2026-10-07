@@ -757,7 +757,9 @@ which live in the domain layer (`Domain/BookingCategory.cs`, `Domain/ClubEventCa
   really interleave. Endpoint logic is tested directly via `internal` helpers (D60). Pages and
   components use bUnit against the app's real authorization policies.
 - **Discipline.** A behavioral fix gets a test that fails against the pre-fix code, verified by
-  reverting the fix.
+  reverting the fix. Prefer a new theory row or assertion on an existing test over a new test. Tests
+  pin behavior, not markup, styling or copy; when copy changes, delete its test rather than
+  rewriting it. Don't assert the absence of removed UI.
 - **What automated tests can't cover:** the real tenant — permissions, Application Access Policy
   scoping, real token claim shapes. Those are verified live. The suite has never run against a real
   Azure AD/Graph tenant.
@@ -765,4 +767,5 @@ which live in the domain layer (`Domain/BookingCategory.cs`, `Domain/ClubEventCa
   (routing, rate limiting, auth handler — would need `WebApplicationFactory`); bUnit coverage of the
   Off-Ice Events list and the practice-ice pages.
 
-The per-area coverage record through 2026-09-28 is Part D of [`decision-log.md`](decision-log.md).
+The per-area coverage record through 2026-09-28 is Part D of [`decision-log.md`](decision-log.md),
+kept as history and no longer maintained per test.

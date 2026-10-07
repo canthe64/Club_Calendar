@@ -1,7 +1,7 @@
+using FacilityScheduler;
 using FacilityScheduler.Domain;
 using FacilityScheduler.Services;
 using FacilityScheduler.Tests.TestSupport;
-using Microsoft.Extensions.Caching.Memory;
 
 namespace FacilityScheduler.Tests.Services;
 
@@ -9,16 +9,14 @@ public class PublicAvailabilityServiceTests
 {
     private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, FacilityConfiguration Facility, SchedulingWindowService Window) Build(string[]? sheetLocalParts = null)
     {
-        var facility = TestFacility.Create(sheetLocalParts);
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(appLog, viewCache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
-        return (publicService, bookingService, facility, window);
+        var h = ServiceHarness.Create(TestFacility.Create(sheetLocalParts));
+        return (h.Availability, h.Bookings, h.Facility, h.Window);
+    }
+
+    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, ClubEventService ClubEventService, FacilityConfiguration Facility) BuildWithClubEvents()
+    {
+        var h = ServiceHarness.Create();
+        return (h.Availability, h.Bookings, h.ClubEvents, h.Facility);
     }
 
     [Fact]
@@ -27,7 +25,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, _) = Build();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0],
             Start = day.AddHours(18),
@@ -74,12 +72,12 @@ public class PublicAvailabilityServiceTests
         var day = facility.Today.AddDays(1);
         var sheets = TestFacility.SheetMailboxes;
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = sheets[0], Start = day.AddHours(9), End = day.AddHours(10),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Team A"
         }, "tester");
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = sheets[1], Start = day.AddHours(14), End = day.AddHours(15),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Team B"
@@ -101,7 +99,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, _) = Build();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.PracticeIce, State = BookingState.Hold, RenterName = "Jane Curler", RenterEmail = "jane@example.com"
@@ -123,7 +121,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, _) = Build();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.PracticeIce, State = BookingState.Confirmed, RenterName = "Practice Ice Hosted by Jeff Pearson"
@@ -141,7 +139,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, _) = Build();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.PracticeIce, State = BookingState.Hold
@@ -162,7 +160,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, _) = Build();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.PracticeIce, State = BookingState.Hold, RenterName = "jane@example.com"
@@ -183,7 +181,7 @@ public class PublicAvailabilityServiceTests
         var day = facility.Today.AddDays(10);
         await window.SetPublicCutoffAsync(facility.Today.AddDays(5), "tester");
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Late Season Game"
@@ -202,7 +200,7 @@ public class PublicAvailabilityServiceTests
         var day = facility.Today.AddDays(5);
         await window.SetPublicCutoffAsync(day, "tester");
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "On The Cutoff"
@@ -220,7 +218,7 @@ public class PublicAvailabilityServiceTests
         var day = facility.Today.AddDays(10);
         await window.SetPublicCutoffAsync(facility.Today.AddDays(5), "tester");
 
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(20),
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
@@ -244,12 +242,12 @@ public class PublicAvailabilityServiceTests
         var start = day.AddHours(18);
         var end = day.AddHours(20);
 
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = facility.SheetMailboxes[0], Start = start, End = end,
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
         }, "tester");
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = facility.SheetMailboxes[1], Start = start, End = end,
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
@@ -269,7 +267,7 @@ public class PublicAvailabilityServiceTests
         var day = facility.Today.AddDays(10);
         await window.SetPublicCutoffAsync(facility.Today.AddDays(5), "tester");
 
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(20),
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
@@ -300,13 +298,13 @@ public class PublicAvailabilityServiceTests
     {
         var (publicService, bookingService, facility, window) = Build();
         var day = facility.Today.AddDays(5);
-        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
-
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(20),
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
         }, "tester");
+        // Configured after the hold exists - a create is itself refused outside the season.
+        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
 
         var response = await publicService.GetAvailabilityAsync(requestedDays: 30);
 
@@ -318,13 +316,13 @@ public class PublicAvailabilityServiceTests
     {
         var (publicService, bookingService, facility, window) = Build();
         var day = facility.Today.AddDays(5);
-        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
-
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(20),
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
         }, "tester");
+        // Configured after the hold exists - a create is itself refused outside the season.
+        await window.SetSeasonWindowAsync(facility.Today.AddDays(30), facility.Today.AddDays(200), "tester");
 
         var windows = await publicService.GetConcurrentAvailabilityAsync(facility.Today, day.AddDays(1), minSheets: 1);
 
@@ -339,7 +337,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, window) = Build();
         var day = facility.Today.AddDays(5);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(19),
             Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Pre-existing"
@@ -371,7 +369,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, facility, _) = Build();
         var day = facility.Today.AddDays(5);
 
-        await bookingService.CreateHoldAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(18), End = day.AddHours(20),
             Category = BookingCategory.GroupEvent, State = BookingState.Hold
@@ -384,27 +382,13 @@ public class PublicAvailabilityServiceTests
 
     // ---- Public Notes exposure (D108, staff feedback 2026-08-27) ----------------------------
 
-    private static (PublicAvailabilityService PublicService, SheetBookingService BookingService, ClubEventService ClubEventService, FacilityConfiguration Facility) BuildWithClubEvents()
-    {
-        var facility = TestFacility.Create();
-        var gateway = new FakeGraphEventGateway(facility.ZoneInfo);
-        var cache = new MemoryCache(new MemoryCacheOptions());
-        var appLog = TestAppLog.Create(facility);
-        var viewCache = new ViewCacheRegistry(cache);
-        var window = new SchedulingWindowService(appLog, viewCache);
-        var bookingService = new SheetBookingService(gateway, cache, facility, appLog, viewCache, window);
-        var clubEventService = new ClubEventService(gateway, cache, facility, appLog, viewCache);
-        var publicService = new PublicAvailabilityService(bookingService, clubEventService, cache, facility, viewCache, window);
-        return (publicService, bookingService, clubEventService, facility);
-    }
-
     [Fact]
     public async Task StaffTypedBookingNote_IsIncludedPublicly()
     {
         var (publicService, bookingService, _, facility) = BuildWithClubEvents();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0],
             Start = day.AddHours(18),
@@ -421,11 +405,11 @@ public class PublicAvailabilityServiceTests
     }
 
     [Fact]
-    public async Task BreelyOriginatedBookingNote_IsNeverExposedPublicly()
+    public async Task BreelyOriginatedBooking_NeitherTheCustomerNameNorTheNoteIsExposedPublicly()
     {
-        // The exact case D108 was written to guard: BuildNotes' fixed template (never staff-reviewed)
-        // must never reach the public calendar, same reasoning and same signal (ExternalBookingId)
-        // already used to suppress the real customer name in the title (D52).
+        // Two leaks keyed off the same signal (ExternalBookingId, only ever set by the webhook): the
+        // customer's real name in the title (D52, live-found 2026-08-04) and BuildNotes' fixed
+        // template, never staff-reviewed, in Notes (D108).
         var (publicService, bookingService, _, facility) = BuildWithClubEvents();
         var day = facility.Today.AddDays(1);
 
@@ -443,7 +427,10 @@ public class PublicAvailabilityServiceTests
 
         var view = await publicService.GetDayViewAsync(day);
 
-        Assert.Null(Assert.Single(view.Bookings).Notes);
+        var booking = Assert.Single(view.Bookings);
+        Assert.DoesNotContain("Jane Customer", booking.Title);
+        Assert.Equal(CalendarStyles.CategoryLabel(BookingCategory.GroupEvent), booking.Title);
+        Assert.Null(booking.Notes);
     }
 
     [Fact]
@@ -539,7 +526,7 @@ public class PublicAvailabilityServiceTests
         var (publicService, bookingService, _, facility) = BuildWithClubEvents();
         var day = facility.Today.AddDays(1);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0],
             Start = day.AddHours(18),
@@ -561,7 +548,7 @@ public class PublicAvailabilityServiceTests
         var day = facility.Today.AddDays(1);
         var longNote = new string('x', 400);
 
-        await bookingService.CreateConfirmedAsync(new SheetBooking
+        await bookingService.BookAsync(new SheetBooking
         {
             SheetMailbox = TestFacility.SheetMailboxes[0],
             Start = day.AddHours(18),

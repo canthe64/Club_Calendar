@@ -26,8 +26,6 @@ public class CalendarFilterTests : BunitContext
 
         Assert.Contains("ON ICE", cut.Markup);
         Assert.Contains("OFF ICE", cut.Markup);
-        // The old single-checkbox control is gone.
-        Assert.DoesNotContain("Show Off-Ice Events", cut.Markup);
     }
 
     [Fact]
