@@ -72,6 +72,7 @@ Any Staff member can approve or decline practice ice requests, but only uses in 
 | `/public/search`           | Find windows where at least N sheets are open simultaneously      |
 | `/public/practice-ice`     | Times any trained member could volunteer to host practice ice     |
 | `/public/make-up-game`     | Two-hour slots a member can book for a league make-up game        |
+| `/public/calendar.ics`     | Subscription feed of the public calendar (Google/Outlook/Apple)   |
 | `/api/public/availability` | Minimized JSON feed, plus a drop-in widget for embedding in a CMS |
 
 **Member practice-ice hosting** — If you wish to give your club members a way to easily volunteer to host practice ice during unused time slots, this feature allows signed-in members to claim an open window to host, which writes a pending hold and emails an approver address. Staff approve or decline (with a reason) from an in-app queue; the volunteer is emailed either way. Requests are automatically added to the calendar for visibility. Set rules for when practice ice sessions can begin/end, as well as minimum times. Sessions can run on the unused sheets alongside another event, as long as a minimum number of sheets (default 3) are free, and can use group-event slots too close to be booked by guests.
@@ -79,6 +80,8 @@ Any Staff member can approve or decline practice ice requests, but only uses in 
 **Member make-up games** — signed-in members can book a single sheet for a two-hour league make-up game, beside a confirmed event that's already running. Bookings are auto-approved and confirmed by email to the member and your calendar team.
 
 **Member self-cancel** — the booking emails for make-up games and practice ice include a link members can use to cancel their own booking (after signing in), with the calendar team notified.
+
+**Calendar subscriptions** — members can subscribe to the public calendar (or just the categories they care about) in Google, Outlook, or Apple Calendar. The feed matches the public calendar exactly. Be aware that the subscriber's calendar app controls how often it refreshes: Google can lag by up to a day, and subscriptions can occasionally stop updating without warning, so the live calendar remains the source of truth.
 
 **Inbound booking integration** — a webhook ingests bookings from 3rd party booking services (currently Breely). This is deliberately one-way and best-effort as the app has no way to send response data back. Breely (or whatever 3rd party tool) remains authoritative for what a customer was actually promised. But the feature can be expanded to other third party platforms that support webhook automations with additional development. 
 

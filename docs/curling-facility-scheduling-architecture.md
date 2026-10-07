@@ -5,7 +5,7 @@
 **Stack:** .NET 10 / C#, Blazor Server (D14)
 
 This document covers the architecture and the decisions and findings that shape it. The full history
-— every numbered decision (`D1`–`D150`), every live-found bug and review finding, and the detailed
+— every numbered decision (`D1`–`D151`), every live-found bug and review finding, and the detailed
 per-feature notes — is in [`decision-log.md`](decision-log.md). `D`-numbers cited here and in code
 comments are defined there; the key ones are summarized in §9.
 
@@ -24,8 +24,9 @@ but staff see one "event" concept with an on-ice/off-ice toggle (§4.4).
 
 Around that core:
 
-- **Five anonymous read surfaces** (§5.4): a JSON availability API for a CMS embed, a public
-  calendar, an availability search, a practice-ice listing, and a make-up game listing.
+- **Six anonymous read surfaces** (§5.4): a JSON availability API for a CMS embed, a public
+  calendar, a calendar subscription feed, an availability search, a practice-ice listing, and a
+  make-up game listing.
 - **Three non-staff write paths**: an inbound webhook from Breely, the club's customer-facing
   booking platform (§4.8, a one-way stopgap); a member practice-ice hosting request that creates a
   pending hold for staff approval (§5.4.4); and a member make-up game request, booked immediately
@@ -55,6 +56,8 @@ architecture is curling-specific (§10).
 - Member-initiated practice-ice hosting, subject to staff approval.
 - Member-scheduled league make-up games alongside ice already in use, auto-approved.
 - Members cancelling their own practice ice and make-up games from their booking email.
+- A calendar subscription feed (iCalendar), so members can see the public calendar in Google,
+  Outlook, or Apple Calendar.
 - A staff-visible record of what the app did in production.
 
 ### 2.2 Out of scope
@@ -65,7 +68,6 @@ architecture is curling-specific (§10).
   make-up game on a sheet free while other ice is in use (§5.4.5).
 - Audit history of cancellations — cancellation is a hard delete (D9).
 - Automatic expiry of holds, including unactioned practice-ice requests.
-- ICS publishing (rejected from prior operational experience).
 - A companion authoritative database (D7).
 - **Real bidirectional sync with Breely** — the intended long-term answer. The webhook (§4.8) is an
   explicit stopgap; if sync is built, reassess §4.8 rather than run both.
@@ -103,7 +105,7 @@ flowchart TB
         API["Services<br/>SheetBookingService · ClubEventService<br/>conflict enforcement · FacilityConfiguration"]
         GW["IGraphEventGateway<br/>(Graph boundary)"]
         CACHE["Ephemeral cache (IMemoryCache)<br/>view reads only"]
-        PUB["Anonymous endpoints (Minimal API)<br/>JSON API · public calendar · search ·<br/>practice-ice and make-up listings"]
+        PUB["Anonymous endpoints (Minimal API)<br/>JSON API · public calendar · ICS feed ·<br/>search · practice-ice and make-up listings"]
         MEMBER_UI["Practice-ice and make-up requests<br/>(Blazor, any signed-in user)"]
         STAFFHTTP["Staff file endpoints (Minimal API)<br/>CSV export · log download"]
         WEBHOOK["Breely webhook (Minimal API)<br/>shared-secret auth"]
@@ -411,7 +413,8 @@ HTML with `StringBuilder` and `WebUtility.HtmlEncode` on every dynamic string (D
 from a live incident: adding `.AllowAnonymous()` to `MapRazorComponents<App>()` disabled
 authorization for **every** staff page, because all routable components share one endpoint set.
 Loading `blazor.web.js` for anonymous visitors also produced unremovable error banners. All public
-surfaces are rate-limited (`public-api`, 60/min, one global bucket).
+surfaces are rate-limited (`public-api`, 60/min, one global bucket; the subscription feed has its
+own, §5.4.7).
 
 **5.4.1 JSON availability API and embed widget** (`/api/public/availability`,
 `/embed/availability-widget.js`). "Available" means an open Group Event hold, not raw free time.
@@ -476,6 +479,28 @@ received" email, and the practice ice approval email each carry a link to `/my-b
 - Cancelling is the same hard delete staff use (D9), on every sheet of the booking; group-event
   hold time it had taken isn't given back (D148). The calendar team's list and the member are
   emailed.
+
+**5.4.7 Calendar subscription feed** (`/public/calendar.ics`, D151) - the public calendar as an
+iCalendar feed that Google, Outlook, and Apple Calendar can subscribe to. Reached from "Subscribe to
+this calendar" in the public calendar's Filters section, which builds the feed address from the
+filters currently applied.
+
+- **Same events as the page, by construction.** The feed is built from the public calendar's own
+  data method and filter code, so titles, privacy rules, sheet counts, and the publish cutoff are
+  identical. The one deliberate difference: holds are titled "Hold: ..." and marked tentative, since
+  calendar apps can't show the dashed hold style.
+- **Window:** one month back to three months ahead - kept modest because calendarView cost grows
+  with range width (D90).
+- **Built to stay correct in subscribers' apps:** stable event UIDs (hashed from public fields, no
+  internal ids), so refreshes update rather than duplicate and cancellations drop out; times in UTC;
+  all-day off-ice events stay all-day; RFC 5545 escaping and line folding.
+- **Built to be fetched often:** cached 15 minutes (cleared on any booking write), and its own
+  `calendar-feed` rate-limit bucket (300/min), so many calendar servers polling at once aren't
+  refused.
+- **What it can't fix:** each subscriber's app decides when to refresh (Google: up to a day) and may
+  stop refreshing silently. The Subscribe section says so; the feed asks for hourly refresh, which
+  only some apps honour. Google also tends to label a URL subscription with its address despite the
+  feed naming itself.
 
 ### 5.5 Breely Webhook Endpoint
 
@@ -655,6 +680,7 @@ anyone changing it should know.
 | `/public/calendar` has no `frame-ancestors` restriction | Simplicity over locking to a domain; a hardening candidate. |
 | Member carve-out not live-verified with a non-staff account | Verify before real member volume (§6.5). |
 | No automatic hold expiry, including practice-ice requests | Staff-supervised volume; per-member cap bounds abuse (D138). |
+| Subscribed calendars can fall behind or silently stop refreshing | Controlled by each subscriber's calendar app, not the feed (D151); the Subscribe section tells members, and the live calendar is always current. |
 | Make-up games are auto-approved with no per-member cap | Operator decision (D149); every booking emails the calendar team, and members acknowledge that existing events keep priority over the sheet. |
 | Accidental deletion is recoverable only via Exchange's recoverable-items window | Acceptable at this scale. |
 
@@ -707,6 +733,7 @@ The decisions that define the architecture. The complete, numbered record is Par
 | D148 | Group-event holds inside the 7-day guest booking window count as free for member-hosted ice | Guests can't book them anymore; taking one trims it. |
 | D149 | Make-up games: auto-approved, confirmed League booking beside a confirmed event | Someone qualified is already running the club; staff are emailed instead of approving. |
 | D150 | Members cancel their own bookings from an emailed link to a signed-in page | Only the booker can cancel; opening the link never cancels, since mail scanners open links. |
+| D151 | Public calendar subscription feed (ICS), matching the page exactly | Members subscribed to the old Google calendar; built from the page's own code so the two can't differ. |
 
 ---
 

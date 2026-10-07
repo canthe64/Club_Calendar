@@ -13,6 +13,7 @@ SignalR circuit, not called via HTTP — the endpoints below are the deliberate 
 | `GET /public/search` | Anonymous | "Find a window with ≥N sheets open" search page |
 | `GET /public/practice-ice` | Anonymous | Open times a member could volunteer to host practice ice |
 | `GET /public/make-up-game` | Anonymous | Two-hour slots a member can book for a league make-up game |
+| `GET /public/calendar.ics` | Anonymous | The public calendar as an iCalendar subscription feed |
 | `POST /api/webhooks/breely` | Shared secret | The one anonymous **write** surface — ingests Breely booking notifications (architecture doc §4.8/§5.5). A deliberate, bounded exception to "public surfaces are read-only," not a broadening of the rule. |
 | `GET /settings/logs/download` | Staff sign-in | Log archive download (architecture doc §5.6) |
 | `GET /search/export.csv` | Staff sign-in | CSV export of the staff event search (architecture doc §4.12/§5.7) |
@@ -264,6 +265,24 @@ acknowledges the conditions and books.
 - **Cache:** server-side, 60 seconds.
 
 **Response `200 OK`** — `text/html; charset=utf-8`. No query parameters.
+
+### `GET /public/calendar.ics`
+
+The public calendar as an iCalendar (RFC 5545) subscription feed (architecture doc §5.4.7, D151),
+for Google, Outlook, and Apple Calendar. Linked from "Subscribe to this calendar" in the public
+calendar's Filters section, which builds the address from the filters currently applied.
+
+- **Query parameters:** the public calendar's own filter parameters (`filtered`, `categories`,
+  `showClubEvents`, `clubFiltered`, `clubCategories`), with the same meaning. None: everything.
+- **Content:** exactly the public calendar's events for those filters, from one month back to three
+  months ahead, after the publish cutoff. Holds are titled `Hold: ...` with `STATUS:TENTATIVE`;
+  everything else `STATUS:CONFIRMED`. Times are UTC; all-day off-ice events use `VALUE=DATE` with an
+  exclusive end. UIDs are stable hashes of public fields. The calendar is named via both
+  `X-WR-CALNAME` and `NAME`, with a one-hour `REFRESH-INTERVAL` hint.
+- **Auth:** none. **Rate limit:** its own `calendar-feed` bucket, 300 req/min. **Cache:** 15
+  minutes, cleared on any booking write.
+
+**Response `200 OK`** — `text/calendar; charset=utf-8`.
 
 ### `POST /api/webhooks/breely`
 

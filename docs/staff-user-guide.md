@@ -483,3 +483,18 @@ calendar (a pending request also leaves Practice Ice Approvals), and the calenda
 
 Bookings made before this feature existed have no link in their emails, so those members still
 contact you. You can always cancel any booking yourself from the Calendar page.
+
+---
+
+## 13. Calendar Subscriptions
+
+Members can add the public calendar to their own Google, Outlook, or Apple calendar: **Filters →
+Subscribe to this calendar** on the public calendar. The subscription shows the same events as the
+public calendar for the categories they had applied, from a month back to three months ahead; holds
+appear as "Hold: …".
+
+**The known limitation, to point members at when they ask:** their calendar app decides when to
+refresh it. Google can take up to a day, and a subscription can stop updating without any warning.
+That's outside the club's control. The live calendar is always current. A member whose subscription
+seems stuck can remove it and subscribe again. Google may also list it under its web address rather
+than its name; they can rename it in Google Calendar's settings.

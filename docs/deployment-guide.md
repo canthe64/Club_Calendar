@@ -742,7 +742,7 @@ env-var host. Nothing here is baked into source (architecture doc §4.6).
 | `Facility:TimeZone` | `Facility__TimeZone` | Windows time zone ID, e.g. `Pacific Standard Time` — resolves fine on Linux too, since .NET maps Windows zone IDs through ICU there; no IANA-form (`America/Los_Angeles`) equivalent needed | **Load-bearing** |
 | `Facility:Name` | `Facility__Name` | Display name — accepted but not yet wired to any UI | No |
 | `Facility:LogoPath` | `Facility__LogoPath` | Path under `wwwroot` — accepted but not yet wired to any UI | No |
-| `Facility:PublicBaseUrl` | `Facility__PublicBaseUrl` | This environment's public address (`https://…`, no trailing path), used to build the "cancel this booking" link in members' emails (D150). Set per environment, like `AllowedHosts`. Blank: emails go out without the link and the activity log says why; malformed: the app refuses to start | Recommended |
+| `Facility:PublicBaseUrl` | `Facility__PublicBaseUrl` | This environment's public address (`https://…`, no trailing path), used to build the "cancel this booking" link in members' emails (D150) and the calendar subscription links (D151; falls back to the request's own host if blank). Set per environment, like `AllowedHosts`. Blank: emails go out without the link and the activity log says why; malformed: the app refuses to start | Recommended |
 | `StaffAccess:StaffGroupId` | `StaffAccess__StaffGroupId` | Staff group **object ID** (GUID). Not a secret. | **Load-bearing** |
 | `PracticeIce:MailerMailbox` | `PracticeIce__MailerMailbox` | Mailbox that sends notifications | Practice ice only |
 | `PracticeIce:ApproverDistributionEmail` | `PracticeIce__ApproverDistributionEmail` | Group notified of new requests | Practice ice only |
