@@ -585,6 +585,13 @@ Practice ice brought non-staff sign-ins, so "authenticated" and "staff" stopped 
   page is staff-only unless it opts out. The only member-reachable pages are `/practice-ice/request`,
   `/make-up-game/request`, and `/my-booking/cancel` (`AnyAuthenticatedUser` policy). Staff-only Minimal API endpoints bind `StaffOnly` explicitly.
   Policies live in `StaffAuthorizationPolicies` so tests exercise the real objects (D75).
+- **Every page also declares its own policy** (`StaffOnly`, `AnyAuthenticatedUser`, or
+  `AllowAnonymous`), and `PageAccessTests` fails on a page that doesn't. This is load-bearing, not
+  belt-and-braces: the interactive connection (`/_blazor`) is open to any signed-in user so member
+  pages work for non-staff, and once a member has a circuit, in-app navigation is checked only by
+  `AuthorizeRouteView` against the page's own attribute — the fallback policy never sees it. Under
+  the old staff-only connection, member pages rendered but their buttons silently did nothing for
+  anyone outside the staff group (found live 2026-10-07).
 - **Staff membership is a live Entra group check at sign-in** (`StaffAccessService`,
   `checkMemberGroups`), not an App Role. Group-based app-role assignment needs Entra ID P1, and the
   tenant is on Free. It needs both `GroupMember.Read.All` and `User.Read.All`. Group ownership is
@@ -599,8 +606,9 @@ Practice ice brought non-staff sign-ins, so "authenticated" and "staff" stopped 
   user can always reach sign-out.
 - The staff menu hides staff-only links using the same policy objects. That's presentation only;
   each page enforces access on its own.
-- **Open item:** the per-page carve-out overriding the strict fallback hasn't been confirmed with a
-  real non-staff account. Verify before inviting members at volume.
+- **Open item:** member pages haven't yet been confirmed end to end with a real non-staff account
+  (the 2026-10-07 connection fix is covered by pipeline and bUnit tests and checked live as staff).
+  Verify before inviting members at volume.
 
 ---
 

@@ -229,10 +229,10 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-// Not for /api: those callers are programs reading the status code, and a re-executed POST (the
-// Breely webhook's 401 or 429) lands on the Blazor not-found page, fails its antiforgery check and
-// comes back as 400 (found by PipelineTests, 2026-10-07).
-app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"),
+// Not for /api or /_blazor: those callers are programs reading the status code, and a re-executed
+// POST (the Breely webhook's 401 or 429, a refused circuit negotiate) lands on the Blazor not-found
+// page, fails its antiforgery check and comes back as 400 (found by PipelineTests, 2026-10-07).
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api") && !context.Request.Path.StartsWithSegments("/_blazor"),
     branch => branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseHttpsRedirection();
 
@@ -279,7 +279,22 @@ app.MapRazorPages();
 // (see PublicCalendarEndpoint/PublicAvailabilityEndpoints - plain endpoints, no Blazor circuit),
 // not carved out of the shared circuit's own authorization.
 app.MapRazorComponents<App>()
-    .AddInteractiveServerRenderMode();
+    .AddInteractiveServerRenderMode()
+    // The interactive connection (/_blazor: negotiate, the hub itself, initializers, disconnect) is
+    // open to any signed-in user, not just staff. Under the staff-only fallback it refused members,
+    // so the member pages (practice ice request, make-up game request, self-cancel) rendered but
+    // their buttons silently did nothing for anyone outside the staff group (found live 2026-10-07).
+    // Safe only because every staff page now carries its own StaffOnly [Authorize], which the
+    // circuit's AuthorizeRouteView enforces on in-app navigation - page access no longer depends on
+    // the fallback policy that used to block the connection.
+    .Add(endpoint =>
+    {
+        if (endpoint is RouteEndpointBuilder { RoutePattern.RawText: { } route }
+            && route.StartsWith("/_blazor", StringComparison.Ordinal))
+        {
+            endpoint.Metadata.Add(new AuthorizeAttribute(FacilityScheduler.Services.StaffAuthorizationPolicies.AnyAuthenticatedUser));
+        }
+    });
 app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
 app.MapPublicCalendarFeedEndpoint();

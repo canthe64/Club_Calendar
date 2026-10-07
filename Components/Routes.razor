@@ -2,7 +2,19 @@
     <Found Context="routeData">
         <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
             <NotAuthorized>
-                <RedirectToLogin />
+                @* Signed in but not allowed (a member reaching a staff page by an in-app link): say so.
+                   Sending them to sign-in again would only bounce back here. *@
+                @if (context.User.Identity?.IsAuthenticated == true)
+                {
+                    <div style="padding:16px 24px">
+                        <h1 style="font-size:16px">Not available</h1>
+                        <p style="font-size:13px">This page is for calendar staff only.</p>
+                    </div>
+                }
+                else
+                {
+                    <RedirectToLogin />
+                }
             </NotAuthorized>
         </AuthorizeRouteView>
         <FocusOnNavigate RouteData="routeData" Selector="h1" />

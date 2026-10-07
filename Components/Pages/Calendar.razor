@@ -1,5 +1,6 @@
 @page "/calendar"
 @page "/"
+@attribute [Authorize(Policy = FacilityScheduler.Services.StaffAuthorizationPolicies.StaffOnly)]
 @implements IDisposable
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services

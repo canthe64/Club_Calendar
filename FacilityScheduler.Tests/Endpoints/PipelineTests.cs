@@ -84,6 +84,22 @@ public class PipelineTests : IClassFixture<AppFactory>
     }
 
     [Fact]
+    public async Task TheInteractiveConnection_OpensForAnySignedInUser_ButNotAnonymously()
+    {
+        // Without it a page renders but none of its buttons do anything - which is what members
+        // outside the staff group got on the practice ice request page (found live 2026-10-07).
+        Task<HttpResponseMessage> Negotiate(string? user) =>
+            app.ClientFor(user).PostAsync("/_blazor/negotiate?negotiateVersion=1", null);
+
+        var anonymous = await Negotiate(null);
+
+        Assert.Equal(HttpStatusCode.Unauthorized, anonymous.StatusCode);
+        Assert.True(anonymous.Headers.Contains(TestAuthHandler.ChallengedHeader));
+        Assert.Equal(HttpStatusCode.OK, (await Negotiate("member")).StatusCode);
+        Assert.Equal(HttpStatusCode.OK, (await Negotiate("staff")).StatusCode);
+    }
+
+    [Fact]
     public async Task BreelyWebhook_IsNotBehindSignIn_ButRejectsAWrongSecret()
     {
         var request = new HttpRequestMessage(HttpMethod.Post, "/api/webhooks/breely") { Content = new StringContent("{}", System.Text.Encoding.UTF8, "application/json") };

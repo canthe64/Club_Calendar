@@ -1,4 +1,5 @@
 @page "/club-events"
+@attribute [Authorize(Policy = FacilityScheduler.Services.StaffAuthorizationPolicies.StaffOnly)]
 @using FacilityScheduler.Domain
 @using FacilityScheduler.Services
 @using FacilityScheduler.Components.Calendar
