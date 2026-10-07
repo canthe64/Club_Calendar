@@ -606,9 +606,8 @@ Practice ice brought non-staff sign-ins, so "authenticated" and "staff" stopped 
   user can always reach sign-out.
 - The staff menu hides staff-only links using the same policy objects. That's presentation only;
   each page enforces access on its own.
-- **Open item:** member pages haven't yet been confirmed end to end with a real non-staff account
-  (the 2026-10-07 connection fix is covered by pipeline and bUnit tests and checked live as staff).
-  Verify before inviting members at volume.
+- **Confirmed live with a real non-staff account (2026-10-07):** a guest member submitted a practice
+  ice request after the connection fix deployed.
 
 ---
 
