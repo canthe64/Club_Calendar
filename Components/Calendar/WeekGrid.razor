@@ -41,7 +41,7 @@
                     @foreach (var hour in CalendarStyles.HourRows)
                     {
                         var slotStart = day.Date.AddHours(hour);
-                        <div @onclick="() => OnSlotClick.InvokeAsync(slotStart)"
+                        <div @onclick="() => OnSlotClick.InvokeAsync(slotStart)" data-slot="@slotStart.ToString("yyyy-MM-ddTHH:mm")"
                              style="box-sizing:border-box;height:@(CalendarStyles.RowHeightPx)px;margin-bottom:@(CalendarStyles.RowGapPx)px;border-radius:5px;background:@CalendarStyles.EmptySlotBg;border:1px solid #eef1f3;cursor:pointer"></div>
                     }
                     @foreach (var laid in laidOutItems)

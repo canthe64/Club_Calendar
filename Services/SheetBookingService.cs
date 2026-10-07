@@ -98,7 +98,7 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
     // Phase 7: a short-TTL read cache for GetBookingsForAllSheetsAsync only - the "give me
     // everything in this window, for display" method used by Calendar.razor and
     // PublicAvailabilityService. Deliberately NOT applied to GetEventsInRangeAsync/GetBookingsAsync,
-    // which every conflict check (CreateAsync, CreateAcrossSheetsAsync, UpdateGroupAsync,
+    // which every conflict check (CreateAcrossSheetsAsync, UpdateGroupAsync,
     // PreviewSeriesConflictsAsync) reads directly - conflict enforcement must always see live data,
     // never a cached snapshot that could mask a just-created booking. Keys are tracked here (not
     // static, since this service is registered as a singleton) so a write can invalidate every
@@ -143,52 +143,6 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
     // embedded directly into a Graph $filter query string (FindByExternalIdAsync) and this app has
     // no other reason to accept anything an OData filter clause could misinterpret.
     private static readonly Regex ExternalIdPattern = new(@"^[A-Za-z0-9:_-]+$", RegexOptions.Compiled);
-
-    public Task<BookingResult> CreateHoldAsync(SheetBooking booking, string actingUser, CancellationToken ct = default)
-    {
-        booking.State = BookingState.Hold;
-        return CreateAsync(booking, actingUser, ct);
-    }
-
-    public Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, string actingUser, CancellationToken ct = default)
-    {
-        booking.State = BookingState.Confirmed;
-        return CreateAsync(booking, actingUser, ct);
-    }
-
-    private async Task<BookingResult> CreateAsync(SheetBooking booking, string actingUser, CancellationToken ct)
-    {
-        var sem = SheetLocks.GetOrAdd(booking.SheetMailbox, _ => new SemaphoreSlim(1, 1));
-        await sem.WaitAsync(ct);
-        try
-        {
-            var overlapping = await GetEventsInRangeAsync(booking.SheetMailbox, booking.Start, booking.End, ct);
-            if (overlapping.Count > 0)
-            {
-                var conflicts = overlapping.Select(e => FromGraphEvent(booking.SheetMailbox, e)).ToList();
-                return BookingResult.Conflict(conflicts);
-            }
-
-            if (booking.BookingGroupId == Guid.Empty)
-            {
-                booking.BookingGroupId = Guid.NewGuid();
-            }
-
-            var graphEvent = ToGraphEvent(booking);
-            var created = await graph.CreateEventAsync(booking.SheetMailbox, graphEvent, ct);
-
-            booking.EventId = created?.Id;
-            booking.ICalUId = created?.ICalUId;
-            InvalidateViewCache();
-            await log.LogActionAsync("BookingCreated", actingUser, booking.EventId, booking.SheetMailbox,
-                $"{booking.Category} {booking.State}, {booking.Start:g}-{booking.End:g}" + (string.IsNullOrWhiteSpace(booking.RenterName) ? "" : $", {booking.RenterName}"), ct);
-            return BookingResult.Success(booking);
-        }
-        finally
-        {
-            sem.Release();
-        }
-    }
 
     /// <summary>
     /// Creates the same conceptual booking across multiple sheets at once (e.g. a rental

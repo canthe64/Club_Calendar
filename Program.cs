@@ -74,9 +74,11 @@ builder.Services.AddRateLimiter(options =>
     // a well-behaved client (or Breely, on the webhook limiter) would actually check for.
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+    // One bucket shared by every anonymous visitor (not per-IP). 150 rather than the original 60 so
+    // a busy evening's page views can't lock everyone out for the rest of the minute (2026-10-07).
     options.AddFixedWindowLimiter("public-api", limiterOptions =>
     {
-        limiterOptions.PermitLimit = 60;
+        limiterOptions.PermitLimit = 150;
         limiterOptions.Window = TimeSpan.FromMinutes(1);
         limiterOptions.QueueLimit = 0;
     });
@@ -227,7 +229,11 @@ if (!app.Environment.IsDevelopment())
     // The default HSTS value is 30 days. You may want to change this for production scenarios, see https://aka.ms/aspnetcore-hsts.
     app.UseHsts();
 }
-app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// Not for /api: those callers are programs reading the status code, and a re-executed POST (the
+// Breely webhook's 401 or 429) lands on the Blazor not-found page, fails its antiforgery check and
+// comes back as 400 (found by PipelineTests, 2026-10-07).
+app.UseWhen(context => !context.Request.Path.StartsWithSegments("/api"),
+    branch => branch.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true));
 app.UseHttpsRedirection();
 
 // Clickjacking/MIME-sniffing hardening - previously sent on no response at all. X-Frame-Options and
@@ -245,6 +251,12 @@ app.Use(async (context, next) =>
     context.Response.Headers.Append("X-Content-Type-Options", "nosniff");
     await next();
 });
+
+// Explicit, and after UseStatusCodePagesWithReExecute/UseExceptionHandler: WebApplication otherwise
+// routes once at the very start of the pipeline, so a re-executed /not-found or /Error had no
+// endpoint, fell to the staff-only fallback policy and challenged - a rate-limited anonymous visitor
+// got sent to Microsoft sign-in instead of a 429 (found by PipelineTests, 2026-10-07).
+app.UseRouting();
 
 app.UseCors();
 app.UseRateLimiter();
@@ -277,6 +289,14 @@ app.MapMakeUpGamePublicEndpoint();
 app.MapBreelyBookingWebhookEndpoint();
 app.MapSettingsLogsEndpoint();
 app.MapStaffSearchExportEndpoint();
+
+// Any path nothing else matched is a plain 404, for everyone. Without this, an unmatched request
+// has no endpoint, so the staff-only fallback policy applies to it: an anonymous visitor who
+// mistyped a /public/* URL was sent to Microsoft sign-in and a member got access denied, never
+// reaching the (anonymous) not-found page. Lowest priority, and only for paths that match no
+// endpoint at all, so it can't make a real page anonymous. File-looking paths (a dot in the last
+// segment) are excluded by MapFallback's default pattern and still get the staff-only treatment.
+app.MapFallback(() => Results.NotFound()).AllowAnonymous();
 
 // Debug-tier only - lets a Settings-page reader see "the app restarted at X" without needing Azure
 // portal access to the platform's own Activity Log. ApplicationStopping fires on a graceful

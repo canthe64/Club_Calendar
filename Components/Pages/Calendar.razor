@@ -51,8 +51,8 @@
                    clicks while everything else on the page hits this and closes it first. That
                    includes the + New Event button itself, which is why reopening still takes a
                    second click rather than toggling twice on one. *@
-                <div @onclick="CloseNewMenu" style="position:fixed;inset:0;z-index:19"></div>
-                <div style="position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #d7dfe5;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);z-index:20;min-width:200px;overflow:hidden">
+                <div @onclick="CloseNewMenu" class="cal-new-backdrop" style="position:fixed;inset:0;z-index:19"></div>
+                <div class="cal-new-menu" style="position:absolute;top:100%;left:0;margin-top:4px;background:#fff;border:1px solid #d7dfe5;border-radius:6px;box-shadow:0 6px 18px rgba(0,0,0,.15);z-index:20;min-width:200px;overflow:hidden">
                     <div @onclick="SelectNewEvent" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer">New Event</div>
                     <div @onclick="SelectNewOffIceEvent" style="padding:9px 15px;font-size:13.5px;font-weight:600;color:#1e2a33;cursor:pointer;border-top:1px solid #f2f5f7">New Off-Ice Event</div>
                     @* Series is on-ice only - off-ice events have no recurrence concept, so the hint
@@ -78,7 +78,7 @@
             @foreach (var cat in CalendarStyles.SheetCategories)
             {
                 var isOn = _onIceCategories.Contains(cat);
-                <span @onclick="() => ToggleOnIceCategory(cat)"
+                <span @onclick="() => ToggleOnIceCategory(cat)" role="button" aria-pressed="@(isOn ? "true" : "false")"
                       style="border:1px solid @CalendarStyles.CategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.CategoryColor(cat));background:@(isOn ? CalendarStyles.CategoryColor(cat) : "#fff");padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
                     @CalendarStyles.CategoryLabel(cat)
                 </span>
@@ -92,7 +92,7 @@
             @foreach (var cat in CalendarStyles.ClubEventCategories)
             {
                 var isOn = _offIceCategories.Contains(cat);
-                <span @onclick="() => ToggleOffIceCategory(cat)"
+                <span @onclick="() => ToggleOffIceCategory(cat)" role="button" aria-pressed="@(isOn ? "true" : "false")"
                       style="border:1px solid @CalendarStyles.ClubEventCategoryColor(cat);color:@(isOn ? "#fff" : CalendarStyles.ClubEventCategoryColor(cat));background:@(isOn ? CalendarStyles.ClubEventCategoryColor(cat) : "#fff");padding:4px 12px;border-radius:12px;font-weight:600;cursor:pointer;white-space:nowrap">
                     @CalendarStyles.ClubEventCategoryLabel(cat)
                 </span>

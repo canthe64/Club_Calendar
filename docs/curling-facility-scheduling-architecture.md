@@ -413,7 +413,7 @@ HTML with `StringBuilder` and `WebUtility.HtmlEncode` on every dynamic string (D
 from a live incident: adding `.AllowAnonymous()` to `MapRazorComponents<App>()` disabled
 authorization for **every** staff page, because all routable components share one endpoint set.
 Loading `blazor.web.js` for anonymous visitors also produced unremovable error banners. All public
-surfaces are rate-limited (`public-api`, 60/min, one global bucket; the subscription feed has its
+surfaces are rate-limited (`public-api`, 150/min, one global bucket; the subscription feed has its
 own, §5.4.7).
 
 **5.4.1 JSON availability API and embed widget** (`/api/public/availability`,
@@ -658,6 +658,14 @@ anyone changing it should know.
   endpoints (D15).
 - A global fallback policy silently captures every framework route the app didn't write (`/Error`,
   not-found, the Microsoft.Identity.Web pages). Each needs an explicit decision.
+- `UseStatusCodePagesWithReExecute` only reaches its page if `UseRouting()` runs after it.
+  `WebApplication` otherwise routes once at the start, and the re-executed request reaches
+  authorization with no endpoint, so the fallback policy challenges it. That turned a rate-limited
+  anonymous visitor's 429 into a sign-in redirect. Status-code pages are also kept off `/api`, where
+  a re-executed POST failed antiforgery and returned 400 (found 2026-10-07).
+- A request that matches no endpoint gets the fallback policy too, so a mistyped public URL sent
+  anonymous visitors to sign-in. An anonymous `MapFallback` returning 404 catches those; it only
+  ever matches paths no real endpoint does.
 - Never assume a claim-type constant is what the identity actually uses (D71, D75).
 - A fire-and-forget `Task` in a Blazor event handler loses its final render (D92).
 - An intermittent bug that fails to reproduce a few times hasn't been shown to be absent.
@@ -748,14 +756,17 @@ which live in the domain layer (`Domain/BookingCategory.cs`, `Domain/ClubEventCa
 
 ## 11. Automated Testing
 
-`FacilityScheduler.Tests` (xUnit, Moq, bUnit) runs in CI on every push and PR to `master`
+`FacilityScheduler.Tests` (xUnit, bUnit, `Mvc.Testing`) runs in CI on every push and PR to `master`
 (`.github/workflows/tests.yml`, `windows-latest`, with coverage collection).
 
 - **Approach.** Services run against `FakeGraphEventGateway`, an in-memory stand-in for
   `IGraphEventGateway` (D59) that models the Graph behaviors the code depends on: PATCH merge
   semantics, 404 on missing events, UTC normalization, and an injectable delay so concurrency tests
   really interleave. Endpoint logic is tested directly via `internal` helpers (D60). Pages and
-  components use bUnit against the app's real authorization policies.
+  components use bUnit against the app's real authorization policies. `PipelineTests` host the real
+  `Program.cs` in memory (`AppFactory`: Graph fakes, a header-driven test sign-in, no tenant or
+  secrets) to cover what only the assembled pipeline decides: each route's access level, the
+  clickjacking headers, CORS, and the rate limiters.
 - **Discipline.** A behavioral fix gets a test that fails against the pre-fix code, verified by
   reverting the fix. Prefer a new theory row or assertion on an existing test over a new test. Tests
   pin behavior, not markup, styling or copy; when copy changes, delete its test rather than
@@ -763,9 +774,9 @@ which live in the domain layer (`Domain/BookingCategory.cs`, `Domain/ClubEventCa
 - **What automated tests can't cover:** the real tenant — permissions, Application Access Policy
   scoping, real token claim shapes. Those are verified live. The suite has never run against a real
   Azure AD/Graph tenant.
-- **Known gaps:** recurring-instance expansion in the fake; full HTTP-pipeline integration tests
-  (routing, rate limiting, auth handler — would need `WebApplicationFactory`); bUnit coverage of the
-  Off-Ice Events list and the practice-ice pages.
+- **Known gaps:** recurring-instance expansion in the fake; the real OpenID Connect handler (the
+  pipeline tests substitute their own sign-in); bUnit coverage of the Off-Ice Events list and the
+  practice-ice pages.
 
 The per-area coverage record through 2026-09-28 is Part D of [`decision-log.md`](decision-log.md),
 kept as history and no longer maintained per test.

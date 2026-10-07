@@ -1,3 +1,4 @@
+using AngleSharp.Dom;
 using Bunit;
 using FacilityScheduler;
 using FacilityScheduler.Components.Pages;
@@ -16,8 +17,12 @@ public class CalendarFilterTests : BunitContext
         return Render<Calendar>();
     }
 
-    private static void ClickChip(IRenderedComponent<Calendar> cut, string label) =>
-        cut.FindAll("span").First(s => s.TextContent.Trim() == label).Click();
+    private static IElement Chip(IRenderedComponent<Calendar> cut, string label) =>
+        cut.FindAll("[aria-pressed]").First(s => s.TextContent.Trim() == label);
+
+    private static void ClickChip(IRenderedComponent<Calendar> cut, string label) => Chip(cut, label).Click();
+
+    private static bool IsSelected(IElement chip) => chip.GetAttribute("aria-pressed") == "true";
 
     [Fact]
     public void ShowRow_RendersBothGroupHeadings()
@@ -77,15 +82,13 @@ public class CalendarFilterTests : BunitContext
     {
         var cut = RenderCalendar();
         var label = CalendarStyles.CategoryLabel(BookingCategory.League);
-        var colour = CalendarStyles.CategoryColor(BookingCategory.League);
-
-        // Selected chips are filled with the category colour; deselected ones are white.
-        Assert.Contains($"background:{colour}", cut.Markup);
+        var otherLabel = CalendarStyles.CategoryLabel(BookingCategory.GroupEvent);
+        Assert.True(IsSelected(Chip(cut, label)));
 
         ClickChip(cut, label);
 
-        var chip = cut.FindAll("span").First(s => s.TextContent.Trim() == label);
-        Assert.Contains("background:#fff", chip.GetAttribute("style"));
+        Assert.False(IsSelected(Chip(cut, label)));
+        Assert.True(IsSelected(Chip(cut, otherLabel)));
     }
 
     [Fact]
@@ -96,13 +99,9 @@ public class CalendarFilterTests : BunitContext
 
         ClickChip(cut, label);
 
-        var toggled = cut.FindAll("span").First(s => s.TextContent.Trim() == label);
-        Assert.Contains("background:#fff", toggled.GetAttribute("style"));
-
+        Assert.False(IsSelected(Chip(cut, label)));
         // Its neighbour is untouched.
-        var otherLabel = CalendarStyles.ClubEventCategoryLabel(ClubEventCategory.Closure);
-        var other = cut.FindAll("span").First(s => s.TextContent.Trim() == otherLabel);
-        Assert.Contains($"background:{CalendarStyles.ClubEventCategoryColor(ClubEventCategory.Closure)}", other.GetAttribute("style"));
+        Assert.True(IsSelected(Chip(cut, CalendarStyles.ClubEventCategoryLabel(ClubEventCategory.Closure))));
     }
 
     [Fact]
@@ -126,5 +125,40 @@ public class CalendarFilterTests : BunitContext
         var cut = RenderCalendar();
 
         Assert.Equal(2, cut.FindAll("span").Count(s => s.TextContent.Trim() == "Other"));
+    }
+
+    [Fact]
+    public async Task DeselectingAChip_HidesThatCategorysEvents_AndNothingElse()
+    {
+        var services = StaffPageServices.Register(this);
+        var day = services.Facility.Today;
+        Assert.True((await services.Bookings.BookAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[0], Start = day.AddHours(19), End = day.AddHours(21),
+            Category = BookingCategory.League, State = BookingState.Confirmed, RenterName = "Tuesday League"
+        })).IsSuccess);
+        Assert.True((await services.Bookings.BookAsync(new SheetBooking
+        {
+            SheetMailbox = TestFacility.SheetMailboxes[1], Start = day.AddHours(19), End = day.AddHours(21),
+            Category = BookingCategory.GroupEvent, State = BookingState.Confirmed, RenterName = "Smith Wedding"
+        })).IsSuccess);
+        await services.ClubEvents.CreateAsync(new ClubEvent
+        {
+            Title = "Board Meeting", Category = ClubEventCategory.Meetings, Start = day, End = day, IsAllDay = true
+        }, "tester");
+
+        var cut = Render<Calendar>();
+        cut.WaitForAssertion(() => Assert.Contains("Tuesday League", cut.Markup));
+        Assert.Contains("Smith Wedding", cut.Markup);
+        Assert.Contains("Board Meeting", cut.Markup);
+
+        ClickChip(cut, CalendarStyles.CategoryLabel(BookingCategory.League));
+        Assert.DoesNotContain("Tuesday League", cut.Markup);
+        Assert.Contains("Smith Wedding", cut.Markup);
+        Assert.Contains("Board Meeting", cut.Markup);
+
+        ClickChip(cut, CalendarStyles.ClubEventCategoryLabel(ClubEventCategory.Meetings));
+        Assert.DoesNotContain("Board Meeting", cut.Markup);
+        Assert.Contains("Smith Wedding", cut.Markup);
     }
 }

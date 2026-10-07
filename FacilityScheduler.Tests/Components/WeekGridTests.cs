@@ -18,10 +18,7 @@ public class WeekGridTests : BunitContext
             .Add(g => g.OnSlotClick, (DateTime s) => slotClicked = s)
             .Add(g => g.OnDayClick, (DateTime _) => dayClicked = true));
 
-        // Rendering order matches CalendarStyles.HourRows (0..23) nested inside the day loop, so the
-        // 10th empty-slot div (index 9) in Monday's column is the 9am slot.
-        var emptySlots = cut.FindAll("div[style*='background:#f6f8f9']");
-        emptySlots[9].Click();
+        cut.Find("[data-slot='2026-08-17T09:00']").Click();
 
         Assert.Equal(WeekStart.Date.AddHours(9), slotClicked);
         Assert.False(dayClicked);

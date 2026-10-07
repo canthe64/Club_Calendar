@@ -7,7 +7,9 @@
    anonymous visitor who mistyped a /public/* URL got bounced to a Microsoft sign-in page instead of
    this one, and a signed-in non-staff member got access denied. Note this is a per-component
    attribute - NOT .AllowAnonymous() on the shared MapRazorComponents registration, which is the
-   thing D15 forbids because it would expose every staff page. *@
+   thing D15 forbids because it would expose every staff page. A mistyped URL only gets this far
+   because of the anonymous MapFallback in Program.cs (added 2026-10-07); before that, the request
+   matched no endpoint and the fallback policy challenged it first. *@
 
 <h3>Not Found</h3>
 <p>Sorry, the content you are looking for does not exist.</p>

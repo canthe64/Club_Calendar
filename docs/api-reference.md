@@ -66,7 +66,7 @@ Returns open-for-group-event time slots and upcoming club-wide events as JSON. B
 - **Auth:** none (anonymous).
 - **CORS:** `AllowAnyOrigin`, `GET` only (safe because the response carries no credentials/cookies
   and nothing sensitive - `Program.cs:48-54`).
-- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Rate limit:** shared `public-api` limiter, 150 req/min, no queue.
 - **Cache:** server-side, 60 seconds per `(start-date, days)` key. A repeated call within that window
   returns the same cached snapshot rather than re-querying Graph.
 
@@ -142,7 +142,7 @@ silent while the server computes the next view.
 
 - **Auth:** none (anonymous).
 - **CORS:** not applicable (same-origin page navigation/iframe embed, not a cross-origin fetch).
-- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Rate limit:** shared `public-api` limiter, 150 req/min, no queue.
 - **Cache:** server-side, 60 seconds per requested range (a distinct cache key per month/week/day
   ever viewed within the clamped window below - each entry still expires after 60s regardless).
 
@@ -205,7 +205,7 @@ Same hand-built-HTML approach and rationale as the other two endpoints.
 
 - **Auth:** none (anonymous).
 - **CORS:** not applicable (page navigation, not a cross-origin fetch).
-- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Rate limit:** shared `public-api` limiter, 150 req/min, no queue.
 - **Cache:** server-side, 60 seconds per `(start, end, sheets)` combination.
 
 **Query parameters**
@@ -242,7 +242,7 @@ submits the request.
 
 - **Auth:** none (anonymous) for this page; the linked request page requires sign-in.
 - **CORS:** not applicable (page navigation, not a cross-origin fetch).
-- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Rate limit:** shared `public-api` limiter, 150 req/min, no queue.
 - **Cache:** server-side, 60 seconds, keyed by date range - the lead-time/horizon window itself
   shifts continuously with the current time, so results reflect "now" within that cache window.
 
@@ -261,7 +261,7 @@ free one) and links to `/make-up-game/request?start=...`, the authenticated page
 acknowledges the conditions and books.
 
 - **Auth:** none for this page; the linked request page requires sign-in.
-- **Rate limit:** shared `public-api` limiter, 60 req/min, no queue.
+- **Rate limit:** shared `public-api` limiter, 150 req/min, no queue.
 - **Cache:** server-side, 60 seconds.
 
 **Response `200 OK`** — `text/html; charset=utf-8`. No query parameters.
@@ -433,8 +433,6 @@ Attendant, so this service is the only thing preventing two overlapping bookings
 
 | Method | Signature | Behavior |
 |---|---|---|
-| `CreateHoldAsync` | `Task<BookingResult> CreateHoldAsync(SheetBooking booking, string actingUser)` | Creates a single-sheet booking in `Hold` state. Conflict-checked against that sheet's existing events; returns `BookingResult.Conflict` (no write) if anything overlaps. Logs `BookingCreated` on success (`actingUser`, architecture doc §4.9). |
-| `CreateConfirmedAsync` | `Task<BookingResult> CreateConfirmedAsync(SheetBooking booking, string actingUser)` | Same as above, in `Confirmed` state. |
 | `CreateAcrossSheetsAsync` | `Task<GroupBookingResult> CreateAcrossSheetsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, string actingUser)` | Creates the same conceptual booking on multiple sheets at once, sharing one `BookingGroupId`. All-or-nothing: any conflict on any sheet aborts the whole request and reports every conflict found. Season-gated (architecture doc §4.10, D84) - a request outside the configured booking season is rejected up front, before any lock or Graph call, via a synthetic `GroupBookingResult.Conflict` entry (`SheetMailbox = "__season__"`). Called by the staff booking form. |
 | `CreateTakingReleasedHoldsAsync` | `Task<GroupBookingResult> CreateTakingReleasedHoldsAsync(IEnumerable<string> sheetMailboxes, SheetBooking template, DateTime holdReleaseCutoff, string actingUser)` | `CreateAcrossSheetsAsync` for member-hosted ice (practice ice, make-up games): same season gate, locking, and all-or-nothing live check, except that an open Group Event hold is not a conflict where the time it overlaps lies before `holdReleaseCutoff` - it's trimmed around the new booking instead (D148), logged as `GroupEventHoldTrimmed`. A trim that fails after the booking is written is logged (`GroupEventHoldTrimFailed`), not thrown. |
 | `ConfirmAsync` | `Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser)` | Flips a single event from Hold to Confirmed (`ShowAs: Busy`). |
@@ -540,7 +538,6 @@ lambdas were not, which is how a full staff lockout reached production (architec
 | `BookingCategory` | `GroupEvent`, `League`, `Event`, `Bonspiel`, `Maintenance`, `PracticeIce`, `LearnToCurl`, `Other` | Display labels ("Group Event", "Practice Ice", "Learn To Curl") are kept separate from these wire values via `CalendarStyles.CategoryLabel` - the values above are what's actually round-tripped through Graph's `categories` property. |
 | `BookingState` | `Hold`, `Confirmed` | |
 | `ClubEventCategory` | `OutOfTownBonspiels`, `Competitions`, `Activities`, `Closure`, `Other`, `Meetings` | Member **names** are the public API wire value (D79) and the Graph category literal - renaming one is a breaking change on both fronts. Ordinals are unpublished, so declaration order is free; picker display order is `CalendarStyles.ClubEventCategories`. Display label differs from the member name only for `OutOfTownBonspiels` ("Out of Town Bonspiels") - see `CalendarStyles.ClubEventCategoryLabel`. |
-| `BookingResult` | `IsSuccess`, `Booking?`, `Conflicts: List<SheetBooking>` | Result of a single-sheet create. |
 | `GroupBookingResult` | `IsSuccess`, `Bookings: List<SheetBooking>`, `Conflicts: List<SheetBooking>` | Result of a multi-sheet create/update. |
 
 ### `FacilityConfiguration`

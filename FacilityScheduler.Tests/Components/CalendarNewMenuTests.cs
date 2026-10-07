@@ -24,11 +24,7 @@ public class CalendarNewMenuTests : BunitContext
 
     /// <summary>The dismiss backdrop: fixed, full-viewport, and behind the panel in z-order.</summary>
     private static IElement? Backdrop(IRenderedComponent<Calendar> cut) =>
-        cut.FindAll("div").FirstOrDefault(el =>
-        {
-            var style = el.GetAttribute("style") ?? "";
-            return style.Contains("position:fixed") && style.Contains("inset:0");
-        });
+        cut.FindAll(".cal-new-backdrop").FirstOrDefault();
 
     private static bool MenuIsOpen(IRenderedComponent<Calendar> cut) =>
         cut.Markup.Contains("New Off-Ice Event");
@@ -75,8 +71,7 @@ public class CalendarNewMenuTests : BunitContext
         NewEventButton(cut).Click();
 
         var backdropZ = ZIndexOf(Backdrop(cut)!);
-        var panelZ = ZIndexOf(cut.FindAll("div").First(el =>
-            (el.GetAttribute("style") ?? "").Contains("position:absolute;top:100%")));
+        var panelZ = ZIndexOf(cut.Find(".cal-new-menu"));
 
         Assert.True(backdropZ < panelZ, $"backdrop z-index {backdropZ} must sit below the panel's {panelZ}");
     }
