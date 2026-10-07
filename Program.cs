@@ -98,6 +98,16 @@ builder.Services.AddRateLimiter(options =>
     // prefetcher is the realistic trigger, not a hostile actor, since both sit behind the staff-only
     // fallback policy already. Separate from public-api/booking-webhook so a burst here can't starve
     // either of those.
+    // The calendar subscription feed (/public/calendar.ics) gets its own bucket: subscribers' calendar
+    // servers poll it on their own schedules, many at once, and a refused fetch is one of the ways a
+    // subscription quietly goes stale. Responses are cached (15 min), so a generous limit is cheap.
+    options.AddFixedWindowLimiter("calendar-feed", limiterOptions =>
+    {
+        limiterOptions.PermitLimit = 300;
+        limiterOptions.Window = TimeSpan.FromMinutes(1);
+        limiterOptions.QueueLimit = 0;
+    });
+
     options.AddFixedWindowLimiter("staff-export", limiterOptions =>
     {
         limiterOptions.PermitLimit = 10;
@@ -260,6 +270,7 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 app.MapPublicAvailabilityEndpoints();
 app.MapPublicCalendarEndpoint();
+app.MapPublicCalendarFeedEndpoint();
 app.MapPublicSearchEndpoint();
 app.MapPracticeIcePublicEndpoint();
 app.MapMakeUpGamePublicEndpoint();

@@ -473,7 +473,32 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     public Task<PublicMonthView> GetDayViewAsync(DateTime day, CancellationToken ct = default) =>
         GetRangeViewAsync(day.Date, day.Date.AddDays(1), $"public-day:{day:yyyyMMdd}", ct);
 
-    private async Task<PublicMonthView> GetRangeViewAsync(DateTime start, DateTime end, string cacheKey, CancellationToken ct)
+    /// <summary>Months of history the calendar subscription feed carries (operator decision, 2026-10-05).</summary>
+    public const int FeedMonthsBack = 1;
+
+    /// <summary>Months ahead the feed carries. Kept modest on purpose: Graph's calendarView cost grows
+    /// with the width of the range when recurring series are involved (D90), and a slow fetch is one
+    /// of the ways a calendar app's subscription quietly stops refreshing.</summary>
+    public const int FeedMonthsAhead = 3;
+
+    // Longer than the 60s page cache: subscribing calendar apps poll on their own schedule, many at
+    // once, and every miss is a Graph fan-out. Still cleared on every booking write (ViewCacheRegistry),
+    // so a change is never held back by it.
+    private static readonly TimeSpan FeedCacheTtl = TimeSpan.FromMinutes(15);
+
+    /// <summary>
+    /// The calendar subscription feed's data (/public/calendar.ics): exactly the public calendar's
+    /// view (same titles, privacy rules, sheet counts, and publish cutoff - same method), over one
+    /// month back to three months ahead. The operator's requirement is that the feed and the page
+    /// match, so the feed gets no data path of its own.
+    /// </summary>
+    public Task<PublicMonthView> GetFeedViewAsync(CancellationToken ct = default)
+    {
+        var today = facility.Today;
+        return GetRangeViewAsync(today.AddMonths(-FeedMonthsBack), today.AddMonths(FeedMonthsAhead).AddDays(1), $"public-feed:{today:yyyyMMdd}", ct, FeedCacheTtl);
+    }
+
+    private async Task<PublicMonthView> GetRangeViewAsync(DateTime start, DateTime end, string cacheKey, CancellationToken ct, TimeSpan? ttl = null)
     {
         if (cache.TryGetValue(cacheKey, out PublicMonthView? cached) && cached is not null)
         {
@@ -514,7 +539,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             .ToList();
 
         var view = new PublicMonthView(bookingLabels, eventLabels);
-        cache.Set(cacheKey, view, CacheTtl);
+        cache.Set(cacheKey, view, ttl ?? CacheTtl);
         viewCache.Track(cacheKey);
         return view;
     }

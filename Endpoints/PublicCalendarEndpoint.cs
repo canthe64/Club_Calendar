@@ -51,16 +51,20 @@ public static class PublicCalendarEndpoint
         app.MapGet("/public/calendar", async (string? view, string? month, string? date,
             string? filtered, string[]? categories, string? showClubEvents,
             string? clubFiltered, string[]? clubCategories,
-            PublicAvailabilityService service, FacilityConfiguration facility, CancellationToken ct) =>
+            PublicAvailabilityService service, FacilityConfiguration facility, HttpContext http, CancellationToken ct) =>
         {
             var today = facility.Today;
             var mode = ParseView(view);
+            // The subscribe links must be absolute (a calendar app fetches them on its own). The
+            // configured public address wins; otherwise this request's own host, which AllowedHosts
+            // has already vouched for.
+            var siteUrl = facility.PublicBaseUrl ?? $"{http.Request.Scheme}://{http.Request.Host}";
             var filter = ParseFilter(filtered, categories, showClubEvents, clubFiltered, clubCategories);
             var html = mode switch
             {
-                ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
-                ViewMode.Day => await RenderDayPageAsync(ParseDate(date, today) ?? today, today, filter, service, ct),
-                _ => await RenderMonthPageAsync(ResolveMonthAnchor(month, date, today), today, filter, service, ct),
+                ViewMode.Week => await RenderWeekPageAsync(ParseDate(date, today) ?? today, today, filter, siteUrl, service, ct),
+                ViewMode.Day => await RenderDayPageAsync(ParseDate(date, today) ?? today, today, filter, siteUrl, service, ct),
+                _ => await RenderMonthPageAsync(ResolveMonthAnchor(month, date, today), today, filter, siteUrl, service, ct),
             };
             return Results.Content(html, "text/html; charset=utf-8");
         })
@@ -244,7 +248,9 @@ public static class PublicCalendarEndpoint
         }
     }
 
-    private static PublicMonthView ApplyFilter(PublicMonthView view, FilterState filter) => view with
+    // internal - the subscription feed (PublicCalendarFeedEndpoint) filters with this exact method, so
+    // the feed and the page can't disagree about what a filter shows.
+    internal static PublicMonthView ApplyFilter(PublicMonthView view, FilterState filter) => view with
     {
         Bookings = [.. view.Bookings.Where(b => filter.Categories.Contains(ParseCategory(b.CategoryLabel)))],
         ClubEvents = [.. view.ClubEvents.Where(ce => filter.ClubCategories.Contains(ce.Category))]
@@ -258,7 +264,7 @@ public static class PublicCalendarEndpoint
     // the hand-built HTML - there's no Razor auto-escaping here to fall back on.
     private static string H(string? s) => WebUtility.HtmlEncode(s ?? string.Empty);
 
-    private static BookingCategory ParseCategory(string label) =>
+    internal static BookingCategory ParseCategory(string label) =>
         Enum.TryParse<BookingCategory>(label, out var category) ? category : BookingCategory.Other;
 
     private static string FormatClubEventRange(PublicClubEventLabel ce)
@@ -421,7 +427,7 @@ public static class PublicCalendarEndpoint
     // are hidden, so a collapsed filter can't silently explain an emptier-looking calendar.
     //
     // internal, not private - reached directly by PublicCalendarFilterCollapseTests (D60's precedent).
-    internal static string AppendCategoryFilterForm(ViewMode mode, DateTime anchor, FilterState filter)
+    internal static string AppendCategoryFilterForm(ViewMode mode, DateTime anchor, FilterState filter, string siteUrl = "")
     {
         var anchorField = mode == ViewMode.Month
             ? $"""<input type="hidden" name="month" value="{anchor:yyyy-MM}">"""
@@ -479,8 +485,45 @@ public static class PublicCalendarEndpoint
                     <button type="submit" style="margin-left:auto;background:#2d5f8a;color:#fff;border:none;padding:4px 14px;border-radius:6px;font-weight:600;font-size:13px;cursor:pointer">Apply</button>
                 </div>
             </form>
+            {SubscribeSection(filter, siteUrl)}
             </details>
             """ + FiltersStartStateScript;
+    }
+
+    // "Subscribe to this calendar" (2026-10-05): the iCalendar feed for exactly the categories applied
+    // above, so a subscription shows what this page shows (PublicCalendarFeedEndpoint). Three ways in,
+    // because each calendar app accepts a different one: Google's own add-by-link, a webcal:// link
+    // that Outlook and Apple Calendar open as a subscription, and the plain address to paste anywhere.
+    // The staleness caveat is the operator's chosen answer to a limitation no feed can fix.
+    internal static string SubscribeSection(FilterState filter, string siteUrl)
+    {
+        var feedUrl = PublicCalendarFeedEndpoint.FeedUrl(siteUrl, filter);
+        var webcalUrl = feedUrl.Contains("://", StringComparison.Ordinal) ? "webcal://" + feedUrl[(feedUrl.IndexOf("://", StringComparison.Ordinal) + 3)..] : feedUrl;
+        var googleUrl = "https://calendar.google.com/calendar/r?cid=" + Uri.EscapeDataString(webcalUrl);
+        const string button = "display:inline-block;border:1px solid #d7dfe5;background:#fff;color:#2d5f8a;border-radius:6px;padding:4px 10px;font-weight:600;font-size:12.5px;text-decoration:none;cursor:pointer";
+
+        return $"""
+            <details class="pub-cal-subscribe" style="margin-top:8px;border-top:1px solid #e7ecef;padding-top:8px">
+                <summary style="cursor:pointer;font-weight:600;color:#2d5f8a">Subscribe to this calendar</summary>
+                <div style="margin-top:8px;display:flex;flex-direction:column;gap:8px">
+                    <div style="color:#5a7183">Adds this calendar, with the categories applied above, to your own calendar app.</div>
+                    <div style="display:flex;gap:8px;flex-wrap:wrap">
+                        <a href="{H(googleUrl)}" target="_blank" rel="noopener" style="{button}">Add to Google Calendar</a>
+                        <a href="{H(webcalUrl)}" target="_top" style="{button}">Open in Outlook / Apple Calendar</a>
+                    </div>
+                    <div style="display:flex;gap:6px">
+                        <input id="pub-cal-feed-url" type="text" readonly value="{H(feedUrl)}" aria-label="Calendar feed address"
+                               style="flex:1;min-width:0;border:1px solid #d7dfe5;border-radius:6px;padding:4px 8px;font-size:12px;color:#1e2a33;font-family:inherit">
+                        <button type="button" id="pub-cal-feed-copy" style="{button}">Copy link</button>
+                    </div>
+                    <div style="font-size:12px;color:#90a0ab">
+                        Subscribed calendars are refreshed by your calendar app on its own schedule - Google can take up to a
+                        day, and subscriptions sometimes stop updating without warning. The live calendar is always current:
+                        <a href="{H(siteUrl)}/public/calendar" target="_top" style="color:#2d5f8a">{H(siteUrl)}/public/calendar</a>
+                    </div>
+                </div>
+            </details>
+            """;
     }
 
     // Runs immediately after the <details> it controls, before the grid below renders, so a phone
@@ -496,11 +539,24 @@ public static class PublicCalendarEndpoint
                 filters.open = saved !== null ? saved === '1' : window.matchMedia('(min-width: 801px)').matches;
                 // Only a visitor's own click is remembered - setting the default above fires the
                 // same 'toggle' event, which would otherwise save the width default as a choice.
-                filters.querySelector('summary').addEventListener('click', function () {
+                filters.querySelector(':scope > summary').addEventListener('click', function () {
                     setTimeout(function () {
                         try { sessionStorage.setItem('pubCalFiltersOpen', filters.open ? '1' : '0'); } catch (e) { }
                     }, 0);
                 });
+
+                // Copy link: the clipboard API can be refused inside an embedding iframe, so the
+                // address is selected first - the visitor can still press Ctrl+C / long-press copy.
+                var copy = document.getElementById('pub-cal-feed-copy');
+                var feedInput = document.getElementById('pub-cal-feed-url');
+                if (copy && feedInput) {
+                    copy.addEventListener('click', function () {
+                        feedInput.select();
+                        if (navigator.clipboard) {
+                            navigator.clipboard.writeText(feedInput.value).then(function () { copy.textContent = 'Copied'; }, function () { });
+                        }
+                    });
+                }
             })();
         </script>
         """;
@@ -517,7 +573,7 @@ public static class PublicCalendarEndpoint
 
     // ── Month view ──────────────────────────────────────────────────────────────────────────────
 
-    private static async Task<string> RenderMonthPageAsync(DateTime anchorMonth, DateTime today, FilterState filter, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderMonthPageAsync(DateTime anchorMonth, DateTime today, FilterState filter, string siteUrl, PublicAvailabilityService service, CancellationToken ct)
     {
         var view = ApplyFilter(await service.GetMonthViewAsync(anchorMonth, ct), filter);
         var filterQuery = FilterQuery(filter);
@@ -528,7 +584,7 @@ public static class PublicCalendarEndpoint
         sb.Append(NavBar(anchorMonth.ToString("MMMM yyyy"),
             MonthHref(anchorMonth.AddMonths(-1), filterQuery), MonthHref(today, filterQuery), MonthHref(anchorMonth.AddMonths(1), filterQuery),
             ViewMode.Month, anchorMonth, filter));
-        sb.Append(AppendCategoryFilterForm(ViewMode.Month, anchorMonth, filter));
+        sb.Append(AppendCategoryFilterForm(ViewMode.Month, anchorMonth, filter, siteUrl));
         sb.Append("</div>");
 
         sb.Append("""<div style="display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:4px;font-size:12px">""");
@@ -627,7 +683,7 @@ public static class PublicCalendarEndpoint
     private const double AllDayChipHeightPx = 18;
     private const double AllDayChipGapPx = 2;
 
-    private static async Task<string> RenderWeekPageAsync(DateTime anchorDate, DateTime today, FilterState filter, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderWeekPageAsync(DateTime anchorDate, DateTime today, FilterState filter, string siteUrl, PublicAvailabilityService service, CancellationToken ct)
     {
         var weekStart = anchorDate.AddDays(-(int)anchorDate.DayOfWeek);
         var view = ApplyFilter(await service.GetWeekViewAsync(weekStart, ct), filter);
@@ -645,7 +701,7 @@ public static class PublicCalendarEndpoint
         sb.Append(NavBar(title,
             WeekHref(weekStart.AddDays(-7), filterQuery), WeekHref(today, filterQuery), WeekHref(weekStart.AddDays(7), filterQuery),
             ViewMode.Week, weekStart, filter));
-        sb.Append(AppendCategoryFilterForm(ViewMode.Week, weekStart, filter));
+        sb.Append(AppendCategoryFilterForm(ViewMode.Week, weekStart, filter, siteUrl));
         sb.Append("</div>");
 
         AppendHourlyGrid(sb, days, view, showDayHeaders: true);
@@ -654,7 +710,7 @@ public static class PublicCalendarEndpoint
         return sb.ToString();
     }
 
-    private static async Task<string> RenderDayPageAsync(DateTime day, DateTime today, FilterState filter, PublicAvailabilityService service, CancellationToken ct)
+    private static async Task<string> RenderDayPageAsync(DateTime day, DateTime today, FilterState filter, string siteUrl, PublicAvailabilityService service, CancellationToken ct)
     {
         var view = ApplyFilter(await service.GetDayViewAsync(day, ct), filter);
         var filterQuery = FilterQuery(filter);
@@ -666,7 +722,7 @@ public static class PublicCalendarEndpoint
         sb.Append(NavBar(day.ToString("dddd, MMMM d, yyyy"),
             DayHref(day.AddDays(-1), filterQuery), DayHref(today, filterQuery), DayHref(day.AddDays(1), filterQuery),
             ViewMode.Day, day, filter));
-        sb.Append(AppendCategoryFilterForm(ViewMode.Day, day, filter));
+        sb.Append(AppendCategoryFilterForm(ViewMode.Day, day, filter, siteUrl));
         sb.Append("</div>");
 
         AppendHourlyGrid(sb, [day], view, showDayHeaders: false);
