@@ -110,7 +110,24 @@ public static class CalendarStyles
     /// modal, and the search page's result rows and title matcher, so all of them agree on what a
     /// booking "is called" by construction instead of each keeping its own copy in sync.</summary>
     public static string BookingDisplayTitle(SheetBooking b) =>
-        string.IsNullOrWhiteSpace(b.RenterName) ? CategoryLabel(b.Category) : b.RenterName;
+        IsMemberPracticeIceRequest(b) ? PracticeIceHostedTitle(b.RenterName)
+        : string.IsNullOrWhiteSpace(b.RenterName) ? CategoryLabel(b.Category) : b.RenterName;
+
+    /// <summary>A practice ice booking made through the member request page. Only that flow sets
+    /// RenterEmail on a PracticeIce booking (the staff form hides the email field for every category
+    /// but Rental), and only there is RenterName the host's own name rather than a staff-typed title
+    /// like "Practice Ice Hosted by Jeff Pearson".</summary>
+    public static bool IsMemberPracticeIceRequest(SheetBooking b) =>
+        b.Category == BookingCategory.PracticeIce && !string.IsNullOrWhiteSpace(b.RenterEmail);
+
+    /// <summary>"Practice Ice Hosted by {host}" - the one wording for a member-requested session on
+    /// both calendars (2026-10-09; the public calendar used to say "Practice Ice - Hosted by" and the
+    /// staff calendar showed the bare name). Never just the name, so the session reads as open to
+    /// everyone, and never a raw address if that's all the sign-in supplied.</summary>
+    public static string PracticeIceHostedTitle(string? hostName) =>
+        !string.IsNullOrWhiteSpace(hostName) && !hostName.Contains('@')
+            ? $"{CategoryLabel(BookingCategory.PracticeIce)} Hosted by {hostName.Trim()}"
+            : CategoryLabel(BookingCategory.PracticeIce);
 
     /// <summary>A sheet resource mailbox as a person-readable label ("sheet3@..." -> "Sheet 3"),
     /// falling back to the raw local part when it carries no digits. Shared by every calendar grid,

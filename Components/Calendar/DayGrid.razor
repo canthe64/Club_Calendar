@@ -185,7 +185,7 @@
     private List<SheetBooking> BookingsForSheet(string sheet) =>
         Bookings.Where(b => b.SheetMailbox == sheet).ToList();
 
-    private static string Title(SheetBooking b) => string.IsNullOrWhiteSpace(b.RenterName) ? CalendarStyles.CategoryLabel(b.Category) : b.RenterName;
+    private static string Title(SheetBooking b) => CalendarStyles.BookingDisplayTitle(b);
 
     // Same reasoning as the title above: b.Start/b.End are the booking's overall boundaries, not
     // necessarily anything to do with the day being rendered. Only state a boundary time this chip

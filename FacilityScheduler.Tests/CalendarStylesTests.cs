@@ -316,6 +316,24 @@ public class CalendarStylesTests
         Assert.Equal("Smith Wedding", CalendarStyles.BookingDisplayTitle(booking));
     }
 
+    [Theory]
+    // A member request (RenterEmail set) names its host the same way the public calendar does -
+    // live-found 2026-10-09: the staff calendar showed just "David Donnan (Guest)". Staff keep the
+    // "(Guest)" suffix the public calendar drops.
+    [InlineData("David Donnan (Guest)", "david@example.com", "Practice Ice Hosted by David Donnan (Guest)")]
+    [InlineData("david@example.com", "david@example.com", "Practice Ice")]
+    // Staff-created: the title as typed, never wrapped a second time.
+    [InlineData("Practice Ice Hosted by Kaiti", null, "Practice Ice Hosted by Kaiti")]
+    public void BookingDisplayTitle_PracticeIce(string renterName, string? renterEmail, string expected)
+    {
+        var booking = Booking("sheet1@example.com", Guid.NewGuid());
+        booking.Category = BookingCategory.PracticeIce;
+        booking.RenterName = renterName;
+        booking.RenterEmail = renterEmail;
+
+        Assert.Equal(expected, CalendarStyles.BookingDisplayTitle(booking));
+    }
+
     [Fact]
     public void BookingDisplayTitle_BlankRenterName_FallsBackToCategoryLabel()
     {

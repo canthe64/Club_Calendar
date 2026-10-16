@@ -580,19 +580,16 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             return CalendarStyles.CategoryLabel(b.Category);
         }
 
-        // Only a booking that came through the member request flow (PracticeIceRequestService.
-        // SubmitAsync) has RenterName = the host's own name - and only that flow ever sets
-        // RenterEmail on a PracticeIce booking (the staff form hides the email field for every
-        // category but Rental). A staff-created PracticeIce booking's RenterName is a free-text
-        // *title* (e.g. "Practice Ice Hosted by Jeff Pearson"), which PracticeIceTitle's own
-        // "Hosted by" wrapper would double up into "Practice Ice - Hosted by Practice Ice Hosted by
-        // Jeff Pearson" - live-found 2026-09-24. Staff titles show as typed, same as every other
-        // category (§2.3).
+        // A member request names its host the same way the staff calendar does
+        // (CalendarStyles.PracticeIceHostedTitle), minus Entra's "(Guest)" suffix. A staff-created
+        // PracticeIce booking's RenterName is a free-text *title* (e.g. "Practice Ice Hosted by Jeff
+        // Pearson") that wrapping would double up - live-found 2026-09-24. Staff titles show as
+        // typed, same as every other category (§2.3).
         if (b.Category == BookingCategory.PracticeIce)
         {
-            if (!string.IsNullOrWhiteSpace(b.RenterEmail))
+            if (CalendarStyles.IsMemberPracticeIceRequest(b))
             {
-                return PracticeIceTitle(b.RenterName);
+                return CalendarStyles.PracticeIceHostedTitle(WithoutGuestSuffix(b.RenterName));
             }
 
             // Staff-typed title: as typed, except still never a bare address, and never blank.
@@ -635,18 +632,15 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
             : null;
 
     // The host volunteers to run this session on behalf of the whole club, so naming them publicly
-    // is a deliberate, accepted use of PII (docs/practice-ice-hosting-design.md §3.6) - but the
-    // title must never be JUST the name (that's the generic RenterName-as-title behavior every other
-    // category uses above, and reads as anonymous/unlabeled for a session anyone should feel
-    // welcome at) and must never show a raw UPN/email if that's all a sign-in claim supplied instead
-    // of a real display name - "Practice Ice" alone is the safe fallback either way.
-    private static string PracticeIceTitle(string? renterName)
-    {
-        var label = CalendarStyles.CategoryLabel(BookingCategory.PracticeIce);
-        return !string.IsNullOrWhiteSpace(renterName) && !renterName.Contains('@')
-            ? $"{label} - Hosted by {renterName}"
-            : label;
-    }
+    // is a deliberate, accepted use of PII (docs/practice-ice-hosting-design.md §3.6). Entra appends
+    // " (Guest)" to a guest account's display name; that's account plumbing, not part of anyone's
+    // name, so the public calendar drops it (2026-10-09). The staff calendar keeps it - staff can
+    // tell the account is a guest.
+    internal static string? WithoutGuestSuffix(string? name) =>
+        name is null ? null : GuestSuffix.Replace(name, "");
+
+    private static readonly System.Text.RegularExpressions.Regex GuestSuffix =
+        new(@"\s*\(Guest\)\s*$", System.Text.RegularExpressions.RegexOptions.IgnoreCase | System.Text.RegularExpressions.RegexOptions.Compiled);
 
     // Mirrors MonthGrid.razor/WeekGrid.razor's own DedupeKey exactly: BookingGroupId when it's a
     // real, persisted group id; falls back to (SheetMailbox, EventId) for Guid.Empty, since that's
