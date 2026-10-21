@@ -15,8 +15,9 @@
     <!-- Not referenced by code. Microsoft.AspNetCore.DataProtection and Microsoft.Identity.Web.TokenCache
          pull in System.Security.Cryptography.Xml 10.0.7 transitively here (the app itself gets it from the
          shared framework), which carries four high-severity advisories (NU1903: GHSA-8q5v-6pqq-x66h,
-         GHSA-cvvh-rhrc-wg4q, GHSA-g8r8-53c2-pm3f, GHSA-mmjf-rqrv-855v). This pin overrides it. -->
-    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.10" />
+         GHSA-cvvh-rhrc-wg4q, GHSA-g8r8-53c2-pm3f, GHSA-mmjf-rqrv-855v). This pin overrides it. Raised to
+         10.0.13 on 2026-10-21 for GHSA-c399-9853-6jmj, GHSA-7hqp-7c5m-4vq6 and GHSA-r955-8q5j-3h83. -->
+    <PackageReference Include="System.Security.Cryptography.Xml" Version="10.0.13" />
     <PackageReference Include="xunit" Version="2.9.3" />
     <PackageReference Include="xunit.runner.visualstudio" Version="3.1.4" />
   </ItemGroup>
