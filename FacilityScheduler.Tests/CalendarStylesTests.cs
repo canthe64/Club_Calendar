@@ -334,6 +334,17 @@ public class CalendarStylesTests
         Assert.Equal(expected, CalendarStyles.BookingDisplayTitle(booking));
     }
 
+    [Theory]
+    [InlineData("2026-03-12T09:00", "2026-03-12T15:00", "Thursday, Mar 12 · 9:00AM-3:00PM")]
+    // Live-found 2026-10-21: a three-day bonspiel read as ending the day it started.
+    [InlineData("2026-03-12T09:00", "2026-03-14T15:00", "Thursday, Mar 12, 9:00AM - Saturday, Mar 14, 3:00PM")]
+    // Ending exactly at midnight is still the start day's evening.
+    [InlineData("2026-03-12T18:00", "2026-03-13T00:00", "Thursday, Mar 12 · 6:00PM-12:00AM")]
+    public void TimedRangeLabel_ShowsBothDatesOnlyWhenTheBookingSpansDays(string start, string end, string expected)
+    {
+        Assert.Equal(expected, CalendarStyles.TimedRangeLabel(DateTime.Parse(start), DateTime.Parse(end)));
+    }
+
     [Fact]
     public void BookingDisplayTitle_BlankRenterName_FallsBackToCategoryLabel()
     {

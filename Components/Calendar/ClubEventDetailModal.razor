@@ -18,7 +18,7 @@
             @if (!string.IsNullOrWhiteSpace(ce.Notes))
             {
                 <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:13.5px">
-                    <span style="color:#5a7183">Notes</span><span style="color:#1e2a33">@ce.Notes</span>
+                    <span style="color:#5a7183">Notes</span><span style="color:#1e2a33;white-space:pre-wrap;text-align:right;margin-left:12px">@ce.Notes</span>
                 </div>
             }
             @if (!string.IsNullOrWhiteSpace(ce.BookedBy))

@@ -9,7 +9,7 @@
                 <span style="font-size:17px;font-weight:600;color:#1e2a33">@CalendarStyles.BookingDisplayTitle(first)</span>
                 <span style="background:@CalendarStyles.CategoryLightBg(first.Category);color:@CalendarStyles.CategoryColor(first.Category);font-size:12px;font-weight:600;padding:2px 9px;border-radius:10px">@first.State</span>
             </div>
-            <div style="font-size:13px;color:#5a7183;margin-bottom:12px">@first.Start.ToString("dddd, MMM d, h:mmtt")-@first.End.ToString("h:mmtt")</div>
+            <div style="font-size:13px;color:#5a7183;margin-bottom:12px">@CalendarStyles.TimedRangeLabel(first.Start, first.End)</div>
 
             <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:13.5px">
                 <span style="color:#5a7183">Sheets</span><span style="color:#1e2a33">@string.Join(", ", Group.Select(g => CalendarStyles.SheetLabel(g.SheetMailbox)))</span>
@@ -32,7 +32,7 @@
             @if (!string.IsNullOrWhiteSpace(first.Notes))
             {
                 <div style="display:flex;justify-content:space-between;border-bottom:1px solid #eef1f3;padding:6px 0;font-size:13.5px">
-                    <span style="color:#5a7183">Notes</span><span style="color:#1e2a33">@first.Notes</span>
+                    <span style="color:#5a7183">Notes</span><span style="color:#1e2a33;white-space:pre-wrap;text-align:right;margin-left:12px">@first.Notes</span>
                 </div>
             }
             @if (!string.IsNullOrWhiteSpace(first.BookedBy))

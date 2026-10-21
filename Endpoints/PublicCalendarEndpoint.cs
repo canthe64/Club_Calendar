@@ -692,7 +692,7 @@ public static class PublicCalendarEndpoint
             var textColor = b.IsConfirmed ? "#fff" : color;
             var border = b.IsConfirmed ? "none" : $"1.5px dashed {color}";
             var subtitle = $"{CalendarStyles.CategoryLabel(category)} · {(b.IsConfirmed ? "Confirmed" : "Hold")}";
-            var time = $"{b.Start:dddd, MMM d} · {b.Start:h:mmtt}-{b.End:h:mmtt}";
+            var time = CalendarStyles.TimedRangeLabel(b.Start, b.End);
             var extraClass = extra ? " pub-cal-extra" : "";
             var display = extra ? "none" : "block";
 
@@ -875,7 +875,7 @@ public static class PublicCalendarEndpoint
                 var textColor = b.IsConfirmed ? "#fff" : color;
                 var border = b.IsConfirmed ? $"1.5px solid {color}" : $"1.5px dashed {color}";
                 var subtitle = $"{CalendarStyles.CategoryLabel(category)} · {(b.IsConfirmed ? "Confirmed" : "Hold")}";
-                var timeText = $"{b.Start:dddd, MMM d} · {b.Start:h:mmtt}-{b.End:h:mmtt}";
+                var timeText = CalendarStyles.TimedRangeLabel(b.Start, b.End);
                 var (contBefore, contAfter) = CalendarStyles.ContinuationMarks(b.Start, b.End, day);
                 // The start time belongs to the booking's actual first day only - repeating it on every
                 // later day reads as a daily recurrence rather than one continuous event.

@@ -109,6 +109,21 @@ public static class CalendarStyles
     /// one was given, or the category label otherwise. Shared by every calendar grid chip, the detail
     /// modal, and the search page's result rows and title matcher, so all of them agree on what a
     /// booking "is called" by construction instead of each keeping its own copy in sync.</summary>
+    /// <summary>True when a timed booking ends on a later day than it starts. An end at exactly
+    /// midnight is still the start day's evening (6 PM-midnight is one day), so the comparison uses
+    /// the last moment the booking actually occupies.</summary>
+    public static bool SpansDays(DateTime start, DateTime end) =>
+        end > start && end.AddTicks(-1).Date > start.Date;
+
+    /// <summary>When a timed booking runs: "Friday, Mar 12 · 9:00AM-3:00PM" within one day, or both
+    /// dates - "Friday, Mar 12, 9:00AM - Sunday, Mar 14, 3:00PM" - when it spans days. Showing only
+    /// the end time on a multi-day booking read as though it ended the day it started
+    /// (live-found 2026-10-21 on a three-day bonspiel).</summary>
+    public static string TimedRangeLabel(DateTime start, DateTime end) =>
+        SpansDays(start, end)
+            ? $"{start:dddd, MMM d, h:mmtt} - {end:dddd, MMM d, h:mmtt}"
+            : $"{start:dddd, MMM d} · {start:h:mmtt}-{end:h:mmtt}";
+
     public static string BookingDisplayTitle(SheetBooking b) =>
         IsMemberPracticeIceRequest(b) ? PracticeIceHostedTitle(b.RenterName)
         : string.IsNullOrWhiteSpace(b.RenterName) ? CategoryLabel(b.Category) : b.RenterName;
