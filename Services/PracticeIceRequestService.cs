@@ -108,7 +108,7 @@ public class PracticeIceRequestService(
         // step below does. Live-found 2026-08-09: logging this after the mail send meant a mail
         // failure left NO audit trail for a request that had, in fact, succeeded.
         await log.LogActionAsync("PracticeIceRequested", hostName, string.Join(",", result.Bookings.Select(b => b.EventId)), string.Join(",", sheets),
-            $"{template.Start:g}-{template.End:g}", ct);
+            $"{template.Start:g}-{template.End:g}", ct, booking: result.Bookings[0].BookingGroupId);
 
         var notified = await TrySendMailAsync(facility.PracticeIceMailerMailbox, facility.PracticeIceApproverEmail, hostEmail,
             "Practice ice hosting request",

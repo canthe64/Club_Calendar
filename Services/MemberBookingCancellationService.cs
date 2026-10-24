@@ -95,7 +95,7 @@ public class MemberBookingCancellationService(
 
         await bookingService.CancelGroupAsync(booking.Members, reopenAsGroupEventHold: false, signedInName, ct);
         await log.LogActionAsync("MemberBookingCancelled", signedInName, string.Join(",", booking.Members.Select(m => m.EventId)),
-            string.Join(",", booking.SheetMailboxes), $"{booking.Description}, {booking.Start:g}-{booking.End:g}, cancelled by {signedInEmail}", ct);
+            string.Join(",", booking.SheetMailboxes), $"{booking.Description}, {booking.Start:g}-{booking.End:g}, cancelled by {signedInEmail}", ct, booking: bookingGroupId);
 
         var when = $"{booking.Start:dddd, MMM d} from {booking.Start:h:mmtt} to {booking.End:h:mmtt} on {CalendarStyles.SheetListLabel(booking.SheetMailboxes)}";
         var staffNotified = false;

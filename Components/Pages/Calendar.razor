@@ -666,21 +666,16 @@
                     BookedBy = bookedBy
                 };
 
-                var membersToUpdate = draft.EditingGroup.Where(m => draft.SelectedSheets.Contains(m.SheetMailbox)).ToList();
-                var newSheets = draft.SelectedSheets.Except(draft.EditingGroup.Select(m => m.SheetMailbox)).ToList();
+                // The booking ends up on exactly the sheets selected: kept sheets are updated, newly
+                // ticked ones created, and deselected ones removed (2026-10-24 - deselecting used to
+                // leave the sheet behind as a separate booking, which staff reasonably read as the
+                // edit not having worked). A fresh group id is still minted when a member has none
+                // (Guid.Empty - an untouched recurring occurrence, see OpenDetail) so an edit gives
+                // it a real, persisted identity instead of writing Guid.Empty right back.
+                var (membersToUpdate, removedMembers, newSheets) = draft.SheetChanges();
+                var freshGroupId = membersToUpdate.Any(m => m.BookingGroupId == Guid.Empty) ? Guid.NewGuid() : (Guid?)null;
 
-                // Deselecting a sheet leaves it untouched (still part of whatever it was before -
-                // e.g. an open rental hold). If that leaves it behind, it needs to split off into
-                // its own BookingGroupId - otherwise it'd still show grouped with the sheets that
-                // ARE being updated here, displaying the wrong renter/state when clicked. Also mint a
-                // fresh group id whenever a member currently has none (Guid.Empty - an untouched
-                // recurring occurrence, see OpenDetail) so an edit gives it a real, persisted identity
-                // instead of writing Guid.Empty right back.
-                var isPartialEdit = membersToUpdate.Count < draft.EditingGroup.Count;
-                var needsFreshGroupId = isPartialEdit || membersToUpdate.Any(m => m.BookingGroupId == Guid.Empty);
-                var splitGroupId = needsFreshGroupId ? Guid.NewGuid() : (Guid?)null;
-
-                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, bookedBy, newSheets, splitGroupId);
+                var result = await BookingService.UpdateGroupAsync(membersToUpdate, updatedFields, bookedBy, newSheets, freshGroupId, removedMembers);
                 if (result.IsSuccess)
                 {
                     CloseForm();

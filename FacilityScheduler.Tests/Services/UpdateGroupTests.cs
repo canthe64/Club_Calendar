@@ -110,6 +110,59 @@ public class UpdateGroupTests
     }
 
     [Fact]
+    public async Task RemovingASheet_DeletesItFromTheBooking_AndLogsTheRemoval()
+    {
+        // Live-found 2026-10-24: a practice ice session edited down from five sheets to three kept
+        // the two deselected sheets as a separate booking, which read as the edit not having worked.
+        var h = ServiceHarness.Create();
+        var day = h.Facility.Today.AddDays(2);
+        var group = await SeedGroupAsync(h.Bookings, [Sheets[0], Sheets[1], Sheets[2]], day.AddHours(19), day.AddHours(21));
+        var kept = group.Where(b => b.SheetMailbox != Sheets[0]).ToList();
+        var removed = group.Single(b => b.SheetMailbox == Sheets[0]);
+
+        var result = await h.Bookings.UpdateGroupAsync(kept, Booking("", day.AddHours(19), day.AddHours(21), "Renamed"), "tester",
+            removedMembers: [removed]);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(h.Gateway.Events(Sheets[0]));
+        foreach (var sheet in new[] { Sheets[1], Sheets[2] })
+        {
+            Assert.Equal("Renamed", (await OnlyBookingAsync(h.Bookings, sheet, day)).RenterName);
+        }
+        Assert.Contains(await h.AppLog.TailAsync(5), line => line.Contains("action=BookingCancelled") && line.Contains(removed.EventId!));
+    }
+
+    [Fact]
+    public async Task AnEditThatConflicts_LeavesTheSheetsItWouldRemoveInPlace()
+    {
+        var h = ServiceHarness.Create();
+        var day = h.Facility.Today.AddDays(2);
+        var group = await SeedGroupAsync(h.Bookings, [Sheets[0], Sheets[1]], day.AddHours(19), day.AddHours(21));
+        Assert.True((await h.Bookings.BookAsync(Booking(Sheets[1], day.AddHours(14), day.AddHours(15), "League"))).IsSuccess);
+
+        var result = await h.Bookings.UpdateGroupAsync(group.Where(b => b.SheetMailbox == Sheets[1]), Booking("", day.AddHours(14), day.AddHours(16)), "tester",
+            removedMembers: group.Where(b => b.SheetMailbox == Sheets[0]));
+
+        Assert.False(result.IsSuccess);
+        Assert.Single(h.Gateway.Events(Sheets[0]));
+    }
+
+    [Fact]
+    public async Task MovingABookingToEntirelyDifferentSheets_KeepsItsGroup()
+    {
+        var h = ServiceHarness.Create();
+        var day = h.Facility.Today.AddDays(2);
+        var group = await SeedGroupAsync(h.Bookings, [Sheets[0]], day.AddHours(19), day.AddHours(21));
+
+        var result = await h.Bookings.UpdateGroupAsync([], Booking("", day.AddHours(19), day.AddHours(21)), "tester",
+            newSheetMailboxes: [Sheets[2]], removedMembers: group);
+
+        Assert.True(result.IsSuccess);
+        Assert.Empty(h.Gateway.Events(Sheets[0]));
+        Assert.Equal(group[0].BookingGroupId, (await OnlyBookingAsync(h.Bookings, Sheets[2], day)).BookingGroupId);
+    }
+
+    [Fact]
     public async Task EditingASubsetWithANewGroupId_SplitsOnlyThoseSheetsOff()
     {
         var h = ServiceHarness.Create();
@@ -162,6 +215,21 @@ public class UpdateGroupTests
 
         Assert.Empty(h.Gateway.Events(Sheets[1]));
         Assert.Empty(h.Gateway.Events(Sheets[2]));
+        Assert.Single(h.Gateway.Events(Sheets[0]));
+    }
+
+    [Fact]
+    public async Task AFailedCreate_LeavesTheSheetsItWouldRemoveInPlace()
+    {
+        var h = ServiceHarness.Create();
+        var day = h.Facility.Today.AddDays(2);
+        var group = await SeedGroupAsync(h.Bookings, [Sheets[0], Sheets[1]], day.AddHours(18), day.AddHours(20));
+        h.Gateway.FailCreateAfter = 0; // the added sheet's create throws
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => h.Bookings.UpdateGroupAsync(
+            group.Where(b => b.SheetMailbox == Sheets[1]), Booking("", day.AddHours(18), day.AddHours(20)), "tester",
+            newSheetMailboxes: [Sheets[2]], removedMembers: group.Where(b => b.SheetMailbox == Sheets[0])));
+
         Assert.Single(h.Gateway.Events(Sheets[0]));
     }
 }

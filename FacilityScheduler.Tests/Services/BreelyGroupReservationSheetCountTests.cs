@@ -14,6 +14,7 @@ public class BreelyGroupReservationSheetCountTests
 {
     [Theory]
     [InlineData("Up to 8 participants", 1)]
+    [InlineData("Up to 8 participants (90-minutes)", 1)]
     [InlineData("9-16 participants", 2)]
     [InlineData("17-24 participants", 3)]
     [InlineData("25-32 participants", 4)]
@@ -34,6 +35,7 @@ public class BreelyGroupReservationSheetCountTests
 
     [Theory]
     [InlineData("Extended session - 3-Hours (weekday evening)")]
+    [InlineData("Extended session - 3-Hours (recommended for groups of 41-60)")] // the real label, 2026-10-24
     [InlineData("Extended session - 3-Hours")]
     [InlineData("extended session - 3-hours - anything after")]
     public void SheetCountForEventType_Extended3HourLabel_ReturnsFive(string eventType)
@@ -43,6 +45,7 @@ public class BreelyGroupReservationSheetCountTests
 
     [Theory]
     [InlineData("Extended session - 4-Hours (weekend)")]
+    [InlineData("Extended session - 4-Hours (recommended for groups of 66-100)")] // the real label, 2026-10-24
     [InlineData("Extended session - 4-Hours")]
     public void SheetCountForEventType_Extended4HourLabel_ReturnsFive(string eventType)
     {

@@ -48,6 +48,19 @@ public class BookingDraft
     /// <summary>Non-null when editing an existing booking - the sibling events sharing its BookingGroupId.</summary>
     public List<SheetBooking>? EditingGroup { get; set; }
 
+    /// <summary>What saving this edit does to each sheet: the booking ends up on exactly the selected
+    /// sheets - members still selected are kept (updated), selected sheets it wasn't on are added,
+    /// and members no longer selected are removed (2026-10-24; deselecting used to leave the sheet
+    /// behind as a separate booking). Empty lists when not editing.</summary>
+    public (List<SheetBooking> Kept, List<SheetBooking> Removed, List<string> Added) SheetChanges()
+    {
+        var group = EditingGroup ?? [];
+        return (
+            group.Where(m => SelectedSheets.Contains(m.SheetMailbox)).ToList(),
+            group.Where(m => !SelectedSheets.Contains(m.SheetMailbox)).ToList(),
+            SelectedSheets.Except(group.Select(m => m.SheetMailbox)).ToList());
+    }
+
     /// <summary>
     /// Only Group Events can be a soft "hold" - every other category is a hard booking. Call this
     /// from the category picker so switching away from GroupEvent coerces the state immediately,

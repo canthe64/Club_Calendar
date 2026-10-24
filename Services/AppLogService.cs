@@ -104,9 +104,10 @@ public class AppLogService
     }
 
     /// <summary>Standard tier - always written. Use for definitive actions: a booking/series/club
-    /// event created, edited, or canceled.</summary>
-    public Task LogActionAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default) =>
-        WriteAsync("INFO", action, actor, eventId, sheet, details, ct);
+    /// event created, edited, or canceled. <paramref name="booking"/> is the booking's group id,
+    /// written as a short <c>booking=</c> tag shared by every line about that booking.</summary>
+    public Task LogActionAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default, Guid? booking = null) =>
+        WriteAsync("INFO", action, actor, eventId, sheet, details, ct, booking);
 
     /// <summary>Standard tier - always written. Use for security-relevant events worth keeping
     /// regardless of level, e.g. a failed webhook secret check.</summary>
@@ -114,18 +115,18 @@ public class AppLogService
         WriteAsync("WARN", action, actor, null, null, details, ct);
 
     /// <summary>Debug tier - a no-op unless the configured level is currently Debug.</summary>
-    public Task LogDebugAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default)
+    public Task LogDebugAsync(string action, string actor, string? eventId = null, string? sheet = null, string? details = null, CancellationToken ct = default, Guid? booking = null)
     {
         if (_level != AppLogLevel.Debug)
         {
             return Task.CompletedTask;
         }
-        return WriteAsync("DEBUG", action, actor, eventId, sheet, details, ct);
+        return WriteAsync("DEBUG", action, actor, eventId, sheet, details, ct, booking);
     }
 
-    private async Task WriteAsync(string tier, string action, string actor, string? eventId, string? sheet, string? details, CancellationToken ct)
+    private async Task WriteAsync(string tier, string action, string actor, string? eventId, string? sheet, string? details, CancellationToken ct, Guid? booking = null)
     {
-        var line = FormatLine(tier, action, actor, eventId, sheet, details);
+        var line = FormatLine(tier, action, actor, eventId, sheet, details, booking);
 
         // The lock acquisition is inside the try, not before it: an already-cancelled token makes
         // WaitAsync throw, and outside the try that exception escaped straight to the caller -
@@ -210,7 +211,10 @@ public class AppLogService
     // rink; UTC timestamps meant mentally subtracting 7-8 hours from every line, and during the
     // facility's own evening hours the date was a day ahead too - the same class of confusion D47
     // fixed everywhere else in the app. The offset is kept so a line is still unambiguous.
-    private string FormatLine(string tier, string action, string actor, string? eventId, string? sheet, string? details)
+    // Field order is for a person reading the file (2026-10-24): what, who, which booking, which
+    // sheets and the details first; the raw Exchange event ids - ~150 characters each, one per
+    // sheet - last, since they're only needed to find the exact event in Exchange.
+    internal string FormatLine(string tier, string action, string actor, string? eventId, string? sheet, string? details, Guid? booking = null)
     {
         var stamp = new DateTimeOffset(_facility.Now, _facility.ZoneInfo.GetUtcOffset(DateTime.UtcNow));
 
@@ -222,18 +226,58 @@ public class AppLogService
             $"actor={Escape(actor)}"
         };
 
-        if (!string.IsNullOrEmpty(eventId)) parts.Add($"eventId={Escape(eventId)}");
-        if (!string.IsNullOrEmpty(sheet)) parts.Add($"sheet={Escape(sheet)}");
+        if (booking is { } groupId && groupId != Guid.Empty) parts.Add($"booking={BookingRef(groupId)}");
+        if (!string.IsNullOrEmpty(sheet)) parts.Add(SheetField(sheet));
         // Not the quote-collapsing Escape() below, and not quote-wrapped either (code review O7) -
-        // details is always the last field on the line, so it never needs a closing delimiter the
-        // way actor/eventId/sheet's own quote-collapsing exists to protect. The one line this
-        // mattered most for is WebhookRawPayloadReceived's raw Breely JSON (D117 raised its cap to
-        // preserve exactly this diagnostic) - collapsing every " to ' made the preserved text
+        // details needs no closing delimiter: the only field that can follow it is eventId, whose
+        // value never contains a space, so a line still splits unambiguously from the right. The one
+        // line this mattered most for is WebhookRawPayloadReceived's raw Breely JSON (D117 raised its
+        // cap to preserve exactly this diagnostic) - collapsing every " to ' made the preserved text
         // unparseable by any JSON tool. Newlines are still stripped: one physical log line per
         // entry is a hard rule regardless of what's in this field.
         if (!string.IsNullOrEmpty(details)) parts.Add($"details={details.Replace('\n', ' ').Replace('\r', ' ')}");
+        if (!string.IsNullOrEmpty(eventId)) parts.Add($"eventId={Escape(eventId).Replace(' ', '_')}");
 
         return string.Join(' ', parts);
+    }
+
+    /// <summary>The first 8 hex digits of a booking's group id - short enough to read, and enough to
+    /// tell this club's bookings apart when searching a log.</summary>
+    internal static string BookingRef(Guid bookingGroupId) => bookingGroupId.ToString("N")[..8];
+
+    // "sheets=2-5" when every value is one of the facility's sheet mailboxes; anything else (the club
+    // events mailbox, a mixed list) is written as-is.
+    private string SheetField(string sheet)
+    {
+        var numbers = new List<int>();
+        foreach (var value in sheet.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var mailbox = _facility.SheetMailboxes.FirstOrDefault(m => string.Equals(m, value, StringComparison.OrdinalIgnoreCase));
+            var digits = mailbox is null ? "" : new string(CalendarStyles.SheetLabel(mailbox).Where(char.IsDigit).ToArray());
+            if (!int.TryParse(digits, out var number))
+            {
+                return $"sheet={Escape(sheet)}";
+            }
+            numbers.Add(number);
+        }
+        return $"sheets={SheetRanges(numbers)}";
+    }
+
+    // 1,2,3,5 -> "1-3,5"
+    internal static string SheetRanges(IEnumerable<int> sheetNumbers)
+    {
+        var sorted = sheetNumbers.Distinct().Order().ToList();
+        var ranges = new List<string>();
+        for (var i = 0; i < sorted.Count; i++)
+        {
+            var first = sorted[i];
+            while (i + 1 < sorted.Count && sorted[i + 1] == sorted[i] + 1)
+            {
+                i++;
+            }
+            ranges.Add(first == sorted[i] ? $"{first}" : $"{first}-{sorted[i]}");
+        }
+        return string.Join(',', ranges);
     }
 
     // One entry per line, by convention - strip characters that would let a value (a staff-entered

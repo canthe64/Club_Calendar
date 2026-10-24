@@ -94,6 +94,12 @@
                             All Sheets
                         </span>
                     </div>
+                    @if (SheetsBeingRemoved is { Count: > 0 } removing)
+                    {
+                        <div class="sheets-removed-warning" style="margin-top:6px;font-size:12.5px;color:#a02c21">
+                            @CalendarStyles.SheetListLabel(removing) will be removed from this booking when you save.
+                        </div>
+                    }
                 </div>
 
                 @if (!IsOnIce)
@@ -295,6 +301,12 @@
     private bool _wasOpen;
 
     private bool IsOnIce => Draft.Mode == EventMode.OnIce;
+
+    // Sheets the booking being edited is on now but won't be after Save - stated up front, because
+    // saving deletes them from the booking (2026-10-24).
+    private List<string>? SheetsBeingRemoved => IsOnIce
+        ? Draft.OnIce.SheetChanges().Removed.Select(m => m.SheetMailbox).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList()
+        : null;
     private bool ModeIsLocked => Draft.IsEditing || !AllowModeToggle;
     private bool ShowTimePickers => IsOnIce || !Draft.OffIce.IsAllDay;
 

@@ -42,6 +42,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     private static readonly Dictionary<string, int> GroupReservationSheetCounts = new(StringComparer.OrdinalIgnoreCase)
     {
         ["Up to 8 participants"] = 1,
+        ["Up to 8 participants (90-minutes)"] = 1, // added 2026-10-24
         ["9-16 participants"] = 2,
         ["17-24 participants"] = 3,
         ["25-32 participants"] = 4,
@@ -281,7 +282,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                     "Breely webhook: event {Id}'s Group Reservation no longer needs sheet {Sheet} (event_type is now \"{EventType}\") - released back to an open hold.",
                     primary.Id, orphan.SheetMailbox, primary.EventType);
                 await appLog.LogActionAsync("BreelyGroupReservationShrank", BookedByLabel, orphan.EventId, orphan.SheetMailbox,
-                    $"Breely event {primary.Id}: no longer needs this sheet (event_type is now \"{primary.EventType}\") - released back to an open hold.", ct);
+                    $"Breely event {primary.Id}: no longer needs this sheet (event_type is now \"{primary.EventType}\") - released back to an open hold.", ct, booking: orphan.BookingGroupId);
             }
             finally
             {
@@ -439,7 +440,8 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 {
                     await bookingService.CancelGroupAsync([existing], reopenAsGroupEventHold: true, BookedByLabel, ct);
                     logger.LogInformation("Breely webhook: event {Id} canceled - released sheet {Sheet}.", evt.Id, existing.SheetMailbox);
-                    await appLog.LogActionAsync("BreelyBookingCancelled", BookedByLabel, existing.EventId, existing.SheetMailbox, $"Breely event {breelyId}.", ct);
+                    await appLog.LogActionAsync("BreelyBookingCancelled", BookedByLabel, existing.EventId, existing.SheetMailbox,
+                        $"Breely event {breelyId}: {SheetBookingService.LogSummary(existing)}.", ct, booking: existing.BookingGroupId);
                 }
                 else
                 {
@@ -464,7 +466,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 logger.LogInformation("Breely webhook: event {Id} rescheduled from {OldStart} to {NewStart} - released old sheet {Sheet}, claiming new slot.",
                     evt.Id, existing.Start, start, existing.SheetMailbox);
                 await appLog.LogActionAsync("BreelyBookingReleased", BookedByLabel, existing.EventId, existing.SheetMailbox,
-                    $"Rescheduling Breely event {breelyId}: {existing.Start:g}-{existing.End:g} -> {start:g}-{end:g}.", ct);
+                    $"Rescheduling Breely event {breelyId}: {existing.Start:g}-{existing.End:g} -> {start:g}-{end:g}.", ct, booking: existing.BookingGroupId);
             }
 
             var template = new SheetBooking
@@ -489,7 +491,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             if (claimed is not null)
             {
                 logger.LogInformation("Breely webhook: event {Id} claimed hold on {Sheet} for {Start}-{End}.", evt.Id, claimed.SheetMailbox, start, end);
-                await appLog.LogActionAsync("BreelyBookingClaimed", BookedByLabel, claimed.EventId, claimed.SheetMailbox, $"Breely event {breelyId}, {start:g}-{end:g}.", ct);
+                await appLog.LogActionAsync("BreelyBookingClaimed", BookedByLabel, claimed.EventId, claimed.SheetMailbox, $"Breely event {breelyId}, {start:g}-{end:g}.", ct, booking: claimed.BookingGroupId);
 
                 if (unrecognizedEventTypeReason is not null)
                 {
@@ -511,7 +513,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
             var forceBooked = await bookingService.ForceCreateConfirmedAsync(fallbackSheet, template, ct);
             logger.LogWarning("Breely webhook: event {Id} didn't match any open hold - force-booked onto {Sheet}.", evt.Id, fallbackSheet);
             await appLog.LogActionAsync("BreelyBookingForceBooked", BookedByLabel, forceBooked.EventId, fallbackSheet,
-                $"Breely event {breelyId} matched no open hold - force-booked, flagged for review.", ct);
+                $"Breely event {breelyId} matched no open hold - force-booked, flagged for review.", ct, booking: forceBooked.BookingGroupId);
 
             // One combined marker, not two, when both conditions apply - a single booking getting two
             // separate "needs review" markers for what's really one investigation is worse than one

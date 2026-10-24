@@ -148,10 +148,11 @@ series…** and **Cancel entire series** (§4), labeled with the series' own sta
 live from the series each time you open the dialog, so it briefly says "loading series dates…" before
 filling in.
 
-- **Edit event…** reopens the same form, pre-filled. If you deselect a sheet that was previously part of a
-  multi-sheet booking, that sheet is left untouched (not deleted) and split off as its own booking —
-  it won't keep showing the old renter's details. You can also *add* a sheet that wasn't part of the
-  original booking; it's created fresh under the same booking.
+- **Edit event…** reopens the same form, pre-filled. When you save, the booking ends up on exactly
+  the sheets you have selected: deselect a sheet and it's removed from the booking (the form warns
+  you which sheets will be removed before you save); select a new sheet and it's added to the same
+  booking. If the new time or an added sheet conflicts with something, nothing changes - not even
+  the removals.
 - **Cancel Booking** offers up to three choices (the reopen choice only appears for a **Confirmed**
   booking — cancelling something that's already an open Hold just offers to remove it, since there's
   nothing to "reopen"):

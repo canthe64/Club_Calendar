@@ -266,18 +266,18 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
                 {
                     await TrimHoldAsync(hold.SheetMailbox, hold, template.Start, template.End, groupId, ct);
                     await log.LogActionAsync("GroupEventHoldTrimmed", actingUser, hold.EventId, hold.SheetMailbox,
-                        $"{template.Category} {template.Start:g}-{template.End:g} took released hold time.", ct);
+                        $"{template.Category} {template.Start:g}-{template.End:g} took released hold time.", ct, booking: groupId);
                 }
                 catch (Exception ex)
                 {
                     await log.LogActionAsync("GroupEventHoldTrimFailed", actingUser, hold.EventId, hold.SheetMailbox,
-                        $"Hold still overlaps the new {template.Category} booking - remove it by hand. {ex.Message}", ct);
+                        $"Hold still overlaps the new {template.Category} booking - remove it by hand. {ex.Message}", ct, booking: groupId);
                 }
             }
 
             InvalidateViewCache();
             await log.LogActionAsync("BookingCreated", actingUser, string.Join(",", created.Select(c => c.EventId)), string.Join(",", orderedSheets),
-                $"{template.Category} {template.State}, {template.Start:g}-{template.End:g}" + (string.IsNullOrWhiteSpace(template.RenterName) ? "" : $", {template.RenterName}"), ct);
+                $"{template.Category} {template.State}, {template.Start:g}-{template.End:g}" + (string.IsNullOrWhiteSpace(template.RenterName) ? "" : $", {template.RenterName}"), ct, booking: groupId);
             return GroupBookingResult.Success(created);
         }
         finally
@@ -288,6 +288,12 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
             }
         }
     }
+
+    /// <summary>What a booking is, for a log line: "PracticeIce Confirmed, 10/24/2026 19:30-10/24/2026
+    /// 21:30, Lani Dubberstein (Guest)". Cancellation lines carry it too (2026-10-24) - without it a
+    /// cancelled booking couldn't be identified from the log at all.</summary>
+    internal static string LogSummary(SheetBooking b) =>
+        $"{b.Category} {b.State}, {b.Start:g}-{b.End:g}" + (string.IsNullOrWhiteSpace(b.RenterName) ? "" : $", {b.RenterName}");
 
     public async Task<SheetBooking> ConfirmAsync(string sheetMailbox, string eventId, string actingUser, CancellationToken ct = default)
     {
@@ -333,21 +339,29 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
     /// (live-found 2026-08-03: adding a sheet to an existing multi-sheet hold appeared to save
     /// successfully but never actually created anything on the new sheet). Conflict-checked and
     /// locked alongside the existing members, same all-or-nothing guarantee.
+    /// <paramref name="removedMembers"/> are sheets the edit drops from the booking: deleted in the
+    /// same operation, after everything else has been written, so a conflict or failed create leaves
+    /// them untouched. Before 2026-10-24 a deselected sheet was left behind as its own booking, which
+    /// read to staff as though the edit hadn't taken (a practice ice session kept two sheets the
+    /// editor had removed).
     /// </summary>
     public async Task<GroupBookingResult> UpdateGroupAsync(
         IEnumerable<SheetBooking> members, SheetBooking updatedFields, string actingUser,
-        IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null, CancellationToken ct = default)
+        IEnumerable<string>? newSheetMailboxes = null, Guid? newBookingGroupId = null,
+        IEnumerable<SheetBooking>? removedMembers = null, CancellationToken ct = default)
     {
         var memberList = members.Where(m => m.EventId is not null).ToList();
         var existingSheets = memberList.Select(m => m.SheetMailbox).ToHashSet();
         var newSheets = (newSheetMailboxes ?? []).Distinct().Where(s => !existingSheets.Contains(s)).ToList();
+        var removedList = (removedMembers ?? []).Where(m => m.EventId is not null && !existingSheets.Contains(m.SheetMailbox)).ToList();
 
         if (memberList.Count == 0 && newSheets.Count == 0)
         {
             return GroupBookingResult.Success([]);
         }
 
-        var orderedSheets = existingSheets.Concat(newSheets).Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
+        var orderedSheets = existingSheets.Concat(newSheets).Concat(removedList.Select(m => m.SheetMailbox))
+            .Distinct().OrderBy(s => s, StringComparer.Ordinal).ToList();
         var sems = orderedSheets.Select(s => SheetLocks.GetOrAdd(s, _ => new SemaphoreSlim(1, 1))).ToList();
 
         foreach (var sem in sems)
@@ -410,7 +424,8 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
             // (a split happened) or, failing that, whatever the retained members already share.
             // Guid.NewGuid() only applies if there were no existing members at all (every sheet in
             // this "edit" is brand new).
-            var targetGroupId = newBookingGroupId ?? memberList.FirstOrDefault()?.BookingGroupId ?? Guid.NewGuid();
+            var targetGroupId = newBookingGroupId ?? memberList.FirstOrDefault()?.BookingGroupId
+                ?? removedList.FirstOrDefault(m => m.BookingGroupId != Guid.Empty)?.BookingGroupId ?? Guid.NewGuid();
 
             // Same partial-write rollback as CreateAcrossSheetsAsync, scoped to the sheets newly
             // *created* here. The PATCHes above are deliberately not rolled back: restoring them
@@ -451,9 +466,30 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
                 throw;
             }
 
+            // Last, so nothing above can fail after a sheet is already gone. Already-deleted (404) is
+            // fine - the sheet is off the booking either way.
+            var removed = new List<SheetBooking>();
+            foreach (var member in removedList)
+            {
+                try
+                {
+                    await graph.DeleteEventAsync(member.SheetMailbox, member.EventId!, ct);
+                    removed.Add(member);
+                }
+                catch (ODataError ex) when (ex.ResponseStatusCode == 404)
+                {
+                }
+            }
+
             InvalidateViewCache();
-            await log.LogActionAsync("BookingUpdated", actingUser, string.Join(",", updated.Select(u => u.EventId)), string.Join(",", orderedSheets),
-                $"{updatedFields.Category} {updatedFields.State}, {updatedFields.Start:g}-{updatedFields.End:g}" + (string.IsNullOrWhiteSpace(updatedFields.RenterName) ? "" : $", {updatedFields.RenterName}"), ct);
+            if (removed.Count > 0)
+            {
+                await log.LogActionAsync("BookingCancelled", actingUser, string.Join(",", removed.Select(m => m.EventId)),
+                    string.Join(",", removed.Select(m => m.SheetMailbox)), $"{LogSummary(removed[0])} - removed from the booking by an edit.", ct, booking: removed[0].BookingGroupId);
+            }
+            await log.LogActionAsync("BookingUpdated", actingUser, string.Join(",", updated.Select(u => u.EventId)), string.Join(",", updated.Select(u => u.SheetMailbox)),
+                $"{updatedFields.Category} {updatedFields.State}, {updatedFields.Start:g}-{updatedFields.End:g}" + (string.IsNullOrWhiteSpace(updatedFields.RenterName) ? "" : $", {updatedFields.RenterName}"), ct,
+                booking: updated.Count > 0 ? updated[0].BookingGroupId : null);
             return GroupBookingResult.Success(updated);
         }
         finally
@@ -564,14 +600,15 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
             await log.LogActionAsync(action, actingUser,
                 string.Join(",", affected.Select(m => m.EventId)),
                 string.Join(",", affected.Select(m => m.SheetMailbox).Distinct()),
-                alreadyGone.Count > 0 ? $"{alreadyGone.Count} other member(s) were already gone." : null, ct);
+                LogSummary(affected[0]) + (alreadyGone.Count > 0 ? $" - {alreadyGone.Count} other member(s) were already gone." : ""), ct,
+                booking: affected[0].BookingGroupId);
         }
         else if (alreadyGone.Count > 0)
         {
             await log.LogDebugAsync(action + "NoOp", actingUser,
                 string.Join(",", alreadyGone.Select(m => m.EventId)),
                 string.Join(",", alreadyGone.Select(m => m.SheetMailbox).Distinct()),
-                "All members were already gone by the time this ran.", ct);
+                $"{LogSummary(alreadyGone[0])} - all members were already gone by the time this ran.", ct, booking: alreadyGone[0].BookingGroupId);
         }
     }
 
@@ -757,7 +794,7 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
 
         InvalidateViewCache();
         await log.LogActionAsync("SeriesCreated", actingUser, string.Join(",", created.Select(c => c.EventId)), string.Join(",", orderedSheets),
-            $"{template.Category}, weekly through {lastOccurrenceDate:d}" + (string.IsNullOrWhiteSpace(template.RenterName) ? "" : $", {template.RenterName}"), ct);
+            $"{template.Category}, weekly through {lastOccurrenceDate:d}" + (string.IsNullOrWhiteSpace(template.RenterName) ? "" : $", {template.RenterName}"), ct, booking: groupId);
         return created;
     }
 
@@ -889,7 +926,7 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
                 string.Join(",", orderedSheets),
                 $"{updatedFields.Category}, {occurrences.Count} occurrence(s)"
                     + (toAdd.Count > 0 ? $", added {string.Join("/", toAdd)}" : "")
-                    + (toRemove.Count > 0 ? $", removed {string.Join("/", toRemove.Select(r => r.SheetMailbox))}" : ""), ct);
+                    + (toRemove.Count > 0 ? $", removed {string.Join("/", toRemove.Select(r => r.SheetMailbox))}" : ""), ct, booking: groupId);
 
             return GroupBookingResult.Success(updated);
         }
@@ -1056,7 +1093,9 @@ public partial class SheetBookingService(IGraphEventGateway graph, IMemoryCache 
         InvalidateViewCache();
         await log.LogActionAsync("SeriesCancelled", actingUser,
             string.Join(",", memberList.Select(m => m.SeriesMasterId).Where(id => id is not null)),
-            string.Join(",", memberList.Select(m => m.SheetMailbox).Distinct()), ct: ct);
+            string.Join(",", memberList.Select(m => m.SheetMailbox).Distinct()),
+            memberList.Count > 0 ? $"{memberList[0].Category} series" + (string.IsNullOrWhiteSpace(memberList[0].RenterName) ? "" : $", {memberList[0].RenterName}") : null,
+            ct, booking: memberList.Count > 0 ? memberList[0].BookingGroupId : null);
     }
 
     // External-booking-source support (FindByExternalIdAsync/ClaimHoldAsync/TrimHoldAsync/

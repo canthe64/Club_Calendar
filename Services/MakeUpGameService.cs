@@ -65,7 +65,7 @@ public class MakeUpGameService(
 
         var sheetLabel = CalendarStyles.SheetLabel(option.SheetMailbox);
         await log.LogActionAsync("MakeUpGameBooked", requesterName, result.Bookings[0].EventId, option.SheetMailbox,
-            $"{option.Start:g}-{option.End:g}, requested by {requesterEmail}", ct);
+            $"{option.Start:g}-{option.End:g}, requested by {requesterEmail}", ct, booking: result.Bookings[0].BookingGroupId);
 
         var when = $"{option.Start:dddd, MMM d} from {option.Start:h:mmtt} to {option.End:h:mmtt} on {sheetLabel}";
         var staffNotified = await TrySendMailAsync(facility.PracticeIceApproverEmail, requesterEmail,

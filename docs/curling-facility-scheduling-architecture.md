@@ -334,6 +334,11 @@ production must be outside the deployed app folder, since a redeploy replaces th
 - **Debug tier (opt-in from Settings):** raw webhook payloads with customer name, email, and phone
   redacted (D35), lookup results, sign-ins, and app start/stop. The Settings page shows a standing
   PII warning while Debug is on (D56).
+- **Line layout is for a person reading the file:** `action`, `actor`, then `booking=` (the first 8
+  hex digits of the booking's group id, shared by every line about that booking, so one search finds
+  its whole history), `sheets=` as sheet numbers (`1-3,5`), the free-text `details`, and the raw
+  Exchange event ids last. Exchange ids never contain a space, so a line still splits unambiguously
+  from the right. Cancellation lines include what was cancelled.
 - Settings persist to small files in the log directory, so a change survives restarts without a
   redeploy. Retention is bounded (`AppLog:RetentionDays`).
 - `MainLayout` wraps pages in an `ErrorBoundary` (D54), so an unhandled handler exception shows a
