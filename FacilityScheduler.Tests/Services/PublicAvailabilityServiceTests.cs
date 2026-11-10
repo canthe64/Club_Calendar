@@ -546,11 +546,15 @@ public class PublicAvailabilityServiceTests
     }
 
     [Fact]
-    public async Task LongNote_IsTruncatedRatherThanShownInFull()
+    public async Task LongNote_IsPassedThroughInFull()
     {
+        // A server-side cap used to cut notes off mid-URL; the overlay collapses long notes behind
+        // "More…" instead, so the full text must reach the page.
         var (publicService, bookingService, _, facility) = BuildWithClubEvents();
         var day = facility.Today.AddDays(1);
-        var longNote = new string('x', 400);
+        var longNote = "Competitive practice ice is intended for established teams to practice together. "
+            + new string('x', 400)
+            + " Sign up here: https://docs.google.com/spreadsheets/d/12L9bvWML5gw0KPaCXbWXabcdefghijklmnop/edit";
 
         await bookingService.BookAsync(new SheetBooking
         {
@@ -565,8 +569,29 @@ public class PublicAvailabilityServiceTests
 
         var view = await publicService.GetDayViewAsync(day);
 
-        var publicNote = Assert.Single(view.Bookings).Notes;
-        Assert.NotNull(publicNote);
-        Assert.True(publicNote!.Length < longNote.Length, "a 400-char note must be shortened, not shown in full");
+        Assert.Equal(longNote, Assert.Single(view.Bookings).Notes);
+    }
+
+    [Fact]
+    public async Task LongClubEventNote_IsPassedThroughInFull()
+    {
+        var (publicService, _, clubEventService, facility) = BuildWithClubEvents();
+        var day = facility.Today.AddDays(1);
+        var longNote = new string('x', 400) + " Sign up here: https://docs.google.com/spreadsheets/d/12L9bvWML5gw0KPaCXbWXabcdefghijklmnop/edit";
+
+        await clubEventService.CreateAsync(new ClubEvent
+        {
+            Title = "Competitive Practice Ice",
+            Category = ClubEventCategory.Closure,
+            Start = day,
+            End = day,
+            IsAllDay = true,
+            Notes = longNote,
+            BookedBy = "staff@example.com"
+        }, "staff@example.com");
+
+        var view = await publicService.GetDayViewAsync(day);
+
+        Assert.Equal(longNote, Assert.Single(view.ClubEvents).Notes);
     }
 }

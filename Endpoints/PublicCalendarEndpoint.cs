@@ -922,16 +922,26 @@ public static class PublicCalendarEndpoint
     // ── Shared overlay + loading-indicator script ───────────────────────────────────────────────
 
     private const string OverlayAndScript = """
+        <style>
+            /* Long notes collapse to a few lines behind "More…" (notes are no longer cut off
+               server-side). overflow-wrap:anywhere lets a long URL wrap inside the 340px box
+               instead of running past its edge. */
+            #pub-cal-overlay-notes { overflow-wrap: anywhere; }
+            #pub-cal-overlay-notes.pub-cal-notes-collapsed {
+                display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden;
+            }
+        </style>
         <div id="pub-cal-loading" style="display:none;position:fixed;inset:0;background:rgba(255,255,255,.7);align-items:center;justify-content:center;z-index:100">
             <div style="background:#1e2a33;color:#fff;padding:10px 20px;border-radius:8px;font-size:12px;font-weight:600">Loading…</div>
         </div>
         <div id="pub-cal-overlay" style="display:none;position:fixed;inset:0;background:rgba(30,42,51,.45);align-items:center;justify-content:center;z-index:50">
-            <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:340px">
+            <div style="background:#fff;border-radius:10px;box-shadow:0 12px 32px rgba(0,0,0,.35);padding:18px 20px;width:340px;max-width:calc(100vw - 32px);max-height:calc(100vh - 32px);overflow-y:auto;box-sizing:border-box">
                 <div id="pub-cal-overlay-title" style="font-size:15px;font-weight:600;color:#1e2a33;margin-bottom:2px"></div>
                 <div id="pub-cal-overlay-subtitle" style="font-size:13px;color:#90a0ab;margin-bottom:10px"></div>
                 <div id="pub-cal-overlay-time" style="font-size:12px;color:#1e2a33"></div>
                 <div id="pub-cal-overlay-note" style="font-size:13px;color:#a02c21;font-weight:600;margin-top:6px"></div>
                 <div id="pub-cal-overlay-notes" style="font-size:12.5px;color:#5a7183;margin-top:6px;white-space:pre-wrap"></div>
+                <span id="pub-cal-overlay-notes-toggle" role="button" tabindex="0" style="display:none;font-size:12px;color:#2b6cb0;font-weight:600;cursor:pointer;margin-top:4px">More&hellip;</span>
                 <div style="text-align:center;margin-top:14px">
                     <span id="pub-cal-overlay-close" style="border:1px solid #d7dfe5;color:#5a7183;border-radius:6px;padding:7px 20px;cursor:pointer;font-size:12px;font-weight:600">Close</span>
                 </div>
@@ -945,6 +955,23 @@ public static class PublicCalendarEndpoint
                 var timeEl = document.getElementById('pub-cal-overlay-time');
                 var noteEl = document.getElementById('pub-cal-overlay-note');
                 var notesEl = document.getElementById('pub-cal-overlay-notes');
+                var notesToggle = document.getElementById('pub-cal-overlay-notes-toggle');
+
+                function setNotesExpanded(expanded) {
+                    notesEl.classList.toggle('pub-cal-notes-collapsed', !expanded);
+                    notesToggle.textContent = expanded ? 'Less' : 'More\u2026';
+                }
+
+                function toggleNotes() {
+                    setNotesExpanded(notesEl.classList.contains('pub-cal-notes-collapsed'));
+                }
+                notesToggle.addEventListener('click', toggleNotes);
+                notesToggle.addEventListener('keydown', function (e) {
+                    if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault();
+                        toggleNotes();
+                    }
+                });
 
                 function openOverlay(chip) {
                     titleEl.textContent = chip.getAttribute('data-title') || '';
@@ -957,6 +984,10 @@ public static class PublicCalendarEndpoint
                     // that would misrepresent it as a warning.
                     notesEl.textContent = chip.getAttribute('data-notes') || '';
                     overlay.style.display = 'flex';
+                    // Start collapsed, then measure (only possible once the overlay is laid out):
+                    // the toggle appears only when the clamp actually hides something.
+                    setNotesExpanded(false);
+                    notesToggle.style.display = notesEl.scrollHeight > notesEl.clientHeight + 1 ? 'inline-block' : 'none';
                 }
 
                 document.querySelectorAll('.pub-cal-chip').forEach(function (chip) {

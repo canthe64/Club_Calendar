@@ -601,12 +601,10 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
         return string.IsNullOrWhiteSpace(b.RenterName) ? b.Category.ToString() : b.RenterName;
     }
 
-    // A publishable cap, not a chip-width one - Notes only ever reaches the public calendar's
-    // click-to-detail overlay (a 340px modal that wraps text over multiple lines), never an inline
-    // cell, so this is sized for "a genuinely useful sentence or two" rather than TruncateForConflict-
-    // Display's 40-char default for a single dense line. Reuses that same helper (its own maxChars
-    // override) rather than a second ellipsis implementation.
-    private const int PublicNotesMaxChars = 300;
+    // Notes are passed through in full - no character cap. A 300-char cap used to cut notes off
+    // mid-URL ("Sign up here: https://docs.google.com/...XbWX…"), leaving a link nobody could use
+    // (2026-11-10). Notes only reach the click-to-detail overlay, which collapses a long note to a
+    // few lines behind a "More…" toggle (PublicCalendarEndpoint's overlay script) instead.
 
     // Same reasoning and same signal as PublicTitle's Breely check above (D52), applied to Notes
     // instead of the title (D108, staff feedback 2026-08-27): a Breely-originated booking's Notes is
@@ -615,7 +613,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     // a staff-typed title already is.
     private static string? PublicBookingNotes(SheetBooking b) =>
         string.IsNullOrWhiteSpace(b.ExternalBookingId) && !string.IsNullOrWhiteSpace(b.Notes)
-            ? CalendarStyles.TruncateForConflictDisplay(b.Notes, PublicNotesMaxChars)
+            ? b.Notes
             : null;
 
     // The Club Event equivalent of PublicBookingNotes above. ClubEvent has no ExternalBookingId - the
@@ -628,7 +626,7 @@ public class PublicAvailabilityService(SheetBookingService bookingService, ClubE
     // name), and set to this one constant only by that webhook path.
     private static string? PublicClubEventNotes(ClubEvent ce) =>
         ce.BookedBy != BreelyBookingProcessor.BookedByLabel && !string.IsNullOrWhiteSpace(ce.Notes)
-            ? CalendarStyles.TruncateForConflictDisplay(ce.Notes, PublicNotesMaxChars)
+            ? ce.Notes
             : null;
 
     // The host volunteers to run this session on behalf of the whole club, so naming them publicly
