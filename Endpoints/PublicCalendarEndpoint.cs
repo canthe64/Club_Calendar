@@ -927,6 +927,7 @@ public static class PublicCalendarEndpoint
                server-side). overflow-wrap:anywhere lets a long URL wrap inside the 340px box
                instead of running past its edge. */
             #pub-cal-overlay-notes { overflow-wrap: anywhere; }
+            #pub-cal-overlay-notes a { color: #2b6cb0; text-decoration: underline; }
             #pub-cal-overlay-notes.pub-cal-notes-collapsed {
                 display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; line-clamp: 6; overflow: hidden;
             }
@@ -973,6 +974,47 @@ public static class PublicCalendarEndpoint
                     }
                 });
 
+                // Notes are plain text; only http(s) URLs in them become links. Built from DOM
+                // nodes (text nodes + <a> whose href is exactly the matched http(s) URL), never
+                // innerHTML, so note text can't inject markup or a javascript: link. New tab,
+                // since the calendar is often embedded in the club site. Same rules as NoteLinks.cs,
+                // which does this for the staff dialogs - keep the two in step.
+                var urlPattern = /https?:\/\/[^\s<>"]+/g;
+
+                function trimUrl(url) {
+                    // Sentence punctuation after a URL isn't part of it; a closing paren only is
+                    // when the URL itself opened one (e.g. Wikipedia-style links).
+                    for (;;) {
+                        var last = url.slice(-1);
+                        if (/[.,;:!?'\]]/.test(last)) {
+                            url = url.slice(0, -1);
+                        } else if (last === ')' && url.split('(').length < url.split(')').length) {
+                            url = url.slice(0, -1);
+                        } else {
+                            return url;
+                        }
+                    }
+                }
+
+                function renderNotes(el, text) {
+                    el.textContent = '';
+                    var pos = 0, m;
+                    urlPattern.lastIndex = 0;
+                    while ((m = urlPattern.exec(text)) !== null) {
+                        var url = trimUrl(m[0]);
+                        el.appendChild(document.createTextNode(text.slice(pos, m.index)));
+                        var a = document.createElement('a');
+                        a.href = url;
+                        a.textContent = url;
+                        a.target = '_blank';
+                        a.rel = 'noopener noreferrer';
+                        el.appendChild(a);
+                        pos = m.index + url.length;
+                        urlPattern.lastIndex = pos;
+                    }
+                    el.appendChild(document.createTextNode(text.slice(pos)));
+                }
+
                 function openOverlay(chip) {
                     titleEl.textContent = chip.getAttribute('data-title') || '';
                     subtitleEl.textContent = chip.getAttribute('data-subtitle') || '';
@@ -982,7 +1024,7 @@ public static class PublicCalendarEndpoint
                     // this is a staff-written note meant to be genuinely useful, not an alert, so it
                     // gets its own neutrally-styled element rather than inheriting red/bold styling
                     // that would misrepresent it as a warning.
-                    notesEl.textContent = chip.getAttribute('data-notes') || '';
+                    renderNotes(notesEl, chip.getAttribute('data-notes') || '');
                     overlay.style.display = 'flex';
                     // Start collapsed, then measure (only possible once the overlay is laid out):
                     // the toggle appears only when the clamp actually hides something.

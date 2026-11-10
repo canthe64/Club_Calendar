@@ -47,7 +47,7 @@
                     <div style="font-size:12px;color:#5a7183;margin-top:2px">@request.HostName @(string.IsNullOrWhiteSpace(request.HostEmail) ? "" : $"· {request.HostEmail}")</div>
                     @if (!string.IsNullOrWhiteSpace(request.Notes))
                     {
-                        <div style="font-size:12px;color:#5a7183;margin-top:6px;font-style:italic">"@request.Notes"</div>
+                        <div style="font-size:12px;color:#5a7183;margin-top:6px;font-style:italic;overflow-wrap:anywhere">"<FacilityScheduler.Components.Calendar.LinkifiedText Text="@request.Notes" />"</div>
                     }
 
                     @if (_decliningId == request.BookingGroupId)
