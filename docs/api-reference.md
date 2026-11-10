@@ -305,7 +305,8 @@ Only a subset of Breely's real (much larger) payload is read:
 | Field | Type | Notes |
 |---|---|---|
 | `event.id` | integer | Stable identity across reschedules; stored as `breely:{id}` in the `ExternalBookingId` extended property for upsert matching. |
-| `event.start_date` / `event.start_time` | string | e.g. `"Sep 25, 2026"` / `"9:00am"`. Parsed as facility-local time; any timezone abbreviation Breely also sends is ignored. |
+| `event.start_date_&_time_(iso_8601)` | string | e.g. `"2026-11-12T20:15:00+00:00"`. The start is read from this first: an exact instant, converted to facility time, independent of Breely's display clock. |
+| `event.start_date` / `event.start_time` | string | e.g. `"Nov 12, 2026"` / `"12:15"`. Fallback when the ISO start is missing. Read as facility-local time in either the 24-hour form Breely has sent since November 2026 or the earlier 12-hour form (`"9:00am"`); any timezone abbreviation is ignored. |
 | `event.duration_in_minutes` | integer | Combined with the above to compute the booking's end time. |
 | `event.booked_with` | string | Must equal the configured sheet resource-type name (currently `"Curling Sheet"`) or the event is ignored as not applicable to this calendar. |
 | `event.canceled` | boolean | `true` releases the matching booking back to an open Group Event hold. |

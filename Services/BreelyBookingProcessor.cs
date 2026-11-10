@@ -316,6 +316,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
                 Id = evt.Id + (extraSheetNumber - 1) * SyntheticSheetIdOffset,
                 StartDate = evt.StartDate,
                 StartTime = evt.StartTime,
+                StartIso = evt.StartIso,
                 DurationInMinutes = evt.DurationInMinutes,
                 BookedWith = evt.BookedWith,
                 Canceled = evt.Canceled,
@@ -403,7 +404,7 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
 
         var externalId = $"{ExternalIdSourcePrefix}:{evt.Id}";
 
-        if (!TryParseWindow(evt, out var start, out var end))
+        if (!TryParseWindow(evt, facility.ZoneInfo, out var start, out var end))
         {
             logger.LogWarning("Breely webhook for event {Id}: could not parse start_date/start_time/duration_in_minutes ({StartDate} {StartTime} {Duration}min) - skipped.",
                 evt.Id, evt.StartDate, evt.StartTime, evt.DurationInMinutes);
@@ -581,18 +582,30 @@ public class BreelyBookingProcessor(SheetBookingService bookingService, ClubEven
     // time, matching how the rest of this app already treats DateTime as local-without-offset. The
     // "PDT"/"PST" abbreviation Breely also sends is deliberately ignored rather than mapped, since
     // the facility's own configured time zone is already the authority on local time here.
-    private static bool TryParseWindow(BreelyEvent evt, out DateTime start, out DateTime end)
+    // Breely's display formats for start_date + start_time. It sent "7:30PM" until early November
+    // 2026, then switched to a 24-hour clock ("19:30") with no notice - every booking was skipped as
+    // unparseable until this accepted both (live-found 2026-11-10).
+    private static readonly string[] LocalStartFormats = ["MMM d, yyyy h:mmtt", "MMM d, yyyy H:mm"];
+
+    /// <summary>The booking's facility-local window. Read from the ISO 8601 start first - an exact
+    /// instant, converted to the facility's zone - and only if that's missing or unreadable from
+    /// start_date + start_time, in either the 12-hour or the 24-hour form Breely has used.</summary>
+    internal static bool TryParseWindow(BreelyEvent evt, TimeZoneInfo facilityZone, out DateTime start, out DateTime end)
     {
         start = default;
         end = default;
 
-        if (string.IsNullOrWhiteSpace(evt.StartDate) || string.IsNullOrWhiteSpace(evt.StartTime) || evt.DurationInMinutes <= 0)
+        if (evt.DurationInMinutes <= 0)
         {
             return false;
         }
 
-        var combined = $"{evt.StartDate} {evt.StartTime}";
-        if (!DateTime.TryParseExact(combined, "MMM d, yyyy h:mmtt", CultureInfo.InvariantCulture, DateTimeStyles.None, out start))
+        if (DateTimeOffset.TryParse(evt.StartIso, CultureInfo.InvariantCulture, DateTimeStyles.None, out var instant))
+        {
+            start = TimeZoneInfo.ConvertTime(instant, facilityZone).DateTime;
+        }
+        else if (string.IsNullOrWhiteSpace(evt.StartDate) || string.IsNullOrWhiteSpace(evt.StartTime)
+            || !DateTime.TryParseExact($"{evt.StartDate.Trim()} {evt.StartTime.Trim()}", LocalStartFormats, CultureInfo.InvariantCulture, DateTimeStyles.None, out start))
         {
             return false;
         }
@@ -617,6 +630,11 @@ public class BreelyEvent
 
     [JsonPropertyName("start_time")]
     public string? StartTime { get; set; }
+
+    /// <summary>The start as an ISO 8601 instant with offset ("2026-11-12T20:15:00+00:00") - the
+    /// field the window is read from first, since it doesn't depend on Breely's display clock.</summary>
+    [JsonPropertyName("start_date_&_time_(iso_8601)")]
+    public string? StartIso { get; set; }
 
     [JsonPropertyName("duration_in_minutes")]
     public int DurationInMinutes { get; set; }
